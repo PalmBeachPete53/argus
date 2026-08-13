@@ -9,10 +9,12 @@ from .base import (
 )
 from .ecb import (
     EXTRACTION_VERSION,
+    SUBJECT_ASSET_PURCHASE,
     SUBJECT_DECISION,
     SUBJECT_DEPOSIT_FACILITY,
     SUBJECT_MAIN_REFINANCING,
     SUBJECT_MARGINAL_LENDING,
+    SUBJECT_POLICY_GUIDANCE,
     EcbDecisionExtractor,
 )
 
@@ -21,10 +23,12 @@ __all__ = [
     "DecisionExtractor",
     "EcbDecisionExtractor",
     "EXTRACTION_VERSION",
+    "SUBJECT_ASSET_PURCHASE",
     "SUBJECT_DECISION",
     "SUBJECT_DEPOSIT_FACILITY",
     "SUBJECT_MAIN_REFINANCING",
     "SUBJECT_MARGINAL_LENDING",
+    "SUBJECT_POLICY_GUIDANCE",
     "extract_decision",
     "extract_decision_batch",
     "get_extractor",

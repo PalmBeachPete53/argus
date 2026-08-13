@@ -5,8 +5,8 @@ publications from the G10 central banks, up to the "raw documents", normalizatio
 classification and fact-extraction layers of the analytical pipeline. No economic
 interpretation or LLM analysis is performed at this stage.
 
-The authoritative evolution plan is `docs/ROADMAP.md`; phases 0–4 are complete,
-phase 5 (Monetary Policy Decision) is next.
+The authoritative evolution plan is `docs/ROADMAP.md`; phases 0–5 are complete,
+phase 6 (Monetary Policy Statement) is next.
 
 ## Pipeline scope
 
@@ -31,7 +31,9 @@ Publication Classification ✅  (Phase 3: deterministic evidence-tier engine)
       ↓
 Fact Model                   ✅  (Phase 4: typed, provenance-carrying facts)
       ↓
-Type-Specific Extraction          (Phases 5–11 — NEXT for Phase 5)
+ECB Decision Extraction      ✅  (Phase 5: EcbDecisionExtractor v5.2.0)
+      ↓
+Type-Specific Extraction          (Phases 6–11 — NEXT for Phase 6)
 Temporal / Analysis               (Phases 12–16 — NOT STARTED)
 Trading / Signal Layer            (Phase 17 — out of scope for now)
 ```
@@ -53,14 +55,18 @@ Per `docs/ROADMAP.md` (statuses: `COMPLETE` / `NEXT` / `NOT STARTED`):
 | 2 | Document Normalization | `COMPLETE` |
 | 3 | Publication Classification | `COMPLETE` |
 | 4 | Fact Model | `COMPLETE` |
-| 5 | Monetary Policy Decision | `NEXT` |
-| 6–11 | Type-specific extractors (statement, press conferences, minutes, projections, reports, speeches) | `NOT STARTED` |
+| 5 | Monetary Policy Decision | `COMPLETE` — ECB extractor (v5.2.0) |
+| 6 | Monetary Policy Statement | `NEXT` |
+| 7–11 | Press conferences, minutes, projections, reports, speeches | `NOT STARTED` |
 | 12–16 | Temporal analysis, policy reaction, policy state, forex fundamentals, historical validation | `NOT STARTED` |
 | 17 | Trading / Signal Layer | `NOT STARTED` — out of scope for now |
 
-Current position: Argus sits at the start of **Phase 5 (Monetary Policy Decision)**.
-No type-specific extractor has been implemented yet; the next phase builds on the
-`Fact` model and the `ExtractionResult` contract defined in Phase 4.
+Current position: Argus sits at the start of **Phase 6 (Monetary Policy
+Statement)**. Phase 5 delivered the `EcbDecisionExtractor` (decision date,
+policy rates, rate changes, effective date, decision wording, asset-purchase /
+balance-sheet decisions, forward guidance — with verbatim provenance and no
+invented facts; votes and risk assessment documented as absent from ECB
+decision documents).
 
 ## Quickstart
 

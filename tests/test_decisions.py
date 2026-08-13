@@ -7,10 +7,12 @@ from pathlib import Path
 
 from argus.classification.base import Confidence
 from argus.decisions import (
+    SUBJECT_ASSET_PURCHASE,
     SUBJECT_DECISION,
     SUBJECT_DEPOSIT_FACILITY,
     SUBJECT_MAIN_REFINANCING,
     SUBJECT_MARGINAL_LENDING,
+    SUBJECT_POLICY_GUIDANCE,
     EcbDecisionExtractor,
     extract_decision,
     extract_decision_batch,
@@ -64,7 +66,7 @@ def test_ecb_fixture_extracts_decision_date():
     extractor = EcbDecisionExtractor()
     result = extractor.extract(ecb_publication(), normalized_ecb_document())
     assert result.warnings == []
-    date_facts = [f for f in result.facts if f.subject == SUBJECT_DECISION]
+    date_facts = [f for f in result.facts if f.subject == SUBJECT_DECISION and f.predicate == "date"]
     assert len(date_facts) == 1
     fact = date_facts[0]
     assert fact.predicate == "date"
@@ -118,8 +120,9 @@ def test_ecb_fixture_provenance_is_traceable():
         assert fact.source_text
         assert fact.publication_id == "pub-ecb-1"
         assert fact.document_id
-    # values never invented: total facts == date + 3 levels + 3 changes
-    assert len(result.facts) == 7
+    # values never invented: date + 3 levels + 3 changes + 2 wording + 2
+    # asset-purchase decisions (APP, PEPP) — nothing else
+    assert len(result.facts) == 11
 
 
 def test_hold_statement_produces_no_change_fact():
@@ -158,6 +161,15 @@ GOLDEN = {
         "changes": {SUBJECT_MAIN_REFINANCING: -25.0, SUBJECT_MARGINAL_LENDING: -25.0, SUBJECT_DEPOSIT_FACILITY: -25.0},
         "effective": "2026-08-02",
         "warnings": [],
+        "statements": [
+            "The Governing Council today decided to lower the three key ECB interest rates by 25 basis points.",
+            "Against this background, the Governing Council decided to lower the deposit facility rate to 1.75 per cent.",
+        ],
+        "guidance": [],  # "stands ready …" sits in the Monetary-policy-statement section → Phase 6 boundary
+        "assets": [
+            ("app:0", "Under the APP, the Governing Council intends to stop reinvesting the proceeds from maturing securities.", None),
+            ("pepp:0", "The Governing Council intends to reinvest the principal payments from maturing securities purchased under the PEPP during the first half of 2027.", "semester:2027-H1"),
+        ],
     },
     "ecb_decision_increase.html": {
         "date": ("2026-09-10", 0),
@@ -165,6 +177,14 @@ GOLDEN = {
         "changes": {SUBJECT_DEPOSIT_FACILITY: 50.0, SUBJECT_MAIN_REFINANCING: 50.0, SUBJECT_MARGINAL_LENDING: 50.0},
         "effective": "2026-10-01",
         "warnings": [],
+        "statements": [
+            "The Governing Council today decided to raise the three key ECB interest rates by 50 basis points.",
+        ],
+        # in the decision body here → extracted (contrast with ecb_decision.html)
+        "guidance": [
+            "Against this background, the Governing Council stands ready to adjust all of its instruments within its mandate to ensure that inflation returns to its 2% target in a timely manner.",
+        ],
+        "assets": [],
     },
     "ecb_decision_hold.html": {
         "date": ("2026-06-11", 0),
@@ -172,6 +192,11 @@ GOLDEN = {
         "changes": {},
         "effective": None,
         "warnings": [],
+        "statements": [
+            "The Governing Council today decided to keep the three key ECB interest rates unchanged.",
+        ],
+        "guidance": [],
+        "assets": [],
     },
     "ecb_decision_per_instrument.html": {
         "date": ("2026-03-17", 0),
@@ -179,6 +204,11 @@ GOLDEN = {
         "changes": {SUBJECT_DEPOSIT_FACILITY: -25.0, SUBJECT_MARGINAL_LENDING: -25.0},
         "effective": "2026-03-25",
         "warnings": [],
+        "statements": [
+            "The Governing Council decided today to lower all three key ECB interest rates.",
+        ],
+        "guidance": [],
+        "assets": [],
     },
     "ecb_decision_minimal.html": {
         "date": ("2026-05-14", 0),
@@ -186,6 +216,30 @@ GOLDEN = {
         "changes": {SUBJECT_DEPOSIT_FACILITY: -25.0},
         "effective": None,
         "warnings": ["no_rates_section"],
+        "statements": [
+            "The Governing Council decided today to lower the deposit facility rate by 25 basis points to 1.50 per cent.",
+        ],
+        "guidance": [],
+        "assets": [],
+    },
+    "ecb_decision_full.html": {
+        "date": ("2027-01-12", 0),
+        "levels": {SUBJECT_MAIN_REFINANCING: 2.5, SUBJECT_MARGINAL_LENDING: 2.75, SUBJECT_DEPOSIT_FACILITY: 2.25},
+        "changes": {SUBJECT_MAIN_REFINANCING: 50.0, SUBJECT_MARGINAL_LENDING: 50.0, SUBJECT_DEPOSIT_FACILITY: 50.0},
+        "effective": "2027-01-13",
+        "warnings": [],
+        "statements": [
+            "The Governing Council today decided to raise the three key ECB interest rates by 50 basis points.",
+        ],
+        "guidance": [
+            "The Governing Council will keep the key ECB interest rates sufficiently restrictive for as long as necessary to return inflation to target.",
+        ],
+        # risk wording + press-conference note in the statement section are NOT extracted
+        "assets": [
+            ("app:0", "Under the APP, the Governing Council intends to stop reinvesting the proceeds from maturing securities from the beginning of February 2027.", None),
+            ("pepp:0", "The Governing Council intends to reinvest the principal payments from maturing securities purchased under the PEPP during the first half of 2027.", "semester:2027-H1"),
+            ("tltro:0", "The Governing Council decided to continue its targeted longer-term refinancing operations on unchanged terms, with banks free to repay early.", None),
+        ],
     },
 }
 
@@ -244,6 +298,36 @@ def test_golden_facts_across_all_fixtures():
             if subject not in expected["changes"]:
                 assert not [x for x in result.facts if x.subject == subject and x.predicate == "change"], name
 
+        # decision wording
+        statements = [f for f in result.facts if f.subject == SUBJECT_DECISION and f.predicate == "statement"]
+        assert sorted(f.value.value for f in statements) == sorted(expected["statements"]), name
+        for f in statements:
+            assert f.value.kind is ValueKind.TEXT
+            assert f.value.source_text == f.value.value
+            assert f.identity_qualifier
+
+        # forward guidance
+        guidance = [f for f in result.facts if f.subject == SUBJECT_POLICY_GUIDANCE]
+        assert sorted(f.value.value for f in guidance) == sorted(expected["guidance"]), name
+        for f in guidance:
+            assert f.value.kind is ValueKind.TEXT
+
+        # asset-purchase / balance-sheet decisions
+        assets = [f for f in result.facts if f.subject == SUBJECT_ASSET_PURCHASE]
+        expected_assets = [a[0] for a in expected["assets"]]
+        assert sorted(f.identity_qualifier for f in assets) == sorted(expected_assets), name
+        for (qualifier, sentence, period), f in zip(
+            sorted(expected["assets"], key=lambda a: a[0]),
+            sorted(assets, key=lambda a: a.identity_qualifier),
+        ):
+            assert f.value.value == sentence, name
+            f_period = f.period.canonical() if f.period else None
+            assert f_period == period, (name, qualifier, f_period, period)
+
+        # never fabricated: no vote, no risk-assessment facts from decisions
+        assert not [x for x in result.facts if x.subject == "vote"], name
+        assert not [x for x in result.facts if x.subject == "risk_assessment"], name
+
 
 def test_fixture_date_robustness_against_arbitrary_dates():
     """The hold fixture mentions a second date (12 June 2026, press conference)
@@ -298,6 +382,43 @@ def test_fixture_increase_order_reads_source_naming():
     assert fact_by(result, SUBJECT_MARGINAL_LENDING, "value").value.value == 2.75
 
 
+def test_guidance_in_statement_section_is_not_extracted():
+    """The identical "stands ready …" sentence sits in the decision body of the
+    increase fixture (extracted) but in the Monetary-policy-statement section of
+    ecb_decision.html (NOT extracted — Phase 6 boundary)."""
+    increased = extract_fixture("ecb_decision_increase.html")
+    assert any(f.subject == SUBJECT_POLICY_GUIDANCE for f in increased.facts)
+    baseline = extract_fixture("ecb_decision.html")
+    assert not any(f.subject == SUBJECT_POLICY_GUIDANCE for f in baseline.facts)
+
+
+def test_risk_assessment_is_not_extracted_from_decisions():
+    """The full fixture carries explicit risk wording ("Risks to the economic
+    outlook … tilted to the upside") inside its Monetary policy statement
+    section. That belongs to Phase 6 and must never surface as a decision fact."""
+    result = extract_fixture("ecb_decision_full.html")
+    assert not any(f.subject == "risk_assessment" for f in result.facts)
+    assert not any(f.subject == "inflation_risk" for f in result.facts)
+
+
+def test_no_vote_fact_is_fabricated():
+    """ECB Monetary Policy Decisions do not report individual votes. The
+    extractor must never invent a vote fact, for any fixture."""
+    for name in GOLDEN:
+        result = extract_fixture(name)
+        assert not any(f.subject == "vote" for f in result.facts), name
+
+
+def test_no_invented_asset_purchase_or_guidance_facts():
+    """Absence of a programme statement or guidance must not become an invented
+    "no change" / "no action" fact."""
+    result = extract_fixture("ecb_decision_minimal.html")
+    assert not any(f.subject == SUBJECT_ASSET_PURCHASE for f in result.facts)
+    assert not any(f.subject == SUBJECT_POLICY_GUIDANCE for f in result.facts)
+    result = extract_fixture("ecb_decision_hold.html")
+    assert not any(f.subject == SUBJECT_ASSET_PURCHASE for f in result.facts)
+
+
 # ---------------------------------------------------------------------------
 # vertical slice: extractor → ExtractionResult → Store
 # ---------------------------------------------------------------------------
@@ -315,11 +436,13 @@ def test_extract_decision_persists_facts(tmp_path):
     results = extract_decision(store, ecb_publication())
     assert len(results) == 1
     persisted = store.get_facts(publication_id="pub-ecb-1")
-    assert len(persisted) == 7
+    assert len(persisted) == 11
     by = {(f.subject, f.predicate) for f in persisted}
     assert (SUBJECT_DECISION, "date") in by
+    assert (SUBJECT_DECISION, "statement") in by
     assert (SUBJECT_DEPOSIT_FACILITY, "value") in by
     assert (SUBJECT_DEPOSIT_FACILITY, "change") in by
+    assert (SUBJECT_ASSET_PURCHASE, "decision") in by
     deposit = next(f for f in persisted if (f.subject, f.predicate) == (SUBJECT_DEPOSIT_FACILITY, "value"))
     assert deposit.value.value == 1.75
     assert deposit.central_bank == "ecb"  # filled from the publication
@@ -331,7 +454,7 @@ def test_extract_decision_is_idempotent(tmp_path):
     pub = ecb_publication()
     extract_decision(store, pub)
     extract_decision(store, pub)  # re-run: same deterministic fact_ids
-    assert len(store.get_facts(publication_id="pub-ecb-1")) == 7
+    assert len(store.get_facts(publication_id="pub-ecb-1")) == 11
 
 
 def test_value_correction_updates_in_place(tmp_path):
@@ -372,4 +495,4 @@ def test_extract_decision_batch_runs_all_decisions(tmp_path):
     store = _store_ecb(tmp_path)
     results = extract_decision_batch(store)
     assert len(results) == 1
-    assert len(store.get_facts(bank="ecb")) == 7
+    assert len(store.get_facts(bank="ecb")) == 11

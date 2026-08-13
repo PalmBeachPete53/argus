@@ -1,15 +1,30 @@
 """ECB — monetary policy decision extractor.
 
-Extracts the core facts of an ECB monetary policy decision from the normalized
-document text:
+Extracts the facts of an ECB monetary policy decision from the normalized
+document text, answering "what did the Governing Council explicitly decide or
+announce as part of the decision?":
 
-- decision date (the leading date paragraph, per ECB layout; the decision
+- the decision date (the leading date paragraph, per ECB layout; the decision
   section is the structural fallback — never an arbitrary date anywhere)
+- the decision wording (the source's "… decided to …" sentences, verbatim)
 - the three key ECB interest rates:
   ``deposit_facility_rate``, ``main_refinancing_rate``, ``marginal_lending_rate``
 - explicit rate changes (direction + magnitude, e.g. "lowered by 25 basis
   points") — sign preserved as basis points (negative = easing)
-- effective date when explicitly stated ("with effect from …")
+- the effective date when explicitly stated ("with effect from …")
+- asset-purchase / balance-sheet decisions (APP, PEPP, TLTRO) where the source
+  states an explicit action (reinvestment, cessation, continuation, maturity
+  handling) — programme identity kept as ``identity_qualifier``
+- explicit forward guidance as part of the decision, verbatim (never classified
+  hawkish/dovish, never interpreted)
+
+Deliberately NOT extracted (Phase 5 boundary):
+
+- votes — ECB Monetary Policy Decisions do not report individual votes; the
+  extractor never fabricates a ``vote`` fact
+- a full risk assessment — the decision document carries none; risk language
+  belongs to the separate Monetary Policy Statement (Phase 6)
+- macro-economic justification (inflation/growth/employment analysis) — Phase 6
 
 Design rules
 
@@ -28,6 +43,8 @@ Design rules
 - A hold ("unchanged", "remain at …") produces level facts only — never a
   ``change`` fact (no invented 0 bp), unless the source states an explicit
   zero delta.
+- Absence of an optional statement (no APP/PEPP section, no guidance, no vote
+  wording) never becomes an invented "no change" or "no action" fact.
 """
 
 from __future__ import annotations
@@ -42,7 +59,11 @@ from ..facts import (
     ExtractionResult,
     Fact,
     FactLocation,
+    FactPeriod,
+    FactValue,
     LocationKind,
+    PeriodKind,
+    ValueKind,
     basis_points,
     date_value,
     percentage,
@@ -50,7 +71,7 @@ from ..facts import (
 from ..normalize import normalize_title, parse_datetime
 from .base import DecisionExtractor
 
-EXTRACTION_VERSION = "5.1.0"
+EXTRACTION_VERSION = "5.2.0"
 
 # ---------------------------------------------------------------------------
 # Canonical Phase 5 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
@@ -59,10 +80,14 @@ SUBJECT_DECISION = "monetary_policy_decision"
 SUBJECT_DEPOSIT_FACILITY = "deposit_facility_rate"
 SUBJECT_MAIN_REFINANCING = "main_refinancing_rate"
 SUBJECT_MARGINAL_LENDING = "marginal_lending_rate"
+SUBJECT_ASSET_PURCHASE = "asset_purchase"
+SUBJECT_POLICY_GUIDANCE = "policy_guidance"
 
 PREDICATE_DATE = "date"
 PREDICATE_VALUE = "value"
 PREDICATE_CHANGE = "change"
+PREDICATE_STATEMENT = "statement"
+PREDICATE_DECISION = "decision"
 
 # Spanish-style "escalated" variants are intentionally absent; ECB uses the
 # canonical name. Instrument phrase → canonical subject, in canonical order.
@@ -113,6 +138,48 @@ _DIRECTION_MARKERS: tuple[tuple[re.Pattern, int], ...] = (
     (re.compile(rf"\b(?:lower|decrease|reduce|cut|drop|ease)\w*", re.IGNORECASE), -1),
     (re.compile(rf"\b(?:increase|raise|hike|lift)\w*", re.IGNORECASE), 1),
 )
+
+# ---------------------------------------------------------------------------
+# Decision-level wording, balance-sheet / asset purchases, forward guidance.
+# ---------------------------------------------------------------------------
+# The Governing Council "…decided (today) to … / …decided that …" sentences are
+# the decision wording, kept verbatim as facts.
+_DECISION_STATEMENT = re.compile(r"\bdecided\s+(?:today\s+)?(?:to|that)\b", re.IGNORECASE)
+
+# Programme sections carry the asset-purchase / balance-sheet decisions. The
+# programme identity is preserved as the Fact's ``identity_qualifier``.
+_PROGRAMME_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("asset purchase programme", "app"),
+    ("pandemic emergency purchase programme", "pepp"),
+    ("targeted longer-term refinancing operations", "tltro"),
+)
+
+# Explicit forward-guidance anchors: prospective *policy* statements about the
+# governing council's own instruments/rates, part of the decision. Anchors are
+# intentionally narrow — they never match economic analysis (Phase 6).
+_GUIDANCE_ANCHORS: tuple[re.Pattern, ...] = (
+    re.compile(r"\bstands?\s+ready\s+to\s+adjust\b", re.IGNORECASE),
+    re.compile(r"\bwill\s+not\s+hesitate\s+to\s+adjust\b", re.IGNORECASE),
+    re.compile(r"\bfor\s+as\s+long\s+as\s+necessary\b", re.IGNORECASE),
+    re.compile(r"\bdoes\s+not\s+pre-?commit\b", re.IGNORECASE),
+    re.compile(r"\bexpects?\s+(?:the\s+)?(?:key\s+)?(?:ecb\s+)?interest\s+rates?\s+to\s+remain\b", re.IGNORECASE),
+    re.compile(r"\bwill\s+keep\s+(?:the\s+)?(?:key\s+)?(?:ecb\s+)?interest\s+rates?\b", re.IGNORECASE),
+    re.compile(r"\b(?:maintain|maintaining)\s+(?:an?\s+|the\s+)?(?:accommodative|restrictive)\b", re.IGNORECASE),
+)
+
+# "… during the first/second half of <year>", "… until the end of <year>",
+# "… in <year>" — the relevant period of a reinvestment decision.
+_PERIOD_DURING_HALF = re.compile(
+    r"\b(?:durin[g]\s+the\s+|in\s+the\s+)?(first|second)\s+half\s+of\s+(?P<year>[0-9]{4})\b",
+    re.IGNORECASE,
+)
+_PERIOD_IN_YEAR = re.compile(r"\b(?:in|during|until\s+the\s+end\s+of)\s+(?P<year>[0-9]{4})\b", re.IGNORECASE)
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split normalized section text into non-empty sentences, each verbatim
+    (trailing period preserved). Both ``". "`` and ``".\\n"`` are boundaries."""
+    return [part.strip() for part in re.split(r"(?<=\.)\s+", text or "") if part.strip()]
 
 
 def _phrase_re(phrase: str) -> str:
@@ -241,6 +308,58 @@ class EcbDecisionExtractor(DecisionExtractor):
                     extraction_method=METHOD_REGEX,
                     extraction_version=EXTRACTION_VERSION,
                     confidence=Confidence.HIGH,
+                )
+            )
+
+        for offset, section_index, sentence in self._decision_wordings(document):
+            result.add(
+                Fact(
+                    publication_id=result.publication_id,
+                    document_id=document.document_id,
+                    subject=SUBJECT_DECISION,
+                    predicate=PREDICATE_STATEMENT,
+                    value=FactValue(ValueKind.TEXT, value=sentence, source_text=sentence),
+                    source_location=FactLocation(LocationKind.SECTION, section=section_index),
+                    source_text=sentence,
+                    extraction_method=METHOD_REGEX,
+                    extraction_version=EXTRACTION_VERSION,
+                    confidence=Confidence.HIGH,
+                    identity_qualifier=f"statement:{offset}",
+                )
+            )
+
+        for offset, section_index, programme, sentence, period in self._asset_purchase_decisions(document):
+            result.add(
+                Fact(
+                    publication_id=result.publication_id,
+                    document_id=document.document_id,
+                    subject=SUBJECT_ASSET_PURCHASE,
+                    predicate=PREDICATE_DECISION,
+                    value=FactValue(ValueKind.TEXT, value=sentence, source_text=sentence),
+                    period=period,
+                    source_location=FactLocation(LocationKind.SECTION, section=section_index),
+                    source_text=sentence,
+                    extraction_method=METHOD_REGEX,
+                    extraction_version=EXTRACTION_VERSION,
+                    confidence=Confidence.HIGH,
+                    identity_qualifier=f"{programme}:{offset}",
+                )
+            )
+
+        for offset, section_index, sentence in self._forward_guidance(document):
+            result.add(
+                Fact(
+                    publication_id=result.publication_id,
+                    document_id=document.document_id,
+                    subject=SUBJECT_POLICY_GUIDANCE,
+                    predicate=PREDICATE_STATEMENT,
+                    value=FactValue(ValueKind.TEXT, value=sentence, source_text=sentence),
+                    source_location=FactLocation(LocationKind.SECTION, section=section_index),
+                    source_text=sentence,
+                    extraction_method=METHOD_REGEX,
+                    extraction_version=EXTRACTION_VERSION,
+                    confidence=Confidence.HIGH,
+                    identity_qualifier=f"guidance:{offset}",
                 )
             )
         return result
@@ -438,3 +557,81 @@ class EcbDecisionExtractor(DecisionExtractor):
             if match and match.start() > best_pos:
                 best_sign, best_pos = sign, match.start()
         return best_sign
+
+    # ------------------------------------------------------------------
+    # decision wording
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _decision_wordings(document) -> list[tuple[int, int, str]]:
+        """The decision's own wording, verbatim: every "Governing Council …
+        decided (today) to …" sentence in the decision section. Returns
+        (ordinal, section index, sentence)."""
+        found: list[tuple[int, int, str]] = []
+        for index, section in enumerate(document.sections):
+            if normalize_title(section.heading or "") != "monetary policy decisions":
+                continue
+            for sentence in _split_sentences(section.text or ""):
+                if _DECISION_STATEMENT.search(sentence):
+                    found.append((len(found), index, sentence))
+            break  # the decision section is authoritative for the wording
+        return found
+
+    # ------------------------------------------------------------------
+    # asset purchases / balance-sheet decisions
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _asset_purchase_decisions(document) -> list[tuple[int, int, str, str, object]]:
+        """Explicit programme decisions (reinvestment, cessation, continuation,
+        maturity handling) from the APP / PEPP / TLTRO sections. Every non-empty
+        sentence of those sections is a source-level decision statement — nothing
+        is inferred from absence. Returns (ordinal, section index, programme,
+        sentence, FactPeriod | None)."""
+        found: list[tuple[int, int, str, str, object]] = []
+        counts: dict[str, int] = {}
+        for index, section in enumerate(document.sections):
+            programme = None
+            for key, code in _PROGRAMME_SECTIONS:
+                if key in normalize_title(section.heading or ""):
+                    programme = code
+                    break
+            if programme is None:
+                continue
+            for sentence in _split_sentences(section.text or ""):
+                period = EcbDecisionExtractor._period_from_text(sentence)
+                ordinal = counts.get(programme, 0)
+                counts[programme] = ordinal + 1
+                found.append((ordinal, index, programme, sentence, period))
+        return found
+
+    @staticmethod
+    def _period_from_text(text: str) -> FactPeriod | None:
+        """Relevant period of a programme decision, verbatim label preserved
+        (e.g. "during the first half of 2027" → semester 2027-H1)."""
+        half = _PERIOD_DURING_HALF.search(text)
+        if half:
+            half_id = "1" if half.group(1).lower() == "first" else "2"
+            return FactPeriod(PeriodKind.SEMESTER, f"{half.group('year')}-H{half_id}", label=half.group(0))
+        year = _PERIOD_IN_YEAR.search(text)
+        if year:
+            return FactPeriod(PeriodKind.YEAR, year.group("year"), label=year.group(0))
+        return None
+
+    # ------------------------------------------------------------------
+    # forward guidance
+    # ------------------------------------------------------------------
+    @classmethod
+    def _forward_guidance(cls, document) -> list[tuple[int, int, str]]:
+        """Explicit prospective policy statements that are part of the decision,
+        verbatim. Only decision-level sections are considered — the separate
+        "Monetary policy statement" is Phase 6 territory. Returns (ordinal,
+        section index, sentence)."""
+        found: list[tuple[int, int, str]] = []
+        for index, section in enumerate(document.sections):
+            if "monetary policy statement" in normalize_title(section.heading or ""):
+                continue
+            for sentence in _split_sentences(section.text or ""):
+                for anchor in _GUIDANCE_ANCHORS:
+                    if anchor.search(sentence):
+                        found.append((len(found), index, sentence))
+                        break
+        return found

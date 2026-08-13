@@ -228,7 +228,18 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4.
 - **Critères de validation** : aucun fait absent n'est inventé ; chaque taux
   extrait est lié à sa provenance.
-- **Statut** : `NEXT`.
+- **Statut** : `COMPLETE` — extracteur `EcbDecisionExtractor` (v5.2.0). Implémenté :
+  policy rates (3 taux), rate changes (signe conservé en bps), decision date,
+  effective date, decision wording (`monetary_policy_decision/statement`,
+  verbatim), asset purchases / balance-sheet decisions (APP/PEPP/TLTRO,
+  `asset_purchase/decision`, identité du programme conservée), forward guidance
+  (`policy_guidance/statement`, verbatim, non interprété). **Non présent dans
+  les décisions ECB** : vote (jamais fabriqué — les votes relèvent des Minutes,
+  Phase 8) et risk assessment (relève du Monetary Policy Statement, Phase 6).
+  Frontière Phase 5/6 mise en œuvre et testée. 6 fixtures, golden tests
+  (valeurs exactes, provenance verbatim, aucun fait inventé), extraction
+  déterministe et persistance idempotente vérifiées ; `docs/EXTRACTORS.md`
+  documente la couverture réelle.
 
 ## Phase 6 — Monetary Policy Statement
 
@@ -239,7 +250,9 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4 (et Phase 5 pour la cohérence du wording).
 - **Critères de validation** : chaque extrait est relié à un passage précis du
   document normalisé.
-- **Statut** : `NOT STARTED`.
+- **Statut** : `NOT STARTED` (prochaine phase autorisée ; la frontière Phase 5/6
+  est déjà implémentée et testée — contenu sous un titre `monetary policy
+  statement` non extrait par `EcbDecisionExtractor`).
 
 ## Phase 7 — Press Conferences
 
@@ -450,14 +463,15 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 ## Current Position
 
-- Argus se situe au début de la **Phase 5 (Monetary Policy Decision)**.
-- Les phases 0, 1, 2, 3 et 4 sont marquées `COMPLETE` après vérification du
+- Argus se situe au début de la **Phase 6 (Monetary Policy Statement)**.
+- Les phases 0, 1, 2, 3, 4 et 5 sont marquées `COMPLETE` après vérification du
   repository (adapters, discovery, collector/fetcher, normalization,
-  classification, modèle `Fact`, tables SQLite correspondantes, tests).
-- **Prochaine phase autorisée : Phase 5 — Monetary Policy Decision** (statut
-  `NEXT`). Le contrat d'extraction (`ExtractionResult(publication_id,
-  document_id, facts, warnings)`) est défini ; aucun extracteur type-spécifique
-  ne doit être écrit avant une conception validée s'appuyant sur ce contrat.
+  classification, modèle `Fact`, extracteur ECB `EcbDecisionExtractor` v5.2.0,
+  tables SQLite correspondantes, tests).
+- **Prochaine phase autorisée : Phase 6 — Monetary Policy Statement** (statut
+  `NOT STARTED`). Elle extrait justification macro-économique, inflation,
+  croissance, emploi, risques, conditions financières, orientation future et
+  changements de formulation hors du périmètre decision-level de la Phase 5.
 
 ## Out of Scope
 

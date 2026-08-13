@@ -14,8 +14,6 @@ ExtractionResult(publication_id, document_id, facts, warnings)
 facts table
 ```
 
-The vertical slice is deliberate and small:
-
 - a classified **ECB monetary policy decision** publication
 - its normalized document(s)
 - the ECB extractor producing structured **Facts**
@@ -50,9 +48,10 @@ class DecisionExtractor(ABC):
 ## ECB extractor
 
 `src/argus/decisions/ecb.py` — `EcbDecisionExtractor` (`extraction_version
-5.0.0`).
+5.2.0`). It answers *"what did the Governing Council explicitly decide or
+announce as part of the decision?"*.
 
-Extracts only what the source states, with provenance:
+### Supported facts
 
 | subject | predicate | value | source |
 |---|---|---|---|
@@ -61,6 +60,9 @@ Extracts only what the source states, with provenance:
 | `marginal_lending_rate` | `value` | percentage | same |
 | `deposit_facility_rate` | `value` | percentage | same |
 | `{rate}` | `change` | basis_points (sign preserved) | explicit "lower(ed) … by 25 basis points" |
+| `monetary_policy_decision` | `statement` | text (verbatim) | decision wording: every "… decided (today) to …" sentence |
+| `asset_purchase` | `decision` | text (verbatim) | APP / PEPP / TLTRO sections (reinvestment, cessation, continuation, maturity handling) |
+| `policy_guidance` | `statement` | text (verbatim) | explicit prospective policy statements in the decision body |
 
 Every Fact also carries:
 
@@ -68,7 +70,41 @@ Every Fact also carries:
   (never assumed);
 - `source_location` — section index inside the normalized document;
 - `source_text` — the verbatim supporting passage / matched value wording;
-- `extraction_method = regex`, `extraction_version = 5.0.0`, `confidence`.
+- value-level `source_text` — verbatim wording next to the normalized value;
+- `extraction_method = regex`, `extraction_version = 5.2.0`, `confidence`.
+
+#### Decision wording
+
+The "The Governing Council … decided to / decided that …" sentences of the
+decision section are kept **verbatim** as `monetary_policy_decision /
+statement` facts. They are source information only: they are **never** recast as
+hawkish/dovish, tightening/easing, bullish/bearish, or any other interpreted
+stance. Interpretation belongs to later phases.
+
+#### Asset purchases & balance-sheet decisions
+
+The APP, PEPP (and, when present, TLTRO) sections state explicit programme
+decisions — reinvestment, cessation of reinvestment, continuation, maturity
+handling. Each such sentence becomes an `asset_purchase / decision` fact:
+
+- programme identity is preserved in `identity_qualifier` (e.g. `app:0`,
+  `pepp:0`, `tltro:0`);
+- a relevant period stated by the source (e.g. "during the first half of
+  2027") is preserved as `Fact.period` (`semester:2027-H1`) with the verbatim
+  label;
+- the decision itself is preserved verbatim as both `value` and `source_text`.
+
+Absence of a programme statement never becomes an invented "no change"/"no
+action" fact.
+
+#### Forward guidance
+
+Explicit prospective **policy** statements that are part of the decision are
+kept verbatim as `policy_guidance / statement` facts (e.g. "will keep the key
+ECB interest rates … for as long as necessary", "stands ready to adjust all of
+its instruments within its mandate"). Narrow anchors only — they never capture
+macro-economic analysis. Guidance is **not** classified and **not** turned into
+an interpreted policy stance.
 
 ### Supported wording
 
@@ -83,12 +119,35 @@ Every Fact also carries:
 - Direction: `lower/decrease/reduce/cut/…` ⇒ negative basis points,
   `increase/raise/hike/…` ⇒ positive.
 
-### Not covered (by design)
+### Not covered — ECB decision limitations
 
+- **Votes.** ECB Monetary Policy Decisions do not report individual votes (no
+  unanimity/dissent counts on the decision page). Vote extraction is therefore
+  **unsupported for ECB Decision documents** and a vote fact is never
+  fabricated. Votes/dissents belong to Minutes / Meeting Accounts (Phase 8).
+- **Risk assessment.** The decision document carries no risk assessment; risk
+  language on the ECB website belongs to the separate Monetary Policy
+  Statement, the press conference and the Economic Bulletin. Risk assessment is
+  therefore **not extracted from ECB decisions** — it is Phase 6 territory
+  (see boundary below).
+- **Inflation/growth/employment analysis.** The macro-economic justification is
+  **deferred to Phase 6** even when it appears on the same page.
 - hawkish/dovish assessment, forex interpretation, temporal/cross-publication
   analysis — later phases;
-- other banks (their extractors are Phase 5 follow-up work);
 - LLM extraction — prohibited by invariant 8.
+
+### Phase 5 / Phase 6 boundary
+
+Phase 5 answers *"what did the central bank explicitly decide or announce as
+part of the decision?"*. Content belonging to the separate **Monetary Policy
+Statement** (macro-economic justification, inflation/growth/employment
+analysis, full risk framework, formulation-change analysis, temporal
+comparison) is Phase 6 and is **not** extracted. Concretely:
+
+- content under a heading normalized to `monetary policy statement` is **not**
+  mined for Phase 5 facts: the same sentence that is a source of forward
+  guidance inside the decision body is **not** extracted when it sits in the
+  statement section (regression-tested);
 
 ## Canonical subject / predicate vocabulary (extensions)
 
@@ -96,20 +155,37 @@ Controlled-vocabulary additions made next to the Phase 4 core set (documented
 here and in `src/argus/decisions/ecb.py`):
 
 - subjects: `monetary_policy_decision`, `main_refinancing_rate`,
-  `marginal_lending_rate`, `deposit_facility_rate`
-- predicates added: `date` (decision date), alongside the existing
-  `value` / `change`.
+  `marginal_lending_rate`, `deposit_facility_rate`, `asset_purchase`,
+  `policy_guidance`
+- predicates added: `date`, `statement`, `decision` (alongside the existing
+  `value` / `change`).
+
+`identity_qualifier` disambiguates the rare multi-fact cases in one document:
+programme (`app`/`pepp`/`tltro`) + ordinal for asset-purchase facts, sentence
+ordinal for decision-wording and forward-guidance facts.
 
 The identity (`fact_id`) follows Phase 4: SHA-256 over publication_id,
-document_id, subject, predicate, period and effective_date. Values are excluded,
-so corrected extractions update rows in place. Two facts differing only by their
-effective date remain distinct facts.
+document_id, subject, predicate, period and effective_date (plus
+identity_qualifier). Values are excluded, so corrected extractions update rows
+in place. Two facts differing only by their effective date or programme remain
+distinct facts.
 
-## Golden test
+## Golden tests
 
-`tests/fixtures/documents/ecb_decision.html` (modeled on the real ECB page:
+`tests/fixtures/documents/ecb_decision*.html` (modeled on the real ECB page:
 date paragraph, decision section, "Key ECB interest rates" section with the
-enumeration + "with effect from 2 August 2026", APP/PEPP sections).
-`tests/test_decisions.py` runs the normalizer → extractor → store slice and
-asserts the seven facts (date, three levels, three changes) with their
-provenance, plus idempotence and classification gating.
+enumeration + "with effect from …", APP/PEPP/TLTRO sections, forward guidance,
+decoy dates, and a "Monetary policy statement" section used to prove the Phase 6
+boundary). `tests/test_decisions.py` runs the normalizer → extractor → store
+slice and asserts, per fixture:
+
+- the exact expected facts (date, levels, changes, decision wording, asset-
+  purchase decisions, forward guidance) with values, effective dates and
+  warnings;
+- no invented facts — no fabricated `vote`, no `risk_assessment`, nothing for
+  absent optional categories;
+- verbatim provenance: each `fact.source_text` and `fact.value.source_text` is
+  a substring of the referenced section;
+- deterministic extraction and idempotent Store persistence
+  (`rebuild_facts_for_document` re-run is a no-op);
+- phase-6 boundary: guidance inside the statement section is not extracted.
