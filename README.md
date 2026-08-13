@@ -1,12 +1,12 @@
 # Argus — Official G10 central bank publication collector
 
 Infrastructure for discovering, registering and retrieving official monetary-policy
-publications from the G10 central banks, up to the "raw documents", normalization
-and classification layers of the analytical pipeline. No economic interpretation or
-LLM analysis is performed at this stage.
+publications from the G10 central banks, up to the "raw documents", normalization,
+classification and fact-extraction layers of the analytical pipeline. No economic
+interpretation or LLM analysis is performed at this stage.
 
-The authoritative evolution plan is `docs/ROADMAP.md`; phases 0–3 are complete,
-phase 4 (Fact Model) is next.
+The authoritative evolution plan is `docs/ROADMAP.md`; phases 0–4 are complete,
+phase 5 (Monetary Policy Decision) is next.
 
 ## Pipeline scope
 
@@ -29,16 +29,18 @@ Document Normalization ✅  (Phase 2: PDF/DOCX/XLSX/CSV/TXT/HTML → structured 
       ↓
 Publication Classification ✅  (Phase 3: deterministic evidence-tier engine)
       ↓
-Fact Model                    (Phase 4 — NEXT)
-Type-Specific Extraction      (Phases 5–11 — NOT STARTED)
-Temporal / Analysis           (Phases 12–16 — NOT STARTED)
-Trading / Signal Layer        (Phase 17 — out of scope for now)
+Fact Model                   ✅  (Phase 4: typed, provenance-carrying facts)
+      ↓
+Type-Specific Extraction          (Phases 5–11 — NEXT for Phase 5)
+Temporal / Analysis               (Phases 12–16 — NOT STARTED)
+Trading / Signal Layer            (Phase 17 — out of scope for now)
 ```
 
 Stage note: **normalization** (`documents/`) turns raw bytes into structured,
 traceable text. **classification** (`classification/`) assigns a canonical
 `publication_type` from an explainable rule engine — no model calls, no fabricated
-labels.
+labels. **facts** (`facts/`) are typed, provenance-carrying assertions extracted
+from normalized documents; future extractors return an `ExtractionResult`.
 
 ## Quickstart
 
@@ -131,6 +133,9 @@ website. Binary fixtures (PDF / DOCX / XLSX) are generated at test time by
 
 - `docs/ROADMAP.md` — official roadmap: vision, phases 0–17, invariants,
   architectural notes and current position.
+- `docs/DATA_MODEL.md` — the Fact model (Phase 4): what a Fact is/is not, value
+  types, temporal semantics, provenance, confidence, identity, persistence and
+  the future extractor contract.
 - `docs/ARCHITECTURE.md` — generic core, discovery abstractions, fetcher, storage,
   deduplication and lifecycle design.
 - `docs/SOURCES.md` — the verified research matrix of official sources per bank

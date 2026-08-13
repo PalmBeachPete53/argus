@@ -200,16 +200,21 @@ L'architecture doit rester extensible à d'autres banques centrales.
   ├── confidence
   └── provenance
   ```
-- **Livrables** : schéma de table `facts` + modèle dans `src/argus/models.py`,
-  vocabulaire canonique, stratégie de provenance ; le tout avec tests et
-  documentation.
+- **Livrables** : schéma de table `facts` + modèle dans `src/argus/facts/`,
+  vocabulaire canonique (subject/predicate/ValueKind), stratégie de provenance
+  (`FactLocation`), identité déterministe (`fact_id`), contrat d'extraction
+  (`ExtractionResult`) ; document de référence `docs/DATA_MODEL.md`.
 - **Dépendances** : Phases 2 et 3.
 - **Critères de validation** : tout fait est remontable à la publication
   officielle ; aucune donnée n'est inventée (provenance requise).
-- **Statut** : `NEXT` — désignée prochaine phase à implémenter. Aucun modèle
-  `Fact` ni table `facts` n'existe actuellement dans le repository ; cette phase
-  n'est **pas** considérée comme implémentée. (Le champ
-  `Publication.publication_type` est un cache de classification, pas un fait.)
+- **Statut** : `COMPLETE` — modèle `Fact`, persistance idempotente
+  (`facts` table, `save_fact`/`get_facts`/`rebuild_facts_for_document`),
+  valeurs typées (`FactValue`), périodes (`FactPeriod`), temporalité multiple
+  (`effective_date` vs `period` vs dates de publication/réunion), provenance
+  (`source_text`, `source_location`), méthode/version d'extraction et
+  confidence implémentés et testés. Aucun extracteur spécialisé n'a été
+  implémenté. (Le champ `Publication.publication_type` reste un cache de
+  classification, distinct du modèle `Fact`.)
 
 ## Phase 5 — Monetary Policy Decision
 
@@ -223,7 +228,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4.
 - **Critères de validation** : aucun fait absent n'est inventé ; chaque taux
   extrait est lié à sa provenance.
-- **Statut** : `NOT STARTED`.
+- **Statut** : `NEXT`.
 
 ## Phase 6 — Monetary Policy Statement
 
@@ -445,24 +450,26 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 ## Current Position
 
-- Argus se situe à la fin de la **Phase 3 (Publication Classification)**.
-- Les phases 0, 1, 2 et 3 sont marquées `COMPLETE` après vérification du
+- Argus se situe au début de la **Phase 5 (Monetary Policy Decision)**.
+- Les phases 0, 1, 2, 3 et 4 sont marquées `COMPLETE` après vérification du
   repository (adapters, discovery, collector/fetcher, normalization,
-  classification, tables SQLite correspondantes, tests).
-- **Prochaine phase autorisée : Phase 4 — Fact Model** (statut `NEXT`). Aucun
-  code d'extraction de faits ne doit être écrit avant la définition validée du
-  modèle `Fact` et de sa provenance.
+  classification, modèle `Fact`, tables SQLite correspondantes, tests).
+- **Prochaine phase autorisée : Phase 5 — Monetary Policy Decision** (statut
+  `NEXT`). Le contrat d'extraction (`ExtractionResult(publication_id,
+  document_id, facts, warnings)`) est défini ; aucun extracteur type-spécifique
+  ne doit être écrit avant une conception validée s'appuyant sur ce contrat.
 
 ## Out of Scope
 
 Fonctionnalités qui ne doivent pas être implémentées prématurément :
 
-- Extraction de faits avant la validation de la Phase 4.
-- Extracteurs spécialisés (Phases 5–11) avant la Phase 4.
+- Extracteurs spécialisés (Phases 5–11) qui ne s'appuient pas sur le modèle
+  `Fact`, la provenance et le contrat `ExtractionResult` définis en Phase 4.
 - Analyse temporelle, fonction de réaction, état de politique monétaire et
   fondamentaux Forex avant les Phases 12–15.
 - **Couche de trading / signaux** (Phase 17) tant que le cœur (collecte,
-  normalisation, classification, extraction) n'est pas stabilisé et isolé.
+  normalisation, classification, extraction de faits) n'est pas stabilisé et
+  isolé.
 - Utilisation d'un LLM comme source de vérité (interdit par l'invariant 8).
 - Interprétation économique dans les couches basses (interdit par l'invariant
-  6).
+  6) — la couche `Fact` ne produit pas d'interprétation.

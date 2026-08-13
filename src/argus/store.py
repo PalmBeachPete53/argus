@@ -141,6 +141,42 @@ CREATE TABLE IF NOT EXISTS classifications (
 );
 CREATE INDEX IF NOT EXISTS idx_classifications_type
     ON classifications(publication_type);
+CREATE TABLE IF NOT EXISTS facts (
+    -- Phase 4 — structured, provenance-carrying assertions extracted from a
+    -- normalized document. `fact_id` is a deterministic SHA-256 over stable
+    -- semantic + provenance fields (see src/argus/facts/identity.py) so
+    -- re-running an extractor updates the row instead of duplicating it.
+    fact_id TEXT PRIMARY KEY,
+    publication_id TEXT NOT NULL,
+    document_id TEXT NOT NULL,
+    central_bank TEXT,
+    subject TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    value_type TEXT,
+    value_json TEXT,
+    previous_value_json TEXT,
+    change_json TEXT,
+    period_kind TEXT,
+    period_value TEXT,
+    period_label TEXT,
+    effective_date TEXT,
+    source_location_json TEXT,
+    source_text TEXT,
+    extraction_method TEXT,
+    extraction_version TEXT,
+    confidence TEXT,
+    extracted_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_facts_publication
+    ON facts(publication_id);
+CREATE INDEX IF NOT EXISTS idx_facts_document
+    ON facts(document_id);
+CREATE INDEX IF NOT EXISTS idx_facts_subject
+    ON facts(subject, predicate);
+CREATE INDEX IF NOT EXISTS idx_facts_bank_subject
+    ON facts(central_bank, subject);
 """
 
 
@@ -818,3 +854,267 @@ class Store:
                 }
             )
         return result
+
+    # ------------------------------------------------------------------
+    # Phase 4 — facts persistence
+    # ------------------------------------------------------------------
+
+    def save_fact(self, fact) -> None:
+        """Persist one fact, upserting by its deterministic ``fact_id``.
+
+        Idempotent: re-saving the same fact (or a corrected version of it —
+        the extracted value is not part of the identity) overwrites the row in
+        place, preserving ``created_at``. ``central_bank`` is filled in from the
+        publication when the fact does not carry it.
+        """
+        from .facts import Fact
+        from .facts.base import FactPeriod
+
+        if not isinstance(fact, Fact):
+            raise TypeError(f"expected Fact, got {type(fact).__name__}")
+        fact_id = fact.resolve_id()
+        central_bank = fact.central_bank
+        if not central_bank:
+            pub = self.get_publication(fact.publication_id)
+            central_bank = pub.central_bank if pub else None
+        now = now_utc()
+        now_iso = iso(now)
+        existing = self._conn.execute(
+            "SELECT created_at FROM facts WHERE fact_id = ?", (fact_id,)
+        ).fetchone()
+        created_at = existing["created_at"] if existing else now_iso
+        self._conn.execute(
+            """
+            INSERT INTO facts
+                (fact_id, publication_id, document_id, central_bank, subject, predicate,
+                 value_type, value_json, previous_value_json, change_json,
+                 period_kind, period_value, period_label, effective_date,
+                 source_location_json, source_text, extraction_method,
+                 extraction_version, confidence, extracted_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(fact_id) DO UPDATE SET
+                publication_id=excluded.publication_id,
+                document_id=excluded.document_id,
+                central_bank=excluded.central_bank,
+                subject=excluded.subject,
+                predicate=excluded.predicate,
+                value_type=excluded.value_type,
+                value_json=excluded.value_json,
+                previous_value_json=excluded.previous_value_json,
+                change_json=excluded.change_json,
+                period_kind=excluded.period_kind,
+                period_value=excluded.period_value,
+                period_label=excluded.period_label,
+                effective_date=excluded.effective_date,
+                source_location_json=excluded.source_location_json,
+                source_text=excluded.source_text,
+                extraction_method=excluded.extraction_method,
+                extraction_version=excluded.extraction_version,
+                confidence=excluded.confidence,
+                extracted_at=excluded.extracted_at,
+                updated_at=excluded.updated_at
+            """,
+            (
+                fact_id,
+                fact.publication_id,
+                fact.document_id,
+                central_bank,
+                fact.subject,
+                fact.predicate,
+                fact.value.kind.value if fact.value else None,
+                json.dumps(fact.value.to_dict()) if fact.value else None,
+                json.dumps(fact.previous_value.to_dict()) if fact.previous_value else None,
+                json.dumps(fact.change.to_dict()) if fact.change else None,
+                fact.period.kind.value if fact.period else None,
+                fact.period.value if fact.period else None,
+                fact.period.label if fact.period else None,
+                iso(fact.effective_date),
+                json.dumps(fact.source_location.to_dict()) if fact.source_location else None,
+                fact.source_text,
+                fact.extraction_method,
+                fact.extraction_version,
+                fact.confidence.value if fact.confidence else None,
+                iso(fact.extracted_at),
+                created_at,
+                now_iso,
+            ),
+        )
+        self._conn.commit()
+
+    def save_facts(self, facts) -> int:
+        """Persist a list of Facts (or an ``ExtractionResult``). Returns count."""
+        if hasattr(facts, "facts"):
+            facts = facts.facts
+        count = 0
+        for fact in facts:
+            self.save_fact(fact)
+            count += 1
+        return count
+
+    def get_fact(self, fact_id: str):
+        row = self._conn.execute("SELECT * FROM facts WHERE fact_id = ?", (fact_id,)).fetchone()
+        return self._fact_from_row(row) if row else None
+
+    def get_facts(
+        self,
+        *,
+        publication_id: str | None = None,
+        document_id: str | None = None,
+        bank: str | tuple[str, ...] | None = None,
+        subject: str | None = None,
+        predicate: str | None = None,
+        value_type: str | None = None,
+        limit: int | None = None,
+    ) -> list:
+        query = "SELECT * FROM facts"
+        clauses: list[str] = []
+        params: list = []
+        if publication_id is not None:
+            clauses.append("publication_id = ?")
+            params.append(publication_id)
+        if document_id is not None:
+            clauses.append("document_id = ?")
+            params.append(document_id)
+        if bank is not None:
+            banks = (bank,) if isinstance(bank, str) else tuple(bank)
+            if banks:
+                clauses.append(f"central_bank IN ({','.join('?' * len(banks))})")
+                params.extend(banks)
+        if subject is not None:
+            clauses.append("subject = ?")
+            params.append(subject)
+        if predicate is not None:
+            clauses.append("predicate = ?")
+            params.append(predicate)
+        if value_type is not None:
+            clauses.append("value_type = ?")
+            params.append(value_type)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY central_bank, subject, predicate, fact_id"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._fact_from_row(r) for r in rows]
+
+    def delete_facts_for_document(self, document_id: str) -> int:
+        """Delete all facts of a document (used when re-normalizing/re-extracting)."""
+        cursor = self._conn.execute("DELETE FROM facts WHERE document_id = ?", (document_id,))
+        self._conn.commit()
+        return cursor.rowcount
+
+    def delete_facts_for_publication(self, publication_id: str) -> int:
+        cursor = self._conn.execute(
+            "DELETE FROM facts WHERE publication_id = ?", (publication_id,)
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def rebuild_facts_for_document(self, document_id: str, facts) -> int:
+        """Replace a document's facts with ``facts`` in one transaction.
+
+        ``facts`` is a list of ``Fact`` or an ``ExtractionResult``. Facts already
+        present that are not part of the new set are removed, so re-extraction
+        never leaves stale rows behind.
+        """
+        from .facts import Fact
+        from .facts.base import ExtractionResult
+
+        if isinstance(facts, ExtractionResult):
+            facts = facts.facts
+        try:
+            self._conn.execute("DELETE FROM facts WHERE document_id = ?", (document_id,))
+            count = 0
+            for fact in facts:
+                if not isinstance(fact, Fact):
+                    raise TypeError(f"expected Fact, got {type(fact).__name__}")
+                fact_id = fact.resolve_id()
+                central_bank = fact.central_bank
+                if not central_bank:
+                    pub = self.get_publication(fact.publication_id)
+                    central_bank = pub.central_bank if pub else None
+                now_iso = iso(now_utc())
+                self._conn.execute(
+                    """
+                    INSERT INTO facts
+                        (fact_id, publication_id, document_id, central_bank, subject, predicate,
+                         value_type, value_json, previous_value_json, change_json,
+                         period_kind, period_value, period_label, effective_date,
+                         source_location_json, source_text, extraction_method,
+                         extraction_version, confidence, extracted_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        fact_id,
+                        fact.publication_id,
+                        fact.document_id,
+                        central_bank,
+                        fact.subject,
+                        fact.predicate,
+                        fact.value.kind.value if fact.value else None,
+                        json.dumps(fact.value.to_dict()) if fact.value else None,
+                        json.dumps(fact.previous_value.to_dict()) if fact.previous_value else None,
+                        json.dumps(fact.change.to_dict()) if fact.change else None,
+                        fact.period.kind.value if fact.period else None,
+                        fact.period.value if fact.period else None,
+                        fact.period.label if fact.period else None,
+                        iso(fact.effective_date),
+                        json.dumps(fact.source_location.to_dict()) if fact.source_location else None,
+                        fact.source_text,
+                        fact.extraction_method,
+                        fact.extraction_version,
+                        fact.confidence.value if fact.confidence else None,
+                        iso(fact.extracted_at),
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                count += 1
+            self._conn.commit()
+            return count
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    @staticmethod
+    def _fact_from_row(row: sqlite3.Row):
+        from .facts.base import (
+            Confidence,
+            Fact,
+            FactLocation,
+            FactPeriod,
+            FactValue,
+        )
+
+        return Fact(
+            fact_id=row["fact_id"],
+            publication_id=row["publication_id"],
+            document_id=row["document_id"],
+            central_bank=row["central_bank"],
+            subject=row["subject"],
+            predicate=row["predicate"],
+            value=FactValue.from_dict(json.loads(row["value_json"])) if row["value_json"] else None,
+            previous_value=(
+                FactValue.from_dict(json.loads(row["previous_value_json"]))
+                if row["previous_value_json"]
+                else None
+            ),
+            change=FactValue.from_dict(json.loads(row["change_json"])) if row["change_json"] else None,
+            period=(
+                FactPeriod(kind=row["period_kind"], value=row["period_value"], label=row["period_label"])
+                if row["period_kind"]
+                else None
+            ),
+            effective_date=from_iso(row["effective_date"]),
+            source_location=(
+                FactLocation.from_dict(json.loads(row["source_location_json"]))
+                if row["source_location_json"]
+                else None
+            ),
+            source_text=row["source_text"],
+            extraction_method=row["extraction_method"] or "",
+            extraction_version=row["extraction_version"],
+            confidence=Confidence(row["confidence"]) if row["confidence"] else None,
+            extracted_at=from_iso(row["extracted_at"]),
+        )

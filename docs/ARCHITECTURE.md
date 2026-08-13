@@ -36,6 +36,10 @@ src/argus/
 │   ├── rules.py     generic regex TypeRules + canonical_types()
 │   ├── bank_rules.py bank-specific rules, one declarative block per bank
 │   └── classifier.py PublicationClassifier — evidence-tier engine (no model calls)
+├── facts/          Phase 4 — the Fact model (contract for future extractors)
+│   ├── base.py     Fact, FactValue, FactPeriod, FactLocation, ExtractionResult,
+│   │               value-kind & extraction-method vocabulary
+│   └── identity.py deterministic fact_id (SHA-256 over semantic+provenance)
 └── adapters/        One BankAdapter per central bank (10x), fully declarative
 ```
 
@@ -113,6 +117,13 @@ documents are re-tried on later runs up to a per-document retry budget.
 - `DocumentPage` — number, text
 - `PublicationClassification` — publication_id, central_bank, publication_type,
   confidence, method, evidence (list of reasons), classified_at
+- `Fact` (Phase 4) — fact_id (deterministic identity), publication_id,
+  document_id, central_bank, subject, predicate, value/previous_value/change
+  (`FactValue`: kind + numeric/string value + unit + verbatim `source_text`),
+  period (`FactPeriod`), effective_date, source_location (`FactLocation`),
+  source_text, extraction_method/version, confidence, extracted_at
+- `ExtractionResult` (Phase 4) — publication_id, document_id, facts[], warnings[]
+  (contract returned by future type-specific extractors)
 
 ## Phase 2A — Normalization (`documents/`)
 
@@ -188,6 +199,30 @@ the `Publication` field is only a lightweight cache for listing/filtering. Batch
 
 All bank-specific knowledge lives declaratively in `bank_rules.py`; the engine in
 `classifier.py` never branches on bank id.
+
+## Phase 4 — Facts (`facts/`)
+
+`Fact` is the canonical, structured representation of information **explicitly
+present** in a source document — never an interpretation (see
+`docs/DATA_MODEL.md`). A Fact carries full provenance: `publication_id` +
+`document_id` (reusing the existing chain to `Source`/`CentralBank`),
+`source_text` (verbatim wording), `source_location` (`section`/`table`/`page`/
+`offset`, format-independent) and `extraction_method` + `extraction_version`
+for auditability. Values are typed (`FactValue` kinds: number, percentage,
+basis_points, currency, date, boolean, categorical, text, range, null) and
+never stored as opaque strings; `FactPeriod` keeps forecast/reference periods
+(year, quarter, month, range) canonical and sortable, distinct from
+`effective_date` and the publication/meeting dates.
+
+Identity is deterministic: `fact_id` = SHA-256 over stable semantic +
+provenance fields (publication, document, subject, predicate, period) — the
+extracted value is excluded so corrections update the row in place. Persistence
+in the `facts` table is idempotent (`save_fact` upserts by `fact_id`;
+`rebuild_facts_for_document` replaces a document's facts in one transaction).
+
+Future type-specific extractors return an `ExtractionResult(publication_id,
+document_id, facts, warnings)`. No extractor exists yet: this phase only
+defines the contract and the data model.
 
 ## Deduplication
 
