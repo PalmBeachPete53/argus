@@ -1,31 +1,38 @@
 # Argus — Official G10 central bank publication collector
 
 Infrastructure for discovering, registering and retrieving official monetary-policy
-publications from the G10 central banks, up to the "raw documents" layer of the
-analytical pipeline. No economic interpretation, classification or LLM analysis is
-performed at this stage.
+publications from the G10 central banks, up to the "raw documents", normalization
+and classification layers of the analytical pipeline. No economic interpretation or
+LLM analysis is performed at this stage.
+
+The authoritative evolution plan is `docs/ROADMAP.md`; phases 0–3 are complete,
+phase 4 (Fact Model) is next.
 
 ## Pipeline scope
+
+Status follows `docs/ROADMAP.md` (`COMPLETE` / `NEXT` / `NOT STARTED`):
 
 ```
 Official Sources
       ↓
-Source Registry        ✅
+Source Registry        ✅  (Phase 1)
       ↓
-Publication Discovery  ✅
+Publication Discovery  ✅  (Phase 1)
       ↓
-Publication Metadata   ✅
+Publication Metadata   ✅  (Phase 1)
       ↓
-Document Fetching      ✅
+Document Fetching      ✅  (Phase 1)
       ↓
-Raw Documents          ✅
+Raw Documents          ✅  (Phase 1)
       ↓
-Document Normalization ✅  (PDF/DOCX/XLSX/CSV/TXT/HTML → structured text+tables)
+Document Normalization ✅  (Phase 2: PDF/DOCX/XLSX/CSV/TXT/HTML → structured text+tables)
       ↓
-Publication Classification ✅  (deterministic evidence-tier engine)
+Publication Classification ✅  (Phase 3: deterministic evidence-tier engine)
       ↓
-Type-Specific Extraction       (next stage)
-Facts / Temporal Analysis      (next stage)
+Fact Model                    (Phase 4 — NEXT)
+Type-Specific Extraction      (Phases 5–11 — NOT STARTED)
+Temporal / Analysis           (Phases 12–16 — NOT STARTED)
+Trading / Signal Layer        (Phase 17 — out of scope for now)
 ```
 
 Stage note: **normalization** (`documents/`) turns raw bytes into structured,
@@ -80,7 +87,7 @@ SHA-256 fingerprint and full provenance (bank, source id, source url, publicatio
 url, publication date, retrieved-at time) recorded in the SQLite store
 (`data/argus.db`).
 
-## Phase 2 — normalize & classify
+## Phases 2 & 3 — normalize & classify
 
 Normalization parses raw documents on disk into structured text + tables (no
 network), and classification assigns a canonical `publication_type` from a
@@ -122,6 +129,8 @@ website. Binary fixtures (PDF / DOCX / XLSX) are generated at test time by
 
 ## Documentation
 
+- `docs/ROADMAP.md` — official roadmap: vision, phases 0–17, invariants,
+  architectural notes and current position.
 - `docs/ARCHITECTURE.md` — generic core, discovery abstractions, fetcher, storage,
   deduplication and lifecycle design.
 - `docs/SOURCES.md` — the verified research matrix of official sources per bank
