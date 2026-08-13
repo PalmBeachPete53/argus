@@ -215,7 +215,8 @@ never stored as opaque strings; `FactPeriod` keeps forecast/reference periods
 `effective_date` and the publication/meeting dates.
 
 Identity is deterministic: `fact_id` = SHA-256 over stable semantic +
-provenance fields (publication, document, subject, predicate, period) — the
+provenance fields (publication, document, subject, predicate, period,
+effective_date) — the
 extracted value is excluded so corrections update the row in place. Persistence
 in the `facts` table is idempotent (`save_fact` upserts by `fact_id`;
 `rebuild_facts_for_document` replaces a document's facts in one transaction).

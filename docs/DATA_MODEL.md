@@ -216,9 +216,14 @@ PDF, DOCX, XLSX, CSV and TXT.
 `rule`, `parser`, `table_extraction`, `regex`, `structured_metadata`, `manual`,
 `unknown` — and `llm`, **reserved for the future and NOT used in Phase 4**.
 
-`extraction_version` (extractor version) is recorded so facts produced by
-different extractor versions can be told apart: if an extraction is later
-corrected, old and new facts remain distinguishable.
+`extraction_version` (extractor version) identifies the version that **produced
+the current canonical value** stored in `facts`. Because the `facts` table is
+upserted by `fact_id`, it holds the *current* state of each fact: when an
+extraction is corrected, the row is updated and the old version is **not**
+retained. `extraction_version` therefore answers "which version produced the
+data currently stored", **not** "which versions have historically produced this
+data". A historical extraction audit log (if ever needed) would be a separate
+system, deliberately out of scope for the `facts` table.
 
 `confidence` is **extraction/structuring confidence** (HIGH/MEDIUM/LOW) — how
 confident the parser is that it faithfully structured the source. It is
@@ -230,7 +235,7 @@ concept does not exist at this layer.
 `fact_id` = `SHA-256` over stable **semantic + provenance** fields:
 
 ```
-publication_id | document_id | subject | predicate | period | identity_qualifier
+publication_id | document_id | subject | predicate | period | effective_date | identity_qualifier
 ```
 
 The extracted `value`, `previous_value` and `change` are deliberately **not**
@@ -239,13 +244,24 @@ part of the identity:
 - Re-running an extractor produces the same `fact_id` → the row is updated,
   never duplicated (idempotent persistence by construction).
 - A corrected extraction (same subject, new value) updates the same row; the
-  `extraction_version` + `confidence` show it was re-extracted.
+  updated `extraction_version` + `confidence` show it was re-extracted.
 - Two facts that only differ in *where* they were found collapse to one, which
   is correct: the same assertion stated twice is one Fact.
 
+`effective_date` **is** part of the identity, by design. Rationale: it is a
+stable, semantic attribute — not an extracted value. Two facts in the same
+document that differ only by their effective date (e.g. a policy rate stated
+for two different dates, two changes effective on different days) are genuinely
+distinct facts and must not collide. Value corrections keep the "update in
+place" property because `value` remains excluded. The one trade-off: correcting
+an `effective_date` changes the identity and opens a new slot — stale rows are
+cleared by the full re-extraction path (`rebuild_facts_for_document` /
+`delete_facts_for_document`).
+
 `identity_qualifier` is an extractor-provided discriminator for the rare case
-where two distinct Facts would otherwise share `subject + predicate + period`
-in one document (e.g. a target range and a midpoint of the same value).
+where two distinct Facts would otherwise share `subject + predicate + period +
+effective_date` in one document (e.g. a target range and a midpoint of the same
+value).
 
 Fuzzy/approximate deduplication is intentionally **not** designed now — the
 immediate requirement is deterministic, idempotent persistence.
@@ -377,8 +393,10 @@ Fact:
 
 ## Architectural decisions (record)
 
-- **A. Fact identity**: SHA-256 over stable semantic + provenance fields;
-  value intentionally excluded so corrections update in place.
+- **A. Fact identity**: SHA-256 over stable semantic + provenance fields
+  (subject, predicate, period, effective_date); extracted value intentionally
+  excluded so value corrections update in place. `effective_date` is included
+  because facts differing only by their effective date are distinct facts.
 - **B. Fact vs Interpretation**: a Fact is explicitly in the source;
   interpretation is reserved for later analysis phases.
 - **C. Fact vs Document**: document = full content (content-preserving); Fact =

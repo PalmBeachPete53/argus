@@ -55,7 +55,7 @@ class ValueKind(str, Enum):
     NUMBER = "number"  # e.g. 1.4 (no unit or with explicit ``unit``)
     PERCENTAGE = "percentage"  # e.g. 4.25 → 4.25%
     BASIS_POINTS = "basis_points"  # e.g. +25 (sign preserved)
-    CURRENCY = "currency"  # value + ``unit`` (e.g. "usd", "billion")
+    CURRENCY = "currency"  # float value + ``unit`` (e.g. "usd", "billion")
     DATE = "date"  # value as ISO-8601 string ("2026-08-14")
     BOOLEAN = "boolean"
     CATEGORICAL = "categorical"  # canonical category, e.g. "upside"
@@ -103,9 +103,11 @@ class FactValue:
     max: float | None = None
 
     def __post_init__(self) -> None:
-        if self.kind in (ValueKind.NUMBER, ValueKind.PERCENTAGE, ValueKind.BASIS_POINTS):
+        if self.kind in (ValueKind.NUMBER, ValueKind.PERCENTAGE, ValueKind.BASIS_POINTS, ValueKind.CURRENCY):
             if self.value is not None and not isinstance(self.value, (int, float)):
                 raise TypeError(f"{self.kind.value} value must be numeric, got {self.value!r}")
+            if self.kind is ValueKind.CURRENCY and self.unit is not None and not isinstance(self.unit, str):
+                raise TypeError(f"currency unit must be a string, got {self.unit!r}")
         elif self.kind is ValueKind.BOOLEAN:
             if self.value is not None and not isinstance(self.value, bool):
                 raise TypeError(f"boolean value must be bool, got {self.value!r}")
@@ -114,7 +116,7 @@ class FactValue:
                 raise TypeError(f"range min must be numeric, got {self.min!r}")
             if self.max is not None and not isinstance(self.max, (int, float)):
                 raise TypeError(f"range max must be numeric, got {self.max!r}")
-        elif self.kind in (ValueKind.TEXT, ValueKind.CATEGORICAL, ValueKind.DATE, ValueKind.CURRENCY):
+        elif self.kind in (ValueKind.TEXT, ValueKind.CATEGORICAL, ValueKind.DATE):
             if self.value is not None and not isinstance(self.value, str):
                 raise TypeError(f"{self.kind.value} value must be str, got {self.value!r}")
         elif self.kind is ValueKind.NULL:
@@ -262,10 +264,13 @@ class Fact:
     """A structured, provenance-carrying assertion extracted from a source.
 
     ``fact_id`` is a deterministic SHA-256 identity derived from stable semantic
-    + provenance fields (NOT from the extracted value), so re-running an
-    extractor or correcting a value updates the same row instead of duplicating
-    it. ``identity_qualifier`` is an optional extractor-provided discriminator
-    for the rare case where two facts would otherwise share the same key.
+    + provenance fields (subject, predicate, period, effective_date — NOT the
+    extracted value), so re-running an extractor or correcting a value updates
+    the same row instead of duplicating it. ``identity_qualifier`` is an
+    optional extractor-provided discriminator for the rare case where two facts
+    would otherwise share the same key. ``effective_date`` is part of the
+    identity because two facts differing only by their effective date are
+    distinct facts (see ``facts/identity.py``).
     """
 
     publication_id: str
@@ -299,6 +304,7 @@ class Fact:
             subject=self.subject,
             predicate=self.predicate,
             period=self.period,
+            effective_date=self.effective_date,
             qualifier=self.identity_qualifier,
         )
 

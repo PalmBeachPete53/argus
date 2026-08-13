@@ -21,6 +21,7 @@ from argus.facts import (
     basis_points,
     boolean_value,
     categorical,
+    currency,
     date_value,
     fact_id_of,
     null_value,
@@ -79,11 +80,15 @@ def test_value_kinds_are_machine_readable():
     assert basis_points(-25).value == -25
     assert number(1.4, unit="trn").value == 1.4
     assert number(1.4, unit="trn").unit == "trn"
+    assert currency(100, unit="usd").value == 100
+    assert currency(1.5, unit="billion").unit == "billion"
 
 
 def test_numeric_kinds_reject_non_numbers():
     with pytest.raises(TypeError):
         percentage("4.25")
+    with pytest.raises(TypeError):
+        currency("100", unit="usd")
 
 
 def test_null_value():
@@ -326,12 +331,26 @@ def test_deterministic_identity():
     assert a.compute_fact_id() == fact_id_of(**kw)
 
 
-def test_identity_excludes_value_but_includes_period():
+def test_identity_excludes_value_but_includes_period_and_effective_date():
     base = dict(publication_id="p", document_id="d", subject="policy_rate", predicate="value")
+    eff = datetime(2026, 8, 14, tzinfo=timezone.utc)
     assert fact_id_of(**base) == fact_id_of(**base, **{})
-    assert fact_id_of(**base) == fact_id_of(**base)
+    # two facts identical in key fields but different values share the identity
+    assert rate_fact(None, value=4.25).compute_fact_id() == rate_fact(None, value=4.50).compute_fact_id()
     assert fact_id_of(**base, period=year("2027")) != fact_id_of(**base)
+    assert fact_id_of(**base, effective_date=eff) != fact_id_of(**base)
     assert fact_id_of(**base, qualifier="target_range") != fact_id_of(**base)
+
+
+def test_facts_differing_only_by_effective_date_do_not_collide(tmp_path):
+    store = store_pub(tmp_path)
+    pub = make_publication(store)
+    a = rate_fact(pub, effective_date=datetime(2026, 8, 14, tzinfo=timezone.utc))
+    b = rate_fact(pub, effective_date=datetime(2026, 9, 1, tzinfo=timezone.utc))
+    assert a.compute_fact_id() != b.compute_fact_id()
+    store.save_fact(a)
+    store.save_fact(b)
+    assert len(store.get_facts(subject="policy_rate")) == 2
 
 
 def test_persist_and_retrieve(tmp_path):
