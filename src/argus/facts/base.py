@@ -335,6 +335,7 @@ class Fact:
             "extraction_method": self.extraction_method,
             "extraction_version": self.extraction_version,
             "confidence": self.confidence.value if self.confidence else None,
+            "identity_qualifier": self.identity_qualifier,
             "extracted_at": iso(self.extracted_at),
         }
 

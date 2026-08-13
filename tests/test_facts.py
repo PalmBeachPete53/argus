@@ -307,6 +307,94 @@ def test_round_trip_dict():
     assert restored.period.canonical() == "year:2027"
 
 
+def test_round_trip_dict_preserves_identity_qualifier():
+    fact = Fact(
+        publication_id="p1",
+        document_id="d1",
+        central_bank="ecb",
+        subject="policy_rate",
+        predicate="value",
+        value=percentage(4.25),
+        identity_qualifier="target_range",
+        extraction_method=METHOD_RULE,
+        extraction_version="1.0",
+        confidence=Confidence.HIGH,
+    )
+    fact.resolve_id()
+    restored = Fact.from_dict(fact.to_dict())
+    assert restored == fact
+    assert restored.identity_qualifier == "target_range"
+
+
+def test_round_trip_dict_preserves_all_fields(tmp_path):
+    store = store_pub(tmp_path)
+    pub = make_publication(store)
+    fact = Fact(
+        publication_id=pub.id,
+        document_id="doc-1",
+        central_bank="ecb",
+        subject="policy_rate",
+        predicate="value",
+        value=percentage(4.25, source_text="4.25 percent"),
+        previous_value=percentage(4.00),
+        change=basis_points(25, source_text="raised by 25 basis points"),
+        period=year("2027", label="in 2027"),
+        effective_date=datetime(2026, 8, 14, tzinfo=timezone.utc),
+        source_location=FactLocation(LocationKind.SECTION, section=2),
+        source_text="4.25 percent",
+        extraction_method=METHOD_RULE,
+        extraction_version="1.0",
+        confidence=Confidence.HIGH,
+        identity_qualifier="midpoint",
+        extracted_at=datetime(2026, 8, 13, tzinfo=timezone.utc),
+    )
+    fact.resolve_id()
+    restored = Fact.from_dict(fact.to_dict())
+    assert restored == fact
+    assert restored.fact_id == fact.fact_id
+    assert restored.source_location.section == 2
+    assert restored.change.kind is ValueKind.BASIS_POINTS
+
+
+def test_facts_differing_only_by_identity_qualifier_stay_distinct():
+    base = dict(
+        publication_id="p1",
+        document_id="d1",
+        subject="policy_rate",
+        predicate="value",
+        value=percentage(4.25),
+        extraction_method=METHOD_RULE,
+    )
+    a = Fact(**base, identity_qualifier="target_range")
+    b = Fact(**base, identity_qualifier="midpoint")
+    assert a.compute_fact_id() != b.compute_fact_id()
+    ra = Fact.from_dict(a.to_dict())
+    rb = Fact.from_dict(b.to_dict())
+    assert ra.identity_qualifier == "target_range"
+    assert rb.identity_qualifier == "midpoint"
+    assert ra.compute_fact_id() != rb.compute_fact_id()
+    assert ra != rb
+
+
+def test_db_round_trip_preserves_identity_qualifier(tmp_path):
+    store = store_pub(tmp_path)
+    pub = make_publication(store)
+    a = rate_fact(pub, central_bank="ecb", identity_qualifier="target_range")
+    b = rate_fact(pub, central_bank="ecb", identity_qualifier="midpoint")
+    store.save_fact(a)
+    store.save_fact(b)
+    assert len(store.get_facts(document_id="doc-1")) == 2
+    stored_a = store.get_fact(a.resolve_id())
+    stored_b = store.get_fact(b.resolve_id())
+    assert stored_a.identity_qualifier == "target_range"
+    assert stored_b.identity_qualifier == "midpoint"
+    assert stored_a == a
+    assert stored_b == b
+    # idempotent re-save does not duplicate
+    store.save_fact(a)
+    assert len(store.get_facts(document_id="doc-1")) == 2
+
+
 def test_factvalue_round_trip_range():
     v = FactValue(ValueKind.RANGE, min=1.0, max=2.5, unit="quarter")
     restored = FactValue.from_dict(v.to_dict())

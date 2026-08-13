@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS normalized_documents (
     extraction_method TEXT,
     extraction_warnings_json TEXT,
     metadata_json TEXT,
+    pages_json TEXT,
     normalized_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_normdocs_publication
@@ -165,6 +166,7 @@ CREATE TABLE IF NOT EXISTS facts (
     extraction_method TEXT,
     extraction_version TEXT,
     confidence TEXT,
+    identity_qualifier TEXT,
     extracted_at TEXT,
     created_at TEXT,
     updated_at TEXT
@@ -190,6 +192,14 @@ class Store:
         if str(self.path) != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        try:
+            self._conn.execute("ALTER TABLE facts ADD COLUMN identity_qualifier TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute("ALTER TABLE normalized_documents ADD COLUMN pages_json TEXT")
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
 
     def close(self) -> None:
@@ -591,8 +601,8 @@ class Store:
             INSERT INTO normalized_documents
                 (document_id, publication_id, source_url, local_path, document_kind,
                  mime_type, title, text, extraction_method, extraction_warnings_json,
-                 metadata_json, normalized_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 metadata_json, pages_json, normalized_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(document_id) DO UPDATE SET
                 publication_id=excluded.publication_id,
                 source_url=excluded.source_url,
@@ -604,6 +614,7 @@ class Store:
                 extraction_method=excluded.extraction_method,
                 extraction_warnings_json=excluded.extraction_warnings_json,
                 metadata_json=excluded.metadata_json,
+                pages_json=excluded.pages_json,
                 normalized_at=excluded.normalized_at
             """,
             (
@@ -618,6 +629,10 @@ class Store:
                 document.extraction_method,
                 json.dumps(document.extraction_warnings),
                 json.dumps(document.metadata, ensure_ascii=False, default=str),
+                json.dumps(
+                    [{"number": p.number, "text": p.text} for p in document.pages],
+                    ensure_ascii=False,
+                ),
                 iso(document.normalized_at or now_utc()),
             ),
         )
@@ -653,12 +668,17 @@ class Store:
 
     def _normalized_from_row(self, row: sqlite3.Row):
         from .documents.base import (
+            DocumentPage,
             DocumentSection,
             DocumentTable,
             NormalizedDocument,
         )
 
         doc_id = row["document_id"]
+        pages = [
+            DocumentPage(number=p["number"], text=p["text"])
+            for p in json.loads(row["pages_json"] or "[]")
+        ]
         sections = [
             DocumentSection(
                 order=r["position"],
@@ -698,6 +718,7 @@ class Store:
             text=row["text"] or "",
             sections=sections,
             tables=tables,
+            pages=pages,
             metadata=json.loads(row["metadata_json"] or "{}"),
             extraction_method=row["extraction_method"] or "",
             extraction_warnings=json.loads(row["extraction_warnings_json"] or "[]"),
@@ -890,8 +911,9 @@ class Store:
                  value_type, value_json, previous_value_json, change_json,
                  period_kind, period_value, period_label, effective_date,
                  source_location_json, source_text, extraction_method,
-                 extraction_version, confidence, extracted_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 extraction_version, confidence, identity_qualifier, extracted_at,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(fact_id) DO UPDATE SET
                 publication_id=excluded.publication_id,
                 document_id=excluded.document_id,
@@ -911,6 +933,7 @@ class Store:
                 extraction_method=excluded.extraction_method,
                 extraction_version=excluded.extraction_version,
                 confidence=excluded.confidence,
+                identity_qualifier=excluded.identity_qualifier,
                 extracted_at=excluded.extracted_at,
                 updated_at=excluded.updated_at
             """,
@@ -934,6 +957,7 @@ class Store:
                 fact.extraction_method,
                 fact.extraction_version,
                 fact.confidence.value if fact.confidence else None,
+                fact.identity_qualifier,
                 iso(fact.extracted_at),
                 created_at,
                 now_iso,
@@ -1042,8 +1066,9 @@ class Store:
                          value_type, value_json, previous_value_json, change_json,
                          period_kind, period_value, period_label, effective_date,
                          source_location_json, source_text, extraction_method,
-                         extraction_version, confidence, extracted_at, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         extraction_version, confidence, identity_qualifier, extracted_at,
+                         created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         fact_id,
@@ -1065,6 +1090,7 @@ class Store:
                         fact.extraction_method,
                         fact.extraction_version,
                         fact.confidence.value if fact.confidence else None,
+                        fact.identity_qualifier,
                         iso(fact.extracted_at),
                         now_iso,
                         now_iso,
@@ -1116,5 +1142,6 @@ class Store:
             extraction_method=row["extraction_method"] or "",
             extraction_version=row["extraction_version"],
             confidence=Confidence(row["confidence"]) if row["confidence"] else None,
+            identity_qualifier=row["identity_qualifier"] or "",
             extracted_at=from_iso(row["extracted_at"]),
         )

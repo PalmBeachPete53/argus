@@ -150,3 +150,31 @@ def test_date_bounds_exclude_undated(tmp_path):
         date_end=datetime(2026, 8, 1, tzinfo=timezone.utc),
     )
     assert [p.title for p in found] == ["dated"]
+
+
+def test_normalized_document_pages_round_trip(tmp_path):
+    from argus.documents.base import DocumentPage, NormalizedDocument
+
+    store = Store(tmp_path / "s.db")
+    pub = store.upsert_publication(make_pub())
+    doc = NormalizedDocument(
+        publication_id=pub.id,
+        document_id="doc-1",
+        source_url="https://x.test/report.pdf",
+        local_path="/raw/report.pdf",
+        document_kind="pdf",
+        mime_type="application/pdf",
+        title="Report",
+        text="page one\npage two",
+        pages=[DocumentPage(number=1, text="page one"), DocumentPage(number=2, text="page two")],
+        extraction_method="pdf_text",
+    )
+    store.upsert_normalized_document(doc)
+    restored = store.get_normalized_document("doc-1")
+    assert restored is not None
+    assert [(p.number, p.text) for p in restored.pages] == [(1, "page one"), (2, "page two")]
+    assert restored.publication_id == pub.id
+    assert restored.extraction_method == "pdf_text"
+    # idempotent re-save keeps a single row
+    store.upsert_normalized_document(doc)
+    assert store.get_normalized_document("doc-1") is not None

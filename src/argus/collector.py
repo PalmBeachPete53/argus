@@ -46,9 +46,10 @@ class CentralBankCollector:
         *,
         banks: tuple[str, ...] | list[str] | None = None,
         source_ids: tuple[str, ...] | list[str] | None = None,
+        run_id: str | None = None,
     ) -> list[models.Publication]:
         self._sync_sources()
-        run_id = self.store.run_stamp()
+        run_id = run_id or self.store.run_stamp()
         publications: list[models.Publication] = []
         for source in self.registry.enabled_sources(banks=banks, source_ids=source_ids):
             strategy = None
@@ -84,12 +85,16 @@ class CentralBankCollector:
         self,
         *,
         banks: tuple[str, ...] | list[str] | None = None,
-        statuses: tuple = (models.PublicationStatus.DISCOVERED,),
+        statuses: tuple = (
+            models.PublicationStatus.DISCOVERED,
+            models.PublicationStatus.UPDATED,
+        ),
         force: bool = False,
         date_start=None,
         date_end=None,
+        run_id: str | None = None,
     ) -> list[FetchResult]:
-        run_id = self.store.run_stamp()
+        run_id = run_id or self.store.run_stamp()
         publications = self.store.list_publications(
             bank=banks, statuses=statuses, date_start=date_start, date_end=date_end
         )
@@ -118,8 +123,9 @@ class CentralBankCollector:
         publications: list[models.Publication],
         *,
         force: bool = False,
+        run_id: str | None = None,
     ) -> list[FetchResult]:
-        run_id = self.store.run_stamp()
+        run_id = run_id or self.store.run_stamp()
         results: list[FetchResult] = []
         for publication in publications:
             try:
@@ -153,10 +159,11 @@ class CentralBankCollector:
         publications: list[models.Publication] = []
         fetch_results: list[FetchResult] = []
         if discover:
-            publications = self.discover_all(banks=banks)
+            publications = self.discover_all(banks=banks, run_id=run_id)
         if fetch:
             fetch_results = self.fetch_all(
-                banks=banks, force=force, date_start=date_start, date_end=date_end
+                banks=banks, force=force, date_start=date_start, date_end=date_end,
+                run_id=run_id,
             )
         return RunResult(
             run_id=run_id,
