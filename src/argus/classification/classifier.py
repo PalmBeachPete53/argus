@@ -26,12 +26,31 @@ class PublicationClassifier:
     tier that yields a single unambiguous candidate. It never delegates to a
     model and never fabricates a type: unresolvable publications are classified
     as ``unknown``.
+
+    The content heuristic (last tier) only inspects a bounded window of the
+    normalized text — by default the first ``content_window`` characters
+    (``content_scope="first_n_chars"``). Raise ``content_window`` for long
+    documents whose distinguishing passage sits deeper in the text.
     """
 
-    def __init__(self, store=None, rules=None, registry=None) -> None:
+    def __init__(
+        self,
+        store=None,
+        rules=None,
+        registry=None,
+        *,
+        content_window: int = 20_000,
+        content_scope: str = "first_n_chars",
+    ) -> None:
         self.store = store
         self.rules = list(rules) if rules is not None else None
         self.registry = registry
+        if content_window < 1:
+            raise ValueError("content_window must be >= 1")
+        if content_scope != "first_n_chars":
+            raise ValueError("content_scope must be 'first_n_chars' for now")
+        self.content_window = content_window
+        self.content_scope = content_scope
 
     # ------------------------------------------------------------------
     # single publication
@@ -222,14 +241,14 @@ class PublicationClassifier:
         return deduped
 
     def _content_types(self, rules, normalized=None):
-        text = ""
-        if normalized is not None:
-            text = normalized.text or ""
-        if not text and normalized is not None:
-            text = " ".join(s.heading + " " + s.text for s in normalized.sections)
+        if normalized is None:
+            return []
+        text = (normalized.text or "")[: self.content_window]
+        if not text:
+            text = " ".join(s.heading + " " + s.text for s in normalized.sections)[: self.content_window]
         hits: list[tuple[str, str]] = []
         for rule in rules:
-            for pattern in rule.match_content(text[:20000]):
+            for pattern in rule.match_content(text):
                 hits.append((rule.publication_type, f"content_heuristic={rule.publication_type} ({pattern})"))
         return hits
 

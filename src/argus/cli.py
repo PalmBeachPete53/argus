@@ -126,7 +126,7 @@ def _run_report(args, *, banks) -> int:
         print(f"  publications        {len(pubs):>6}   (by bank: "
               f"{' '.join(f'{k}={v}' for k, v in sorted(n_bank.items())) or 'none'})")
         print(f"    by status         {(' '.join(f'{k}={v}' for k, v in sorted(n_status.items())) or 'none')}")
-        print(f"    by type           {(' '.join(f'{k}={v}' for k, v in sorted(n_types.items())) or 'none')}")
+        print(f"    by type (cache)   {(' '.join(f'{k}={v}' for k, v in sorted(n_types.items())) or 'none')}")
         print(f"  raw documents       {n_raw:>6}")
         print(f"  normalized docs     {len(normalized):>6}   (by format: "
               f"{' '.join(f'{k}={v}' for k, v in sorted(n_kind.items())) or 'none'})")

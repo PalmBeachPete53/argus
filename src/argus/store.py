@@ -128,6 +128,9 @@ CREATE TABLE IF NOT EXISTS document_tables (
 CREATE INDEX IF NOT EXISTS idx_tables_document
     ON document_tables(document_id);
 CREATE TABLE IF NOT EXISTS classifications (
+    -- Single source of truth for a publication's classification: type,
+    -- confidence, method and evidence. `publications.publication_type` is a
+    -- denormalized cache refreshed atomically by set_classification().
     publication_id TEXT PRIMARY KEY,
     central_bank TEXT,
     publication_type TEXT,
@@ -723,35 +726,46 @@ class Store:
         evidence: list[str],
         classified_at=None,
     ) -> None:
-        self._conn.execute(
-            """
-            INSERT INTO classifications
-                (publication_id, central_bank, publication_type, confidence, method,
-                 evidence_json, classified_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(publication_id) DO UPDATE SET
-                central_bank=excluded.central_bank,
-                publication_type=excluded.publication_type,
-                confidence=excluded.confidence,
-                method=excluded.method,
-                evidence_json=excluded.evidence_json,
-                classified_at=excluded.classified_at
-            """,
-            (
-                publication_id,
-                central_bank,
-                publication_type,
-                confidence,
-                method,
-                json.dumps(evidence),
-                iso(classified_at or now_utc()),
-            ),
-        )
-        self._conn.execute(
-            "UPDATE publications SET publication_type=? WHERE id=?",
-            (publication_type, publication_id),
-        )
-        self._conn.commit()
+        """Persist a classification (upsert on ``publication_id``).
+
+        The ``classifications`` table is the **single source of truth**.
+        ``publications.publication_type`` is kept as a denormalized quick-filter
+        cache and is updated in the same transaction, so both always agree.
+        Read the authoritative record via ``get_classification``.
+        """
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO classifications
+                    (publication_id, central_bank, publication_type, confidence, method,
+                     evidence_json, classified_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(publication_id) DO UPDATE SET
+                    central_bank=excluded.central_bank,
+                    publication_type=excluded.publication_type,
+                    confidence=excluded.confidence,
+                    method=excluded.method,
+                    evidence_json=excluded.evidence_json,
+                    classified_at=excluded.classified_at
+                """,
+                (
+                    publication_id,
+                    central_bank,
+                    publication_type,
+                    confidence,
+                    method,
+                    json.dumps(evidence),
+                    iso(classified_at or now_utc()),
+                ),
+            )
+            self._conn.execute(
+                "UPDATE publications SET publication_type=? WHERE id=?",
+                (publication_type, publication_id),
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def get_classification(self, publication_id: str) -> dict | None:
         row = self._conn.execute(

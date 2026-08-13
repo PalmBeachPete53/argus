@@ -167,7 +167,23 @@ unreliable and it is skipped (e.g. a generic URL slug vs an explicit
 "Minutes of the Federal Open Market Committee" title). Confidence is HIGH when the
 winner also appears in the source hint set, MEDIUM otherwise. Unresolved
 publications are returned as `type="unknown"` with a non-empty `evidence` trail, and
-a classification never fabricates a type. Batch entry points persist results in the
+a classification never fabricates a type.
+
+The content heuristic (fifth tier) only looks at a bounded, configurable window of
+the normalized text — `content_window` (default 20 000 chars) with
+`content_scope="first_n_chars"` — chosen so long 150-page reports are not scanned
+end-to-end by default; raise `content_window` when the distinguishing passage sits
+deeper in a document.
+
+### Single source of truth for classification
+
+The `classifications` table is the **authoritative** record of a publication's type:
+it stores `publication_type`, `confidence`, `method` and `evidence`, upserted by
+`Store.set_classification()`. `publications.publication_type` is a **denormalized
+cache** duplicated onto the quick-filter column **in the same transaction**, so both
+always agree by construction. Downstream code that needs the authoritative type +
+reasoning must read via `Store.get_classification()` / `list_classifications()`;
+the `Publication` field is only a lightweight cache for listing/filtering. Batch entry points persist results in the
 `classifications` table and update `publications.publication_type`.
 
 All bank-specific knowledge lives declaratively in `bank_rules.py`; the engine in

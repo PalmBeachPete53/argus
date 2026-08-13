@@ -247,6 +247,21 @@ def test_parse_is_content_preserving_and_repeatable(tmp_path):
     assert first.extraction_method == second.extraction_method
 
 
+def test_parsers_do_not_claim_document_identity(tmp_path):
+    # The Normalizer is the sole owner of a document's stable identity: parsers
+    # return an empty document_id and Normalizer.parse rewrites it from SHA-256.
+    from argus.documents.html import HtmlParser
+
+    data = (FIXTURES / "sample.html").read_bytes()
+    doc = make_document(tmp_path, data, kind="html", name="sample.html")
+
+    raw = HtmlParser().parse(doc)
+    assert raw.document_id == ""
+
+    normalized = Normalizer().parse(doc)
+    assert normalized.document_id == document_id_of(doc) != ""
+
+
 def test_normalizer_persist_and_roundtrip(tmp_path):
     from conftest import make_store
 

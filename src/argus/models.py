@@ -65,6 +65,9 @@ class Publication:
     source_url: str
     publication_date: datetime | None = None
     meeting_date: datetime | None = None
+    # Denormalized cache of the last classification; the authoritative record
+    # (type + confidence + method + evidence) lives in the `classifications`
+    # table, written atomically by `Store.set_classification`.
     publication_type: str | None = None
     language: str | None = None
     document_urls: tuple[str, ...] = ()

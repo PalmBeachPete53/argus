@@ -74,7 +74,7 @@ def make_unavailable(
             warnings.append(WARNING_MISSING_FILE)
     return NormalizedDocument(
         publication_id=document.publication_id,
-        document_id=document.sha256 or "",
+        document_id="",
         source_url=document.url,
         local_path=document.local_path,
         document_kind=document.kind,

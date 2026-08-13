@@ -194,6 +194,37 @@ def test_content_heuristic_low_confidence():
     assert evidence_prefix(result.evidence, "content_heuristic=monetary_policy_decision")
 
 
+def test_content_window_is_configurable():
+    # The distinguishing passage sits beyond the default window: with the
+    # default content_window the content tier sees nothing, but a larger,
+    # explicitly configured window lets the content heuristic resolve it.
+    filler = "forecast tables and charts\n" * 1500  # ~48k chars of non-signals
+    pub_kwargs = dict(
+        central_bank="fed",
+        title="FOMC dots and summary",
+        url="https://www.federalreserve.gov/aboutthefed/2026/dots-notes.htm",
+        extra={},
+    )
+    doc = normalized(text=filler + "The Committee decided to raise the target range.")
+
+    default = PublicationClassifier().classify(publication(**pub_kwargs), normalized=doc)
+    assert default.publication_type == "unknown"
+
+    wide = PublicationClassifier(content_window=60_000).classify(publication(**pub_kwargs), normalized=doc)
+    assert wide.publication_type == "monetary_policy_decision"
+    assert wide.method == METHOD_CONTENT_HEURISTIC
+    assert wide.confidence == Confidence.LOW
+
+
+def test_invalid_content_configuration_rejected():
+    import pytest
+
+    with pytest.raises(ValueError):
+        PublicationClassifier(content_window=0)
+    with pytest.raises(ValueError):
+        PublicationClassifier(content_scope="last_n_chars")
+
+
 def test_metadata_contradiction_beats_url_tier():
     # An explicit document title is a stronger, more specific signal than the
     # shared URL slug: the url tier is skipped and the metadata tier decides.
@@ -343,6 +374,31 @@ def test_classify_many_and_persist(tmp_path):
     assert record["publication_type"] == "monetary_policy_decision"
     assert record["confidence"] == "medium"
     assert record["method"] == METHOD_TITLE_PATTERN
+
+
+def test_classifications_is_single_source_of_truth(tmp_path):
+    # `classifications` carries the authoritative type + method + evidence;
+    # `publications.publication_type` is only a denormalized cache written in
+    # the same transaction, so both always agree by construction.
+    from conftest import make_store
+
+    store = make_store(tmp_path)
+    stored = store.upsert_publication(publication())
+    store.set_classification(
+        stored.id,
+        central_bank="ecb",
+        publication_type="monetary_policy_decision",
+        confidence="high",
+        method="source_type_hint",
+        evidence=["type_hint=monetary_policy_decision"],
+    )
+    record = store.get_classification(stored.id)
+    cached = store.get_publication(stored.id)
+    assert record is not None
+    assert record["publication_type"] == cached.publication_type == "monetary_policy_decision"
+    # The cache never carries the reasoning — only the classification table does.
+    assert "evidence" in record and record["confidence"] == "high"
+    assert record["method"] == "source_type_hint"
 
 
 def test_classify_does_not_persist_without_store(tmp_path):

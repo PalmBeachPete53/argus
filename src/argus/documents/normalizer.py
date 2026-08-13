@@ -30,6 +30,12 @@ class Normalizer:
     Independent of collection: it only reads documents already stored on disk
     (``Document.local_path``) and never performs HTTP requests, so parsers and
     normalization can be re-run at any time without re-fetching.
+
+    `Normalizer` is the sole owner of a document's stable identity: parsers
+    return a `NormalizedDocument` with an empty ``document_id`` and `parse`
+    rewrites it from `document_id_of()` (SHA-256 of the raw bytes). Code that
+    uses parsers directly without `Normalizer.parse` therefore gets no identity
+    claim, which is intended — only this class decides it.
     """
 
     def __init__(
