@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Federal Reserve Press Releases</title>
+    <link>https://www.federalreserve.gov/newsevents/pressreleases.htm</link>
+    <description>Press releases from the Board of Governors</description>
+    <item>
+      <title>Federal Reserve issues FOMC statement</title>
+      <link>https://www.federalreserve.gov/newsevents/pressreleases/monetary20260729a.htm</link>
+      <guid isPermaLink="true">https://www.federalreserve.gov/newsevents/pressreleases/monetary20260729a.htm</guid>
+      <pubDate>Wed, 29 Jul 2026 14:00:00 -0400</pubDate>
+      <description>The Federal Reserve decided to keep the target range for the federal funds rate at ...</description>
+    </item>
+    <item>
+      <title>Federal Reserve issues FOMC statement</title>
+      <link>https://www.federalreserve.gov/newsevents/pressreleases/monetary20260617a.htm</link>
+      <guid isPermaLink="true">https://www.federalreserve.gov/newsevents/pressreleases/monetary20260617a.htm</guid>
+      <pubDate>Wed, 17 Jun 2026 14:00:00 -0400</pubDate>
+      <description>The Federal Reserve decided to maintain the target range ...</description>
+    </item>
+  </channel>
+</rss>

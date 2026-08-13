@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Norges Bank - Press releases</title>
+    <link>https://www.norges-bank.no/en/news-events/news/</link>
+    <description>Press releases from Norges Bank</description>
+    <item>
+      <title>Policy rate held at 4.50 percent</title>
+      <link>https://www.norges-bank.no/en/topics/monetary-policy/Monetary-policy-meetings/2026/august-2026/</link>
+      <guid>https://www.norges-bank.no/en/topics/monetary-policy/Monetary-policy-meetings/2026/august-2026/</guid>
+      <pubDate>Wed, 13 Aug 2026 10:00:00 GMT</pubDate>
+      <description>Norges Bank's Monetary Policy and Financial Stability Committee decided to keep the policy rate at 4.50 percent...</description>
+    </item>
+    <item>
+      <title>Policy rate cut to 4.25 percent</title>
+      <link>https://www.norges-bank.no/en/topics/monetary-policy/Monetary-policy-meetings/2026/june-2026/</link>
+      <guid>https://www.norges-bank.no/en/topics/monetary-policy/Monetary-policy-meetings/2026/june-2026/</guid>
+      <pubDate>Wed, 18 Jun 2026 10:00:00 GMT</pubDate>
+      <description>Norges Bank's Monetary Policy and Financial Stability Committee decided to cut the policy rate...</description>
+    </item>
+  </channel>
+</rss>

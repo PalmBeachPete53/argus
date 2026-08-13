@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Bank of Japan - What's New (English)</title>
+    <link>https://www.boj.or.jp/en/index.htm</link>
+    <description>What's New on the Bank of Japan website</description>
+    <item>
+      <title>Statement on Monetary Policy</title>
+      <link>https://www.boj.or.jp/en/mopo/mpmdeci/statement_20260731/index.htm</link>
+      <guid>https://www.boj.or.jp/en/mopo/mpmdeci/statement_20260731/index.htm</guid>
+      <pubDate>Fri, 31 Jul 2026 14:00:00 +0900</pubDate>
+    </item>
+    <item>
+      <title>Minutes of the Monetary Policy Meeting</title>
+      <link>https://www.boj.or.jp/en/mopo/mpmdeci/minutes_20260619/index.htm</link>
+      <guid>https://www.boj.or.jp/en/mopo/mpmdeci/minutes_20260619/index.htm</guid>
+      <pubDate>Fri, 17 Jul 2026 08:50:00 +0900</pubDate>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Riksbank - Press releases</title>
+    <link>https://www.riksbank.se/en-gb/press-and-published/press-releases/</link>
+    <description>Press releases from Sveriges Riksbank</description>
+    <item>
+      <title>Policy rate unchanged at 1.75 per cent</title>
+      <link>https://www.riksbank.se/en-gb/monetary-policy/monetary-policy-report/2026/monetary-policy-decision-june-2026/</link>
+      <guid>https://www.riksbank.se/en-gb/monetary-policy/monetary-policy-report/2026/monetary-policy-decision-june-2026/</guid>
+      <pubDate>Wed, 17 Jun 2026 09:31:00 +0200</pubDate>
+      <description>The Executive Board of the Riksbank decided to leave the policy rate unchanged at 1.75 per cent...</description>
+    </item>
+    <item>
+      <title>Policy rate cut to 1.75 per cent</title>
+      <link>https://www.riksbank.se/en-gb/monetary-policy/monetary-policy-report/2026/monetary-policy-decision-may-2026/</link>
+      <guid>https://www.riksbank.se/en-gb/monetary-policy/monetary-policy-report/2026/monetary-policy-decision-may-2026/</guid>
+      <pubDate>Wed, 06 May 2026 09:31:00 +0200</pubDate>
+      <description>The Executive Board decided to lower the policy rate to 1.75 per cent...</description>
+    </item>
+  </channel>
+</rss>

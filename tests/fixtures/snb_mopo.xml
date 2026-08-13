@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Monetary policy at the SNB</title>
+    <link>https://www.snb.ch/en/the-snb/mandates-goals/monetary-policy</link>
+    <description>Monetary policy news from the Swiss National Bank</description>
+    <item>
+      <title>Monetary policy assessment of 19 June 2026</title>
+      <link>https://www.snb.ch/en/publications/communication/press-releases-restricted/pre_20260619</link>
+      <guid>https://www.snb.ch/en/publications/communication/press-releases-restricted/pre_20260619</guid>
+      <pubDate>Thu, 19 Jun 2026 09:30:00 +0200</pubDate>
+      <enclosure url="https://www.snb.ch/en/mmr/reference/pre_20260619/source" length="12345" type="application/pdf"/>
+      <description>The SNB is lowering the SNB policy rate by 25 basis points to 0.25%...</description>
+    </item>
+    <item>
+      <title>Monetary policy assessment of 20 March 2026</title>
+      <link>https://www.snb.ch/en/publications/communication/press-releases-restricted/pre_20260320</link>
+      <guid>https://www.snb.ch/en/publications/communication/press-releases-restricted/pre_20260320</guid>
+      <pubDate>Thu, 20 Mar 2026 09:30:00 +0100</pubDate>
+      <description>The SNB is keeping the policy rate at 0.50%...</description>
+    </item>
+  </channel>
+</rss>

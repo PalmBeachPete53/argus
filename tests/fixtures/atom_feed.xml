@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom feed</title>
+  <id>urn:uuid:example</id>
+  <updated>2026-07-01T10:00:00Z</updated>
+  <entry>
+    <title>Monetary policy decision - atom</title>
+    <published>2026-07-01T09:00:00Z</published>
+    <id>urn:uuid:abc-123</id>
+    <link href="https://example.org/monetary-policy/atom-decision" rel="alternate"/>
+    <summary>First atom entry</summary>
+  </entry>
+  <entry>
+    <title>Minutes - atom</title>
+    <updated>2026-07-15T09:00:00Z</updated>
+    <id>urn:uuid:def-456</id>
+    <link href="https://example.org/monetary-policy/atom-minutes"/>
+    <summary>Second atom entry</summary>
+  </entry>
+</feed>

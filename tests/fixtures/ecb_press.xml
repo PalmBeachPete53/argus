@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>ECB Press releases</title>
+    <link>https://www.ecb.europa.eu/press/html/index.en.html</link>
+    <description>Press releases from the ECB</description>
+    <item>
+      <title>Monetary policy decisions</title>
+      <link>https://www.ecb.europa.eu/press/pr/date/2026/html/ecb.mp260703~d1a2b3c4d5.en.html</link>
+      <guid>https://www.ecb.europa.eu/press/pr/date/2026/html/ecb.mp260703~d1a2b3c4d5.en.html</guid>
+      <pubDate>Fri, 03 Jul 2026 13:45:00 GMT</pubDate>
+      <description>The Governing Council decided to keep the three key ECB interest rates unchanged...</description>
+    </item>
+    <item>
+      <title>Monetary policy decisions</title>
+      <link>https://www.ecb.europa.eu/press/pr/date/2026/html/ecb.mp260521~e6f7a8b9c0.en.html</link>
+      <guid>https://www.ecb.europa.eu/press/pr/date/2026/html/ecb.mp260521~e6f7a8b9c0.en.html</guid>
+      <pubDate>Thu, 21 May 2026 13:45:00 GMT</pubDate>
+      <description>The Governing Council decided to lower the three key ECB interest rates by 25 basis points...</description>
+    </item>
+  </channel>
+</rss>

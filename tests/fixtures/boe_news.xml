@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Bank of England news</title>
+    <link>https://www.bankofengland.co.uk/news</link>
+    <description>News from the Bank of England</description>
+    <item>
+      <title>Bank Rate maintained at 3.75% - July 2026 Monetary Policy Summary and Minutes</title>
+      <link>https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes/2026/july-2026</link>
+      <guid>https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes/2026/july-2026</guid>
+      <pubDate>Thu, 30 Jul 2026 12:00:00 GMT</pubDate>
+      <description>The Monetary Policy Committee voted by a majority of 7-2 to maintain Bank Rate at 3.75%...</description>
+    </item>
+    <item>
+      <title>Monetary Policy Report - August 2026</title>
+      <link>https://www.bankofengland.co.uk/monetary-policy-report/2026/august-2026</link>
+      <guid>https://www.bankofengland.co.uk/monetary-policy-report/2026/august-2026</guid>
+      <pubDate>Thu, 06 Aug 2026 12:00:00 GMT</pubDate>
+      <description>The Monetary Policy Report sets out the economic analysis and inflation projections...</description>
+    </item>
+    <item>
+      <title>Statistical Notice 2026/05 - Implementation of Bank of England Statistics Taxonomy</title>
+      <link>https://www.bankofengland.co.uk/statistics/notice/2026/statistical-notice-2026-05</link>
+      <guid>https://www.bankofengland.co.uk/statistics/notice/2026/statistical-notice-2026-05</guid>
+      <pubDate>Wed, 03 Jun 2026 09:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

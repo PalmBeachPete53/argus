@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns="http://purl.org/rss/1.0/"
+         xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel rdf:about="https://www.bankofcanada.ca/content_type/press-releases/feed/">
+    <title>Bank of Canada - Press Releases</title>
+    <link>https://www.bankofcanada.ca/press/press-releases/</link>
+    <description>Press releases from the Bank of Canada</description>
+    <items>
+      <rdf:Seq>
+        <rdf:li rdf:resource="https://www.bankofcanada.ca/2026/07/fad-press-release-2026-07-15/"/>
+        <rdf:li rdf:resource="https://www.bankofcanada.ca/2026/06/fad-press-release-2026-06-03/"/>
+      </rdf:Seq>
+    </items>
+  </channel>
+  <item rdf:about="https://www.bankofcanada.ca/2026/07/fad-press-release-2026-07-15/">
+    <title>Bank of Canada reduces policy interest rate by 25 basis points</title>
+    <link>https://www.bankofcanada.ca/2026/07/fad-press-release-2026-07-15/</link>
+    <dc:date>2026-07-15T10:00:00-04:00</dc:date>
+    <description>The Bank of Canada today reduced its target for the overnight rate to 2.25%...</description>
+  </item>
+  <item rdf:about="https://www.bankofcanada.ca/2026/06/fad-press-release-2026-06-03/">
+    <title>Bank of Canada increases policy interest rate by 25 basis points</title>
+    <link>https://www.bankofcanada.ca/2026/06/fad-press-release-2026-06-03/</link>
+    <dc:date>2026-06-03T10:00:00-04:00</dc:date>
+    <description>The Bank of Canada today increased its target for the overnight rate to 2.50%...</description>
+  </item>
+</rdf:RDF>
