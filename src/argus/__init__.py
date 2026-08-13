@@ -1,5 +1,20 @@
 from . import models
+from .classification import (
+    Confidence,
+    PublicationClassification,
+    PublicationClassifier,
+    canonical_types,
+)
 from .collector import CentralBankCollector, DEFAULT_RAW_ROOT, DEFAULT_STORE_PATH
+from .documents import (
+    DocumentParser,
+    DocumentSection,
+    DocumentTable,
+    NormalizedDocument,
+    Normalizer,
+    ParserRegistry,
+    document_id_of,
+)
 from .errors import (
     ArgusError,
     ConfigurationError,
@@ -25,7 +40,7 @@ from .models import (
 from .registry import SourceRegistry
 from .store import Store
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "__version__",
@@ -45,6 +60,19 @@ __all__ = [
     "Fetcher",
     "HttpClient",
     "HttpConfig",
+    # Phase 2A — normalization
+    "Normalizer",
+    "NormalizedDocument",
+    "DocumentSection",
+    "DocumentTable",
+    "DocumentParser",
+    "ParserRegistry",
+    "document_id_of",
+    # Phase 2B — classification
+    "PublicationClassifier",
+    "PublicationClassification",
+    "Confidence",
+    "canonical_types",
     "ArgusError",
     "HttpError",
     "TransportError",

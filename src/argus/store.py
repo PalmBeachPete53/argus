@@ -85,6 +85,59 @@ CREATE TABLE IF NOT EXISTS collect_errors (
     created_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_errors_bank ON collect_errors(bank_id);
+CREATE TABLE IF NOT EXISTS normalized_documents (
+    document_id TEXT PRIMARY KEY,
+    publication_id TEXT NOT NULL,
+    source_url TEXT,
+    local_path TEXT,
+    document_kind TEXT,
+    mime_type TEXT,
+    title TEXT,
+    text TEXT,
+    extraction_method TEXT,
+    extraction_warnings_json TEXT,
+    metadata_json TEXT,
+    normalized_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_normdocs_publication
+    ON normalized_documents(publication_id);
+CREATE INDEX IF NOT EXISTS idx_normdocs_kind
+    ON normalized_documents(document_kind);
+CREATE TABLE IF NOT EXISTS document_sections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id TEXT NOT NULL,
+    position INTEGER,
+    heading TEXT,
+    level INTEGER,
+    text TEXT,
+    page INTEGER,
+    UNIQUE(document_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_sections_document
+    ON document_sections(document_id);
+CREATE TABLE IF NOT EXISTS document_tables (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id TEXT NOT NULL,
+    position INTEGER,
+    name TEXT,
+    headers_json TEXT,
+    rows_json TEXT,
+    page INTEGER,
+    metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tables_document
+    ON document_tables(document_id);
+CREATE TABLE IF NOT EXISTS classifications (
+    publication_id TEXT PRIMARY KEY,
+    central_bank TEXT,
+    publication_type TEXT,
+    confidence TEXT,
+    method TEXT,
+    evidence_json TEXT,
+    classified_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_classifications_type
+    ON classifications(publication_type);
 """
 
 
@@ -485,3 +538,269 @@ class Store:
 
     def run_stamp(self) -> str:
         return time_mod.strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
+
+    # ------------------------------------------------------------------
+    # Phase 2A — normalization persistence
+    # ------------------------------------------------------------------
+
+    def upsert_normalized_document(self, document) -> None:
+        from .documents.base import DocumentSection, DocumentTable  # noqa: F401
+
+        doc_id = document.document_id
+        self._conn.execute(
+            """
+            INSERT INTO normalized_documents
+                (document_id, publication_id, source_url, local_path, document_kind,
+                 mime_type, title, text, extraction_method, extraction_warnings_json,
+                 metadata_json, normalized_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(document_id) DO UPDATE SET
+                publication_id=excluded.publication_id,
+                source_url=excluded.source_url,
+                local_path=excluded.local_path,
+                document_kind=excluded.document_kind,
+                mime_type=excluded.mime_type,
+                title=excluded.title,
+                text=excluded.text,
+                extraction_method=excluded.extraction_method,
+                extraction_warnings_json=excluded.extraction_warnings_json,
+                metadata_json=excluded.metadata_json,
+                normalized_at=excluded.normalized_at
+            """,
+            (
+                doc_id,
+                document.publication_id,
+                document.source_url,
+                document.local_path,
+                document.document_kind,
+                document.mime_type,
+                document.title,
+                document.text,
+                document.extraction_method,
+                json.dumps(document.extraction_warnings),
+                json.dumps(document.metadata, ensure_ascii=False, default=str),
+                iso(document.normalized_at or now_utc()),
+            ),
+        )
+        self._conn.execute("DELETE FROM document_sections WHERE document_id=?", (doc_id,))
+        self._conn.execute("DELETE FROM document_tables WHERE document_id=?", (doc_id,))
+        for position, section in enumerate(document.sections):
+            self._conn.execute(
+                """
+                INSERT INTO document_sections
+                    (document_id, position, heading, level, text, page)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (doc_id, position, section.heading, section.level, section.text, section.page),
+            )
+        for position, table in enumerate(document.tables):
+            self._conn.execute(
+                """
+                INSERT INTO document_tables
+                    (document_id, position, name, headers_json, rows_json, page, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    doc_id,
+                    position,
+                    table.name,
+                    json.dumps(table.headers, ensure_ascii=False, default=str),
+                    json.dumps(table.rows, ensure_ascii=False, default=str),
+                    table.page,
+                    json.dumps(table.metadata, ensure_ascii=False, default=str),
+                ),
+            )
+        self._conn.commit()
+
+    def _normalized_from_row(self, row: sqlite3.Row):
+        from .documents.base import (
+            DocumentSection,
+            DocumentTable,
+            NormalizedDocument,
+        )
+
+        doc_id = row["document_id"]
+        sections = [
+            DocumentSection(
+                order=r["position"],
+                level=r["level"],
+                heading=r["heading"] or "",
+                text=r["text"] or "",
+                page=r["page"],
+                id=r["id"],
+            )
+            for r in self._conn.execute(
+                "SELECT * FROM document_sections WHERE document_id=? ORDER BY position", (doc_id,)
+            )
+        ]
+        tables = []
+        for r in self._conn.execute(
+            "SELECT * FROM document_tables WHERE document_id=? ORDER BY position", (doc_id,)
+        ):
+            tables.append(
+                DocumentTable(
+                    order=r["position"],
+                    name=r["name"] or "",
+                    headers=json.loads(r["headers_json"] or "[]"),
+                    rows=json.loads(r["rows_json"] or "[]"),
+                    page=r["page"],
+                    metadata=json.loads(r["metadata_json"] or "{}"),
+                    id=r["id"],
+                )
+            )
+        return NormalizedDocument(
+            publication_id=row["publication_id"],
+            document_id=doc_id,
+            source_url=row["source_url"] or "",
+            local_path=row["local_path"],
+            document_kind=row["document_kind"] or "",
+            mime_type=row["mime_type"],
+            title=row["title"],
+            text=row["text"] or "",
+            sections=sections,
+            tables=tables,
+            metadata=json.loads(row["metadata_json"] or "{}"),
+            extraction_method=row["extraction_method"] or "",
+            extraction_warnings=json.loads(row["extraction_warnings_json"] or "[]"),
+            normalized_at=from_iso(row["normalized_at"]),
+        )
+
+    def get_normalized_document(self, document_id: str):
+        row = self._conn.execute(
+            "SELECT * FROM normalized_documents WHERE document_id = ?", (document_id,)
+        ).fetchone()
+        return self._normalized_from_row(row) if row else None
+
+    def normalized_documents_for_publication(self, publication_id: str):
+        rows = self._conn.execute(
+            "SELECT * FROM normalized_documents WHERE publication_id = ? ORDER BY document_id",
+            (publication_id,),
+        ).fetchall()
+        return [self._normalized_from_row(r) for r in rows]
+
+    def list_normalized_documents(
+        self,
+        *,
+        publication_id: str | None = None,
+        bank: str | tuple[str, ...] | None = None,
+        kinds: tuple[str, ...] = (),
+    ):
+        query = (
+            "SELECT n.* FROM normalized_documents n "
+            "LEFT JOIN publications p ON p.id = n.publication_id"
+        )
+        clauses: list[str] = []
+        params: list = []
+        if publication_id is not None:
+            clauses.append("n.publication_id = ?")
+            params.append(publication_id)
+        if bank is not None:
+            banks = (bank,) if isinstance(bank, str) else tuple(bank)
+            if banks:
+                clauses.append(f"p.central_bank IN ({','.join('?' * len(banks))})")
+                params.extend(banks)
+        if kinds:
+            clauses.append(f"n.document_kind IN ({','.join('?' * len(kinds))})")
+            params.extend(kinds)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY n.publication_id"
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._normalized_from_row(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Phase 2B — classification persistence
+    # ------------------------------------------------------------------
+
+    def set_classification(
+        self,
+        publication_id: str,
+        *,
+        central_bank: str | None = None,
+        publication_type: str,
+        confidence: str,
+        method: str,
+        evidence: list[str],
+        classified_at=None,
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO classifications
+                (publication_id, central_bank, publication_type, confidence, method,
+                 evidence_json, classified_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(publication_id) DO UPDATE SET
+                central_bank=excluded.central_bank,
+                publication_type=excluded.publication_type,
+                confidence=excluded.confidence,
+                method=excluded.method,
+                evidence_json=excluded.evidence_json,
+                classified_at=excluded.classified_at
+            """,
+            (
+                publication_id,
+                central_bank,
+                publication_type,
+                confidence,
+                method,
+                json.dumps(evidence),
+                iso(classified_at or now_utc()),
+            ),
+        )
+        self._conn.execute(
+            "UPDATE publications SET publication_type=? WHERE id=?",
+            (publication_type, publication_id),
+        )
+        self._conn.commit()
+
+    def get_classification(self, publication_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM classifications WHERE publication_id = ?", (publication_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "publication_id": row["publication_id"],
+            "central_bank": row["central_bank"],
+            "publication_type": row["publication_type"],
+            "confidence": row["confidence"],
+            "method": row["method"],
+            "evidence": json.loads(row["evidence_json"] or "[]"),
+            "classified_at": row["classified_at"],
+        }
+
+    def list_classifications(
+        self,
+        *,
+        bank: str | tuple[str, ...] | None = None,
+        publication_type: str | None = None,
+    ) -> list[dict]:
+        query = "SELECT * FROM classifications"
+        clauses: list[str] = []
+        params: list = []
+        if bank is not None:
+            banks = (bank,) if isinstance(bank, str) else tuple(bank)
+            if banks:
+                clauses.append(f"central_bank IN ({','.join('?' * len(banks))})")
+                params.extend(banks)
+        if publication_type is not None:
+            clauses.append("publication_type = ?")
+            params.append(publication_type)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY publication_id"
+        rows = self._conn.execute(query, params).fetchall()
+        result: list[dict] = []
+        for row in rows:
+            result.append(
+                {
+                    "publication_id": row["publication_id"],
+                    "central_bank": row["central_bank"],
+                    "publication_type": row["publication_type"],
+                    "confidence": row["confidence"],
+                    "method": row["method"],
+                    "evidence": json.loads(row["evidence_json"] or "[]"),
+                    "classified_at": row["classified_at"],
+                }
+            )
+        return result

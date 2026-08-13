@@ -5,11 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "argus"
 version = "0.1.0"
-description = "Generic, extensible collector of official G10 central bank monetary policy publications (up to raw documents)."
+description = "Generic, extensible collector and normalizer of official G10 central bank monetary policy publications."
 requires-python = ">=3.10"
 dependencies = [
   "requests>=2.31",
   "beautifulsoup4>=4.12",
+  "pypdf>=4.0",
+  "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]

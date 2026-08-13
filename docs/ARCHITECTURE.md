@@ -21,6 +21,21 @@ src/argus/
 │   ├── rss.py       RSS 2.0 / RSS 1.0 (RDF) / Atom
 │   ├── sitemap.py   sitemap.xml + sitemap index recursive walk
 │   └── html.py      HTML archive / calendar listing (+ pagination, date sniffing)
+├── documents/       Phase 2A — parsers + normalization (no network, no economics)
+│   ├── base.py      NormalizedDocument / DocumentSection / DocumentTable /
+│   │                DocumentPage + shared extraction-method & warning vocabulary
+│   ├── registry.py  ParserRegistry — dispatch by kind / content-type / byte sniffing
+│   ├── normalizer.py Normalizer — parse + persist, idempotent, store-backed
+│   ├── html.py      HTML parser (main-content isolation, sections, tables, links)
+│   ├── pdf.py       PDF parser via pypdf (text + pages + scanned/blank detection)
+│   ├── docx.py      DOCX parser (zipfile + OOXML XML — headings, tables, core props)
+│   ├── spreadsheet.py XLSX/CSV/TXT parsers (structured tables per sheet/file)
+│   └── _util.py     shared helpers (make_unavailable, sniffing)
+├── classification/  Phase 2B — deterministic, explainable publication typing
+│   ├── base.py      PublicationClassification, Confidence, method & vocabulary
+│   ├── rules.py     generic regex TypeRules + canonical_types()
+│   ├── bank_rules.py bank-specific rules, one declarative block per bank
+│   └── classifier.py PublicationClassifier — evidence-tier engine (no model calls)
 └── adapters/        One BankAdapter per central bank (10x), fully declarative
 ```
 
@@ -90,6 +105,70 @@ documents are re-tried on later runs up to a per-document retry budget.
   (provenance preserved: every record can be traced to an official source)
 - `Document` — publication_id, url, kind, status, local_path, sha256, content_type,
   size, retrieved_at, retries, error
+- `NormalizedDocument` — publication_id, document_id, source_url, local_path,
+  document_kind, mime_type, title, text, `sections[]`, `tables[]`, `pages[]`,
+  metadata, extraction_method, extraction_warnings, normalized_at
+- `DocumentSection` — order, heading, level, text, page
+- `DocumentTable` — order, name, headers, rows, page, metadata
+- `DocumentPage` — number, text
+- `PublicationClassification` — publication_id, central_bank, publication_type,
+  confidence, method, evidence (list of reasons), classified_at
+
+## Phase 2A — Normalization (`documents/`)
+
+`Normalizer` turns a raw `Document` (already fetched to disk, `local_path`) into a
+`NormalizedDocument`. It is strictly content-preserving: no summarization,
+translation or economic interpretation. Parsers never touch the network — they only
+read `Document.local_path`, so normalization can be re-run on stored bytes at any
+time.
+
+Dispatch (`ParserRegistry`) picks a parser from `Document.kind`, then the content
+type, and finally byte sniffing (`%PDF-`, OLE header, `PK\x03\x04`, …). Each parser
+produces the same dataclasses, so downstream code never depends on the source format.
+
+- **HTML** — isolates `<main>` (site header/nav/footer are excluded), builds sections
+  from headings, captures tables (`<table>` → headers+rows) and outbound links
+  (`linked_documents` metadata) without following them.
+- **PDF** — page-by-page text via pypdf with page boundaries; a PDF whose pages have
+  no text but contain images is reported as `scanned_pdf` (method `pdf_unavailable`)
+  instead of hallucinating OCR text; blank-but-textless PDFs emit `empty_text`.
+- **DOCX** — OOXML via `zipfile`/`ElementTree`: heading levels, paragraph order,
+  tables, and core properties (`dc:title`, …).
+- **XLSX / CSV / TXT** — structured tables per sheet/file (header detection,
+  delimiter auto-detection, trailing-empty-row trimming); TXT stays a single text
+  blob.
+
+Every `NormalizedDocument` carries `extraction_method` and `extraction_warnings`
+(shared codes such as `scanned_pdf`, `unsupported_kind`, `missing_file`,
+`parse_error`, `empty_text`) so failures are explicit and auditable. Documents
+normalized with a `Store` are persisted (`normalized_documents` +
+`document_sections` + `document_tables`) keyed by the SHA-256 `document_id`, with
+idempotence: re-running without `force` skips already-normalized documents.
+
+## Phase 2B — Classification (`classification/`)
+
+`PublicationClassifier` assigns one `publication_type` from a fixed canonical
+vocabulary (`PUBLICATION_TYPES`) to each publication, deterministically and
+without any model call. It evaluates evidence tiers in order and stops at the first
+tier that yields a single unambiguous candidate:
+
+1. `source_type_hint` — a single canonical `Publication.extra["type_hint"]` (or
+   declared `Source.publication_types`) ⇒ HIGH confidence.
+2. `url_pattern` — bank-specific and generic URL regexes.
+3. `title_pattern` — same, on the title.
+4. `document_metadata` / `content_heuristic` — from the normalized document when
+   available (heuristic content matches are LOW confidence).
+
+A later single signal that contradicts the current tier's only hit makes the tier
+unreliable and it is skipped (e.g. a generic URL slug vs an explicit
+"Minutes of the Federal Open Market Committee" title). Confidence is HIGH when the
+winner also appears in the source hint set, MEDIUM otherwise. Unresolved
+publications are returned as `type="unknown"` with a non-empty `evidence` trail, and
+a classification never fabricates a type. Batch entry points persist results in the
+`classifications` table and update `publications.publication_type`.
+
+All bank-specific knowledge lives declaratively in `bank_rules.py`; the engine in
+`classifier.py` never branches on bank id.
 
 ## Deduplication
 

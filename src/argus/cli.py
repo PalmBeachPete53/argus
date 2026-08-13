@@ -96,6 +96,63 @@ def purge(store_path: str, raw_root: str) -> tuple[int, int]:
     return removed_store + removed_data, removed_raw
 
 
+def _run_phase2(args, *, banks, pub_ids) -> int:
+    """Normalize stored raw documents and/or classify publications (offline)."""
+    from .classification import PublicationClassifier
+    from .documents import Normalizer
+    from .store import Store
+
+    store = Store(args.store)
+    try:
+        if args.normalize:
+            normalizer = Normalizer(store=store, raw_root=args.raw_root)
+            if pub_ids:
+                results: list = []
+                for pub_id in pub_ids:
+                    pub = store.get_publication(pub_id)
+                    if pub is None:
+                        print(f"  unknown publication: {pub_id}")
+                        continue
+                    results.extend(normalizer.normalize_publication(pub, force=args.force))
+            else:
+                results = normalizer.normalize_all(banks=banks, force=args.force)
+            bank_of = {}
+            for pub in store.list_publications(bank=banks):
+                if pub.id:
+                    bank_of[pub.id] = pub.central_bank
+            by_kind: dict[str, int] = {}
+            for doc in results:
+                by_kind[doc.document_kind] = by_kind.get(doc.document_kind, 0) + 1
+            problems = [d for d in results if d.extraction_warnings]
+            by_method: dict[str, int] = {}
+            for doc in results:
+                by_method[doc.extraction_method] = by_method.get(doc.extraction_method, 0) + 1
+            print(f"Normalized {len(results)} document(s) "
+                  f"(by format: {(' '.join(f'{k}={v}' for k, v in sorted(by_kind.items()))) or 'none'})")
+            print(f"  extraction methods: "
+                  f"{' '.join(f'{k}={v}' for k, v in sorted(by_method.items())) or 'none'}")
+            if problems:
+                print(f"  {len(problems)} document(s) with warnings:")
+                for doc in problems:
+                    print(f"    {bank_of.get(doc.publication_id, '?')}:{doc.document_kind} "
+                          f"[{','.join(doc.extraction_warnings)}] {doc.source_url}")
+
+        if args.classify:
+            classifier = PublicationClassifier(store=store)
+            if pub_ids:
+                classifications = classifier.classify_publications(pub_ids, persist=True)
+            else:
+                classifications = classifier.classify_all(banks=banks, persist=True)
+            print(f"Classified {len(classifications)} publication(s)")
+            for c in classifications:
+                title = (c.publication_title or "")[:60]
+                print(f"  {c.central_bank:>9}  {c.publication_type:<24} "
+                      f"{c.confidence.value:>6}  {c.method:<20}  {title}")
+        return 0
+    finally:
+        store.close()
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="argus",
@@ -112,6 +169,15 @@ def main(argv=None) -> int:
     parser.add_argument("--fetch-force", action="store_true", help="Re-fetch already fetched documents")
     parser.add_argument("--year", type=int, default=None, help="Restrict to a publication year (YYYY)")
     parser.add_argument("--month", default=None, help="Restrict to a publication month (YYYY-MM)")
+    parser.add_argument("--normalize", action="store_true",
+                        help="Normalize already-collected raw documents (no network). "
+                             "Reprocesses the raw documents stored locally.")
+    parser.add_argument("--classify", action="store_true",
+                        help="Classify stored publications (deterministic rules, no network).")
+    parser.add_argument("--publication", action="append", default=None,
+                        help="Restrict normalization/classification to a publication id (repeatable)")
+    parser.add_argument("--force", action="store_true",
+                        help="Re-run normalization/classification even if already done")
     parser.add_argument("--purge", action="store_true",
                         help="Delete all collected data (store db and raw documents), keeping the directory structure")
     args = parser.parse_args(argv)
@@ -131,6 +197,12 @@ def main(argv=None) -> int:
         print(f"Purged data: {removed} file(s)/dir(s) under {Path(args.raw_root).parent}, "
               f"{raw_entries} entrie(s) under {args.raw_root}")
         return 0
+
+    banks = tuple(args.bank) if args.bank else None
+    pub_ids = tuple(args.publication) if args.publication else None
+
+    if args.normalize or args.classify:
+        return _run_phase2(args, banks=banks, pub_ids=pub_ids)
 
     from .http import HttpConfig
 

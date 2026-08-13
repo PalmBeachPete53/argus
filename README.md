@@ -20,10 +20,18 @@ Document Fetching      ✅
       ↓
 Raw Documents          ✅
       ↓
-Publication Classification        (next stage)
-Type-Specific Extraction          (next stage)
-Facts / Temporal Analysis         (next stage)
+Document Normalization ✅  (PDF/DOCX/XLSX/CSV/TXT/HTML → structured text+tables)
+      ↓
+Publication Classification ✅  (deterministic evidence-tier engine)
+      ↓
+Type-Specific Extraction       (next stage)
+Facts / Temporal Analysis      (next stage)
 ```
+
+Stage note: **normalization** (`documents/`) turns raw bytes into structured,
+traceable text. **classification** (`classification/`) assigns a canonical
+`publication_type` from an explainable rule engine — no model calls, no fabricated
+labels.
 
 ## Quickstart
 
@@ -72,6 +80,33 @@ SHA-256 fingerprint and full provenance (bank, source id, source url, publicatio
 url, publication date, retrieved-at time) recorded in the SQLite store
 (`data/argus.db`).
 
+## Phase 2 — normalize & classify
+
+Normalization parses raw documents on disk into structured text + tables (no
+network), and classification assigns a canonical `publication_type` from a
+deterministic rule engine:
+
+```bash
+# Parse all fetched documents (PDF/DOCX/XLSX/CSV/TXT/HTML) into the store
+.venv/bin/python -m argus.cli --store data/argus.db --raw-root data/raw --normalize
+
+# Re-run a single publication's normalization, overwriting previous output
+.venv/bin/python -m argus.cli --store data/argus.db --raw-root data/raw --publication <id> --normalize --force
+
+# Classify publications (optionally scoped per bank) and persist the result
+.venv/bin/python -m argus.cli --store data/argus.db --normalize --classify --bank ecb
+
+# In-process equivalent
+from argus.documents import Normalizer
+from argus.classification import PublicationClassifier
+
+normalizer = Normalizer(store=collector.store, raw_root="data/raw")
+docs = normalizer.normalize_all(force=False)
+
+classifier = PublicationClassifier(store=collector.store)
+results = classifier.classify_all()
+```
+
 ## Tests
 
 ```bash
@@ -79,7 +114,8 @@ url, publication date, retrieved-at time) recorded in the SQLite store
 ```
 
 Unit tests use local fixtures and a fake HTTP transport; they never depend on a live
-website.
+website. Binary fixtures (PDF / DOCX / XLSX) are generated at test time by
+`tests/fixture_docs.py`, so no binary blobs are committed.
 
 ## Documentation
 
