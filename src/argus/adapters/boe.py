@@ -12,7 +12,6 @@ class BoEAdapter(BankAdapter):
                 "BoE news RSS",
                 "https://www.bankofengland.co.uk/rss/news",
                 priority=1,
-                types=("monetary_policy_decision", "monetary_policy_statement"),
             ),
             rss_source(
                 "boe_publications_rss",

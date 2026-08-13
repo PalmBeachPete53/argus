@@ -12,7 +12,6 @@ class BoCAdapter(BankAdapter):
                 "BoC press releases RSS (RDF)",
                 "https://www.bankofcanada.ca/content_type/press-releases/feed/",
                 priority=1,
-                types=("monetary_policy_decision", "policy_interest_rate"),
             ),
             rss_source(
                 "boc_announcements_rss",

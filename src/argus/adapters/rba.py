@@ -19,7 +19,6 @@ class RBAAdapter(BankAdapter):
                 "RBA media releases RSS (incl. policy decisions)",
                 "https://www.rba.gov.au/rss/rss-cb-media-releases.xml",
                 priority=1,
-                types=("monetary_policy_decision",),
             ),
             rss_source(
                 "rba_smp_rss",

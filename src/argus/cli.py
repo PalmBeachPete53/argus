@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -96,6 +97,50 @@ def purge(store_path: str, raw_root: str) -> tuple[int, int]:
     return removed_store + removed_data, removed_raw
 
 
+def _run_report(args, *, banks) -> int:
+    """Read-only summary of the store: publications, raw/normalized docs,
+    classifications and extraction warnings."""
+    from .store import Store
+
+    store = Store(args.store)
+    try:
+        pubs = store.list_publications(bank=banks)
+        normalized = store.list_normalized_documents(bank=banks, kinds=())
+        classifications = store.list_classifications(bank=banks)
+
+        n_raw = sum(store.document_count(p.id) for p in pubs if p.id)
+        n_types = Counter(p.publication_type or "unclassified" for p in pubs)
+        n_status = Counter(p.status.value for p in pubs)
+        n_bank = Counter(p.central_bank for p in pubs)
+        n_kind = Counter(d.document_kind for d in normalized)
+        n_method = Counter(d.extraction_method for d in normalized)
+        warnings: Counter = Counter()
+        for doc in normalized:
+            for code in doc.extraction_warnings:
+                warnings[code] += 1
+        c_type = Counter(c["publication_type"] for c in classifications)
+        c_conf = Counter(c["confidence"] for c in classifications)
+        c_method = Counter(c["method"] for c in classifications)
+
+        print(f"Store report: {args.store}")
+        print(f"  publications        {len(pubs):>6}   (by bank: "
+              f"{' '.join(f'{k}={v}' for k, v in sorted(n_bank.items())) or 'none'})")
+        print(f"    by status         {(' '.join(f'{k}={v}' for k, v in sorted(n_status.items())) or 'none')}")
+        print(f"    by type           {(' '.join(f'{k}={v}' for k, v in sorted(n_types.items())) or 'none')}")
+        print(f"  raw documents       {n_raw:>6}")
+        print(f"  normalized docs     {len(normalized):>6}   (by format: "
+              f"{' '.join(f'{k}={v}' for k, v in sorted(n_kind.items())) or 'none'})")
+        print(f"    by method         {(' '.join(f'{k}={v}' for k, v in sorted(n_method.items())) or 'none')}")
+        print(f"    warnings          {(' '.join(f'{k}={v}' for k, v in sorted(warnings.items())) or 'none')}")
+        print(f"  classifications     {len(classifications):>6}")
+        print(f"    by type           {(' '.join(f'{k}={v}' for k, v in sorted(c_type.items())) or 'none')}")
+        print(f"    by confidence     {(' '.join(f'{k}={v}' for k, v in sorted(c_conf.items())) or 'none')}")
+        print(f"    by method         {(' '.join(f'{k}={v}' for k, v in sorted(c_method.items())) or 'none')}")
+        return 0
+    finally:
+        store.close()
+
+
 def _run_phase2(args, *, banks, pub_ids) -> int:
     """Normalize stored raw documents and/or classify publications (offline)."""
     from .classification import PublicationClassifier
@@ -138,7 +183,9 @@ def _run_phase2(args, *, banks, pub_ids) -> int:
                           f"[{','.join(doc.extraction_warnings)}] {doc.source_url}")
 
         if args.classify:
-            classifier = PublicationClassifier(store=store)
+            from .registry import SourceRegistry
+
+            classifier = PublicationClassifier(store=store, registry=SourceRegistry())
             if pub_ids:
                 classifications = classifier.classify_publications(pub_ids, persist=True)
             else:
@@ -174,6 +221,9 @@ def main(argv=None) -> int:
                              "Reprocesses the raw documents stored locally.")
     parser.add_argument("--classify", action="store_true",
                         help="Classify stored publications (deterministic rules, no network).")
+    parser.add_argument("--report", action="store_true",
+                        help="Print a read-only store summary (publications, documents, "
+                             "normalization and classification stats).")
     parser.add_argument("--publication", action="append", default=None,
                         help="Restrict normalization/classification to a publication id (repeatable)")
     parser.add_argument("--force", action="store_true",
@@ -201,7 +251,9 @@ def main(argv=None) -> int:
     banks = tuple(args.bank) if args.bank else None
     pub_ids = tuple(args.publication) if args.publication else None
 
-    if args.normalize or args.classify:
+    if args.normalize or args.classify or args.report:
+        if args.report:
+            return _run_report(args, banks=banks)
         return _run_phase2(args, banks=banks, pub_ids=pub_ids)
 
     from .http import HttpConfig

@@ -12,7 +12,6 @@ class RiksbankAdapter(BankAdapter):
                 "Riksbank press releases RSS (incl. policy decisions)",
                 "https://www.riksbank.se/en-gb/rss/press-releases/",
                 priority=1,
-                types=("monetary_policy_decision",),
             ),
             rss_source(
                 "riksbank_minutes_rss",

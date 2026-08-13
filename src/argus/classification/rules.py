@@ -94,13 +94,15 @@ GENERIC_RULES: tuple[TypeRule, ...] = (
             r"monetary policy decisions?",
             r"policy( |-)?rate decision",
             r"interest( |-)?rate decision",
-            r"policy( |-)?rate (maintained|held|unchanged|raised|lowered)",
+            r"policy( |-)?rate (maintained|held|kept|unchanged|raised|lowered)",
             r"monetary policy summary",
         ),
         content=(
             r"the governing council decided",
             r"the committee decided to",
             r"monetary policy decisions",
+            r"\b(kept|set|maintained|held|raised|lowered) the policy rate\b",
+            r"policy rate (was )?(left|kept|held) (at|unchanged)",
         ),
     ),
     TypeRule(

@@ -152,8 +152,11 @@ vocabulary (`PUBLICATION_TYPES`) to each publication, deterministically and
 without any model call. It evaluates evidence tiers in order and stops at the first
 tier that yields a single unambiguous candidate:
 
-1. `source_type_hint` — a single canonical `Publication.extra["type_hint"]` (or
-   declared `Source.publication_types`) ⇒ HIGH confidence.
+1. `source_type_hint` — a single canonical declared type from the **live**
+   `Source.publication_types` (or, for unregistered sources, the stored
+   `extra["type_hint"]`) ⇒ HIGH confidence. Broad "press releases" feeds declare
+   *no* type — adapters only tag genuinely type-specific sources — and the live
+   declaration is authoritative over any stale stored hint.
 2. `url_pattern` — bank-specific and generic URL regexes.
 3. `title_pattern` — same, on the title.
 4. `document_metadata` / `content_heuristic` — from the normalized document when

@@ -180,17 +180,17 @@ class PublicationClassifier:
         return rules
 
     def _source_types(self, publication: Publication) -> list[str]:
-        types = list(canonical_types(publication.extra.get("type_hint") or ()))
+        # The *live* source declaration is the single source of truth for
+        # declared types: discovery stamps `extra["type_hint"]` from the same
+        # declaration, which can go stale when an adapter is corrected. The
+        # stored hint is only a fallback for sources that are no longer
+        # registered.
         source = None
         if self.registry is not None:
             source = self.registry.source(publication.source_id)
-        declared = ()
-        if source is not None:
-            declared = source.publication_types
-        for value in canonical_types(declared):
-            if value not in types:
-                types.append(value)
-        return types
+        if source is None:
+            return canonical_types(publication.extra.get("type_hint") or ())
+        return canonical_types(source.publication_types or ())
 
     def _tier_hits(self, rules, attr: str, publication: Publication, normalized=None):
         hits: list[tuple[str, str]] = []

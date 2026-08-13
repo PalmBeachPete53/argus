@@ -12,7 +12,6 @@ class NorgesBankAdapter(BankAdapter):
                 "Norges Bank press releases RSS (incl. policy-rate decisions)",
                 "https://www.norges-bank.no/en/rss-feeds/Press-releases---Norges-Bank/",
                 priority=1,
-                types=("monetary_policy_decision",),
             ),
             rss_source(
                 "norges_mpr_rss",

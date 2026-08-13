@@ -96,6 +96,9 @@ deterministic rule engine:
 # Classify publications (optionally scoped per bank) and persist the result
 .venv/bin/python -m argus.cli --store data/argus.db --normalize --classify --bank ecb
 
+# Read-only store summary (publications, raw/normalized docs, classifications)
+.venv/bin/python -m argus.cli --store data/argus.db --report
+
 # In-process equivalent
 from argus.documents import Normalizer
 from argus.classification import PublicationClassifier

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from argus.classification import (
     Confidence,
+    METHOD_CONTENT_HEURISTIC,
+    METHOD_DOCUMENT_METADATA,
     METHOD_SOURCE_TYPE_HINT,
     METHOD_TITLE_PATTERN,
     METHOD_UNRESOLVED,
     METHOD_URL_PATTERN,
     PublicationClassifier,
 )
+from argus.documents import NormalizedDocument
 from argus.models import Publication
 
 
@@ -31,6 +34,18 @@ def classify(pub, **kw):
 
 def evidence_prefix(evidence, prefix: str) -> bool:
     return any(item.startswith(prefix) for item in evidence)
+
+
+def normalized(**kw) -> NormalizedDocument:
+    fields = dict(
+        publication_id="pub-1",
+        document_id="doc-1",
+        source_url="",
+        local_path=None,
+        document_kind="html",
+    )
+    fields.update(kw)
+    return NormalizedDocument(**fields)
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +129,19 @@ def test_snb_bank_rule_from_url():
     assert result.confidence == Confidence.MEDIUM
 
 
+def test_title_pattern_kept_policy_rate_norges():
+    result = classify(
+        publication(
+            central_bank="norges",
+            title="Policy rate kept unchanged at 4.25 percent",
+            url="https://www.norges-bank.no/en/news-updates/2026/03/policy-rate/",
+            source_id="norges_press_releases_rss",
+        )
+    )
+    assert result.publication_type == "monetary_policy_decision"
+    assert result.method == METHOD_TITLE_PATTERN
+
+
 def test_title_contradiction_skips_url_tier():
     # The URL slug is generic enough to match the statement rule, but the
     # (stronger) title is explicit about minutes.
@@ -126,6 +154,60 @@ def test_title_contradiction_skips_url_tier():
     )
     assert result.publication_type == "minutes"
     assert result.method in (METHOD_TITLE_PATTERN, METHOD_URL_PATTERN)
+
+
+# ---------------------------------------------------------------------------
+# Tier 4/5 — document metadata & content heuristic
+# ---------------------------------------------------------------------------
+
+
+def test_document_metadata_title_used_when_publication_title_empty():
+    # The downloaded document's own title is a separate signal from the feed
+    # title and is only consulted once url/title tiers produced nothing.
+    doc = normalized(title="Account of the monetary policy meeting")
+    result = classify(
+        publication(
+            title="index.en",
+            url="https://www.ecb.europa.eu/press/miscellaneous/2026/index.en.html",
+        ),
+        normalized=doc,
+    )
+    assert result.publication_type == "meeting_account"
+    assert result.method == METHOD_DOCUMENT_METADATA
+    assert result.confidence == Confidence.MEDIUM
+    assert evidence_prefix(result.evidence, "document_metadata=meeting_account")
+
+
+def test_content_heuristic_low_confidence():
+    doc = normalized(text="The governing council decided to keep the policy stance unchanged.")
+    result = classify(
+        publication(
+            central_bank="ecb",
+            title="ECB Economic Bulletin, Issue 3/2026",
+            url="https://www.ecb.europa.eu/pub/economic-bulletin/html/eb202603.en.html",
+        ),
+        normalized=doc,
+    )
+    assert result.publication_type == "monetary_policy_decision"
+    assert result.method == METHOD_CONTENT_HEURISTIC
+    assert result.confidence == Confidence.LOW
+    assert evidence_prefix(result.evidence, "content_heuristic=monetary_policy_decision")
+
+
+def test_metadata_contradiction_beats_url_tier():
+    # An explicit document title is a stronger, more specific signal than the
+    # shared URL slug: the url tier is skipped and the metadata tier decides.
+    doc = normalized(title="Minutes of the Federal Open Market Committee")
+    result = classify(
+        publication(
+            central_bank="fed",
+            title="index.en",
+            url="https://www.federalreserve.gov/newsevents/pressreleases/monetary20260729a.htm",
+        ),
+        normalized=doc,
+    )
+    assert result.publication_type == "minutes"
+    assert result.method == METHOD_DOCUMENT_METADATA
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +248,69 @@ def test_classified_type_always_in_vocabulary():
     for candidate in candidates:
         result = classify(candidate)
         assert result.publication_type in PUBLICATION_TYPES, result.publication_type
+
+
+def test_broad_feed_declares_no_type():
+    # Regression: broad "press releases" feeds must NOT declare a single type,
+    # otherwise every unrelated item (speeches, surveys, explainers) is forced
+    # into a HIGH-confidence decision. Only type-specific sources declare types.
+    from argus.classification import canonical_types
+    from argus.registry import SourceRegistry
+
+    registry = SourceRegistry()
+
+    def types_of(source_id):
+        source = registry.source(source_id)
+        return tuple(canonical_types(source.publication_types))
+
+    assert types_of("boc_press_releases_rss") == ()
+    assert types_of("norges_press_releases_rss") == ()
+    assert types_of("riksbank_press_releases_rss") == ()
+    assert types_of("rba_media_releases_rss") == ()
+    assert types_of("boe_news_rss") == ()
+    assert types_of("boj_whatsnew_rss") == ()
+
+    # Type-specific sources still declare their type.
+    assert types_of("boc_fad_archive") == ("monetary_policy_decision",)
+    assert types_of("norges_mpr_rss") == ("monetary_policy_report",)
+    assert types_of("fed_monetary_press_rss") == ("monetary_policy_decision", "monetary_policy_statement")
+
+
+def test_unrelated_item_from_broad_feed_is_not_forced_decision():
+    from argus.registry import SourceRegistry
+
+    classifier = PublicationClassifier(registry=SourceRegistry())
+    result = classifier.classify(
+        publication(
+            central_bank="boc",
+            title="What is a central bank?",
+            url="https://www.bankofcanada.ca/2026/07/what-is-a-central-bank/",
+            source_id="boc_press_releases_rss",
+            extra={},
+        )
+    )
+    assert result.publication_type == "unknown"
+    assert result.confidence == Confidence.LOW
+
+
+def test_stale_stored_hint_does_not_override_live_declaration():
+    # A publication stored with a stale decision hint from an old (corrected)
+    # adapter must not be forced into a HIGH decision when the live source now
+    # declares no types.
+    from argus.registry import SourceRegistry
+
+    classifier = PublicationClassifier(registry=SourceRegistry())
+    result = classifier.classify(
+        publication(
+            central_bank="norges",
+            title="Norges Bank launches new website feature",
+            url="https://www.norges-bank.no/en/news-updates/2026/07/new-feature/",
+            source_id="norges_press_releases_rss",
+            extra={"type_hint": ["monetary_policy_decision"]},  # stale
+        )
+    )
+    assert result.publication_type == "unknown"
+    assert result.method == METHOD_UNRESOLVED
 
 
 def test_classification_is_repeatable_and_deterministic():

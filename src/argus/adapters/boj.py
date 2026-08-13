@@ -12,7 +12,6 @@ class BoJAdapter(BankAdapter):
                 "BoJ 'what's new' RSS (EN)",
                 "https://www.boj.or.jp/en/rss/whatsnew.xml",
                 priority=1,
-                types=("monetary_policy_decision", "monetary_policy_statement"),
             ),
             html_source(
                 "boj_mopo_archive",
