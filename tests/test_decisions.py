@@ -148,6 +148,157 @@ def test_hold_statement_produces_no_change_fact():
 
 
 # ---------------------------------------------------------------------------
+# golden facts across all ECB decision fixtures
+# ---------------------------------------------------------------------------
+
+GOLDEN = {
+    "ecb_decision.html": {
+        "date": ("2026-07-23", 0),
+        "levels": {SUBJECT_MAIN_REFINANCING: 2.0, SUBJECT_MARGINAL_LENDING: 2.25, SUBJECT_DEPOSIT_FACILITY: 1.75},
+        "changes": {SUBJECT_MAIN_REFINANCING: -25.0, SUBJECT_MARGINAL_LENDING: -25.0, SUBJECT_DEPOSIT_FACILITY: -25.0},
+        "effective": "2026-08-02",
+        "warnings": [],
+    },
+    "ecb_decision_increase.html": {
+        "date": ("2026-09-10", 0),
+        "levels": {SUBJECT_DEPOSIT_FACILITY: 2.0, SUBJECT_MAIN_REFINANCING: 2.5, SUBJECT_MARGINAL_LENDING: 2.75},
+        "changes": {SUBJECT_DEPOSIT_FACILITY: 50.0, SUBJECT_MAIN_REFINANCING: 50.0, SUBJECT_MARGINAL_LENDING: 50.0},
+        "effective": "2026-10-01",
+        "warnings": [],
+    },
+    "ecb_decision_hold.html": {
+        "date": ("2026-06-11", 0),
+        "levels": {SUBJECT_MAIN_REFINANCING: 2.0, SUBJECT_MARGINAL_LENDING: 2.25, SUBJECT_DEPOSIT_FACILITY: 1.75},
+        "changes": {},
+        "effective": None,
+        "warnings": [],
+    },
+    "ecb_decision_per_instrument.html": {
+        "date": ("2026-03-17", 0),
+        "levels": {SUBJECT_DEPOSIT_FACILITY: 1.5, SUBJECT_MAIN_REFINANCING: 1.75, SUBJECT_MARGINAL_LENDING: 2.0},
+        "changes": {SUBJECT_DEPOSIT_FACILITY: -25.0, SUBJECT_MARGINAL_LENDING: -25.0},
+        "effective": "2026-03-25",
+        "warnings": [],
+    },
+    "ecb_decision_minimal.html": {
+        "date": ("2026-05-14", 0),
+        "levels": {SUBJECT_DEPOSIT_FACILITY: 1.5},
+        "changes": {SUBJECT_DEPOSIT_FACILITY: -25.0},
+        "effective": None,
+        "warnings": ["no_rates_section"],
+    },
+}
+
+ALL_RATES = (SUBJECT_MAIN_REFINANCING, SUBJECT_MARGINAL_LENDING, SUBJECT_DEPOSIT_FACILITY)
+
+
+def normalized_fixture(name: str) -> object:
+    doc = Document(
+        publication_id="pub-ecb-1",
+        url=ECB_URL,
+        kind="html",
+        status=DocumentStatus.FETCHED,
+        local_path=str(FIXTURES / name),
+    )
+    return Normalizer().parse(doc)
+
+
+def extract_fixture(name: str):
+    return EcbDecisionExtractor().extract(ecb_publication(), normalized_fixture(name))
+
+
+def fact_by(result, subject: str, predicate: str):
+    matches = [f for f in result.facts if f.subject == subject and f.predicate == predicate]
+    assert len(matches) == 1, f"{subject}/{predicate}: {len(matches)} facts"
+    return matches[0]
+
+
+def test_golden_facts_across_all_fixtures():
+    for name, expected in GOLDEN.items():
+        result = extract_fixture(name)
+        assert result.warnings == expected["warnings"], (name, result.warnings)
+
+        iso, section = expected["date"]
+        f = fact_by(result, SUBJECT_DECISION, "date")
+        assert f.value.kind is ValueKind.DATE
+        assert f.value.value == iso
+        assert f.source_location.section == section
+
+        for subject, value in expected["levels"].items():
+            f = fact_by(result, subject, "value")
+            assert f.value.kind is ValueKind.PERCENTAGE
+            assert f.value.value == value, (name, subject)
+            if expected["effective"]:
+                assert f.effective_date.date().isoformat() == expected["effective"]
+            else:
+                assert f.effective_date is None
+        for subject in ALL_RATES:
+            if subject not in expected["levels"]:
+                assert not [x for x in result.facts if x.subject == subject and x.predicate == "value"], name
+
+        for subject, delta in expected["changes"].items():
+            f = fact_by(result, subject, "change")
+            assert f.value.kind is ValueKind.BASIS_POINTS
+            assert f.value.value == delta, (name, subject)
+        for subject in ALL_RATES:
+            if subject not in expected["changes"]:
+                assert not [x for x in result.facts if x.subject == subject and x.predicate == "change"], name
+
+
+def test_fixture_date_robustness_against_arbitrary_dates():
+    """The hold fixture mentions a second date (12 June 2026, press conference)
+    inside the rates section; the decision date must stay the leading date."""
+    normalized = normalized_fixture("ecb_decision_hold.html")
+    assert "12 June 2026" in normalized.sections[2].text
+    f = fact_by(extract_fixture("ecb_decision_hold.html"), SUBJECT_DECISION, "date")
+    assert f.value.value == "2026-06-11"
+    assert f.source_location.section == 0
+
+
+def test_fixture_minimal_does_not_invent_rates():
+    result = extract_fixture("ecb_decision_minimal.html")
+    subjects = {f.subject for f in result.facts}
+    assert SUBJECT_MAIN_REFINANCING not in subjects
+    assert SUBJECT_MARGINAL_LENDING not in subjects
+    assert "no_rates_section" in result.warnings
+
+
+def test_fixture_source_text_is_verbatim_in_section():
+    for name in GOLDEN:
+        document = normalized_fixture(name)
+        result = extract_fixture(name)
+        for fact in result.facts:
+            section_text = document.sections[fact.source_location.section].text or ""
+            assert fact.source_text in section_text, (name, fact.subject, fact.predicate)
+            assert fact.value.source_text in section_text, (name, fact.subject, fact.predicate)
+            assert fact.confidence is Confidence.HIGH
+
+
+def test_fixture_extraction_is_deterministic(tmp_path):
+    for name in GOLDEN:
+        store = Store(tmp_path / f"{name}.db")
+        store.upsert_publication(ecb_publication())
+        document = normalized_fixture(name)
+        store.upsert_normalized_document(document)
+        result = extract_fixture(name)
+        store.rebuild_facts_for_document(document.document_id, result)
+        first = sorted((f.fact_id, f.subject, f.predicate, f.value.value) for f in store.get_facts(publication_id="pub-ecb-1"))
+        store.rebuild_facts_for_document(document.document_id, result)
+        second = sorted((f.fact_id, f.subject, f.predicate, f.value.value) for f in store.get_facts(publication_id="pub-ecb-1"))
+        assert first == second, name
+        assert len(first) == len(result.facts), name
+
+
+def test_fixture_increase_order_reads_source_naming():
+    """The increase fixture names the deposit facility first: item i must map to
+    the i-th named instrument, not a canonical order."""
+    result = extract_fixture("ecb_decision_increase.html")
+    assert fact_by(result, SUBJECT_DEPOSIT_FACILITY, "value").value.value == 2.0
+    assert fact_by(result, SUBJECT_MAIN_REFINANCING, "value").value.value == 2.5
+    assert fact_by(result, SUBJECT_MARGINAL_LENDING, "value").value.value == 2.75
+
+
+# ---------------------------------------------------------------------------
 # vertical slice: extractor → ExtractionResult → Store
 # ---------------------------------------------------------------------------
 
