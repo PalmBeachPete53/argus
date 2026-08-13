@@ -42,6 +42,26 @@ traceable text. **classification** (`classification/`) assigns a canonical
 labels. **facts** (`facts/`) are typed, provenance-carrying assertions extracted
 from normalized documents; future extractors return an `ExtractionResult`.
 
+### Roadmap status
+
+Per `docs/ROADMAP.md` (statuses: `COMPLETE` / `NEXT` / `NOT STARTED`):
+
+| Phase | Name | Status |
+|---|---|---|
+| 0 | Architecture & Specification | `COMPLETE` |
+| 1 | Source Registry & Collection | `COMPLETE` |
+| 2 | Document Normalization | `COMPLETE` |
+| 3 | Publication Classification | `COMPLETE` |
+| 4 | Fact Model | `COMPLETE` |
+| 5 | Monetary Policy Decision | `NEXT` |
+| 6–11 | Type-specific extractors (statement, press conferences, minutes, projections, reports, speeches) | `NOT STARTED` |
+| 12–16 | Temporal analysis, policy reaction, policy state, forex fundamentals, historical validation | `NOT STARTED` |
+| 17 | Trading / Signal Layer | `NOT STARTED` — out of scope for now |
+
+Current position: Argus sits at the start of **Phase 5 (Monetary Policy Decision)**.
+No type-specific extractor has been implemented yet; the next phase builds on the
+`Fact` model and the `ExtractionResult` contract defined in Phase 4.
+
 ## Quickstart
 
 ```bash
