@@ -1,22 +1,45 @@
-"""Phase 12 — temporal / cross-publication change analysis.
+"""Phase 12 — temporal / cross-publication change analysis (deep hardening).
 
 Tests the pure ``FactChangeAnalyzer`` and the store integration
 (``analyze_changes`` + ``fact_changes`` persistence).
 
-Covers: the three change types (numeric / qualitative / text), positive /
-negative / zero deltas, exact-value no-change, verbatim text no-change,
-period mismatch → no change, ordering by temporal reference (meeting_date
-preferred, then publication_date, tie-break by publication id), consecutive
-chaining (never a fixed baseline), cross-publication-only matching, publication
-type compatibility, identity qualifier discrimination, provenance to both
-source facts/documents/publications, deterministic change ids, idempotent
-rebuild, empty-result persistence, no mutation of the source Facts, skipped /
-warning observability (missing, unclassified, undated, valueless), and Phase
-5–11 coexistence in the store.
+Deep-hardening coverage beyond the original suite:
+
+- **Classification source of truth**: the publication type used for matching
+  comes from the authoritative ``classifications`` mapping when provided (the
+  denormalized ``Publication.publication_type`` cache is never trusted when an
+  authoritative classification is available); stale cache, missing
+  classification and unknown classification are handled conservatively.
+- **Central bank fallback**: ``FactChange.central_bank`` = ``Fact.central_bank``
+  else ``Publication.central_bank``, never invented when both are absent.
+- **Provenance**: every field on both sides is checked with concrete values
+  for each change type (no tautological assertions), plus traceability from a
+  persisted change back to its source Facts and publications.
+- **Source text verbatim**: preserved byte-for-byte, no normalisation.
+- **Incompatible observations**: an incomparable adjacent pair is never jumped
+  over to bridge to a later observation; incompatible units never produce a
+  numeric delta.
+- **Effective date**: preserved, distinct from period and ordering dates, and
+  never blocks matching.
+- **Publication type boundary**: decision→decision and speech→speech are
+  comparable; decision→speech and minutes→decision are not.
+- **Identity qualifier**: ``None`` and ``""`` are the same (no qualifier);
+  distinct non-empty qualifiers never merge.
+- **Period**: 2027→2027 comparable; 2027→2028, month/year mismatch and
+  None→2027 are distinct lineages (no change).
+- **No-change**: numeric / qualitative / text identical values → zero changes.
+- **Deterministic chaining** F1→F2→F3→F4 with deterministic tie-break.
+- **Directional, deterministic ``change_id``**.
+- **Immutability**: snapshot copy of the source Facts is unchanged after
+  analysis.
+- **Persistence**: idempotence, rebuild, empty-result rebuild, bank isolation.
+- **Empty/missing data**: every degraded input is warned about and never
+  produces a false change.
 """
 
 from __future__ import annotations
 
+import copy
 from datetime import datetime
 
 import pytest
@@ -31,9 +54,10 @@ from argus.changes import (
     change_id_of,
 )
 from argus.facts import (
+    basis_points,
     categorical,
-    date_value,
     fact_id_of,
+    number,
     percentage,
     range_value,
     text_value,
@@ -46,13 +70,15 @@ BANK = "ecb"
 
 PERCENTAGE = "percentage"
 
+DECISION = "monetary_policy_decision"
+
 
 def mk_pub(
     pub_id: str,
     date: datetime | None = None,
     *,
     meeting_date: datetime | None = None,
-    ptype: str = "monetary_policy_decision",
+    ptype: str = DECISION,
     bank: str = BANK,
 ) -> Publication:
     return Publication(
@@ -76,13 +102,13 @@ def mk_fact(
     *,
     period: FactPeriod | None = None,
     effective: datetime | None = None,
-    qualifier: str = "",
+    qualifier: str | None = "",
     predicate: str = "value",
     doc: str | None = None,
-    bank: str = BANK,
+    bank: str | None = BANK,
     source_text: str | None = None,
 ) -> Fact:
-    doc_id = doc or pub_id
+    doc_id = doc if doc is not None else pub_id
     return Fact(
         publication_id=pub_id,
         document_id=doc_id,
@@ -102,13 +128,36 @@ def mk_fact(
             predicate=predicate,
             period=period,
             effective_date=effective,
-            qualifier=qualifier,
+            qualifier=qualifier or "",
         ),
     )
 
 
-def run(facts: list[Fact], pubs: dict[str, Publication]) -> FactChangeResult:
+def run(
+    facts: list[Fact], pubs: dict[str, Publication]
+) -> FactChangeResult:
     return FactChangeAnalyzer().analyze(facts, publications=pubs)
+
+
+def run_c(
+    facts: list[Fact],
+    pubs: dict[str, Publication],
+    classifications: dict[str, str],
+) -> FactChangeResult:
+    return FactChangeAnalyzer().analyze(
+        facts, publications=pubs, classifications=classifications
+    )
+
+
+def classify(store: Store, pub_id: str, ptype: str = DECISION, bank: str = BANK) -> None:
+    store.set_classification(
+        pub_id,
+        central_bank=bank,
+        publication_type=ptype,
+        confidence="high",
+        method="source_type_hint",
+        evidence=["test"],
+    )
 
 
 def year(v: str) -> FactPeriod:
@@ -118,6 +167,7 @@ def year(v: str) -> FactPeriod:
 P1 = mk_pub("P1", datetime(2026, 1, 15), meeting_date=datetime(2026, 1, 15))
 P2 = mk_pub("P2", datetime(2026, 3, 15), meeting_date=datetime(2026, 3, 15))
 P3 = mk_pub("P3", datetime(2026, 5, 15), meeting_date=datetime(2026, 5, 15))
+P4 = mk_pub("P4", datetime(2026, 7, 15), meeting_date=datetime(2026, 7, 15))
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +244,24 @@ class TestQualitative:
         res = run([f1, f2], {"P1": P1, "P2": P2})
         assert res.changes == []
 
+    def test_range_change(self):
+        f1 = mk_fact("P1", "range", range_value(2.0, 3.0))
+        f2 = mk_fact("P2", "range", range_value(2.0, 3.5))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+        assert res.changes[0].change_type is ChangeType.QUALITATIVE
+        assert res.changes[0].previous_value.max == 3.0
+        assert res.changes[0].current_value.max == 3.5
+
+    def test_boolean_change(self):
+        from argus.facts import boolean_value
+
+        f1 = mk_fact("P1", "flag", boolean_value(False))
+        f2 = mk_fact("P2", "flag", boolean_value(True))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+        assert res.changes[0].change_type is ChangeType.QUALITATIVE
+
 
 # ---------------------------------------------------------------------------
 # text changes
@@ -208,13 +276,28 @@ class TestText:
         assert c.change_type is ChangeType.TEXT
         assert c.previous_value.value == "We stand ready."
         assert c.current_value.value == "We stand ready to act."
-        assert c.previous_source_text is None or c.previous_value.value == c.previous_value.value
+        assert c.delta is None
 
     def test_identical_text_no_change(self):
         f1 = mk_fact("P1", "guidance", text_value("We stand ready."))
         f2 = mk_fact("P2", "guidance", text_value("We stand ready."))
         res = run([f1, f2], {"P1": P1, "P2": P2})
         assert res.changes == []
+
+    def test_source_text_verbatim_preserved(self):
+        f1 = mk_fact(
+            "P1", "inflation", percentage(2.1),
+            source_text="Inflation is expected at 2.1%.",
+        )
+        f2 = mk_fact(
+            "P2", "inflation", percentage(2.4),
+            source_text="Inflation is expected at 2.4%.",
+        )
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+        c = res.changes[0]
+        assert c.previous_source_text == "Inflation is expected at 2.1%."
+        assert c.current_source_text == "Inflation is expected at 2.4%."
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +344,419 @@ class TestMatching:
 
 
 # ---------------------------------------------------------------------------
+# classification source of truth
+# ---------------------------------------------------------------------------
+class TestClassification:
+    def test_normal_classification_used(self):
+        pubs = {"P1": P1, "P2": P2}
+        cl = {"P1": DECISION, "P2": DECISION}
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25))
+        res = run_c([f1, f2], pubs, cl)
+        assert len(res.changes) == 1
+
+    def test_stale_cache_does_not_win(self):
+        # authoritative classification says decision, denormalized cache says
+        # speech — the classification must win (the change is produced).
+        stale_p1 = mk_pub("P1", datetime(2026, 1, 15), meeting_date=datetime(2026, 1, 15), ptype="speech")
+        stale_p2 = mk_pub("P2", datetime(2026, 3, 15), meeting_date=datetime(2026, 3, 15), ptype="speech")
+        cl = {"P1": DECISION, "P2": DECISION}
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25))
+        res = run_c([f1, f2], {"P1": stale_p1, "P2": stale_p2}, cl)
+        assert len(res.changes) == 1
+        assert res.changes[0].change_type is ChangeType.NUMERIC
+
+    def test_missing_classification_skips_with_warning(self):
+        cl = {"P1": DECISION}
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25))
+        res = run_c([f1, f2], {"P1": P1, "P2": P2}, cl)
+        assert res.changes == []
+        assert any(w.startswith("missing_classification:P2") for w in res.warnings)
+
+    def test_unknown_classification_skips(self):
+        cl = {"P1": DECISION, "U": "unknown"}
+        unknown = mk_pub("U", datetime(2026, 2, 1))
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("U", "policy_rate", percentage(4.25))
+        res = run_c([f1, f2], {"P1": P1, "U": unknown}, cl)
+        assert res.changes == []
+        assert any(w.startswith("unclassified_publication:U") for w in res.warnings)
+
+    def test_other_classification_skips(self):
+        cl = {"P1": DECISION, "O": "other"}
+        other = mk_pub("O", datetime(2026, 2, 1))
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("O", "policy_rate", percentage(4.25))
+        res = run_c([f1, f2], {"P1": P1, "O": other}, cl)
+        assert res.changes == []
+        assert any(w.startswith("unclassified_publication:O") for w in res.warnings)
+
+    def test_classification_isolates_types(self):
+        # authoritative classification still isolates decision vs speech.
+        speech = mk_pub("S", datetime(2026, 2, 1), ptype="speech")
+        cl = {"P1": DECISION, "P2": DECISION, "S": "speech"}
+        f1 = mk_fact("P1", "inflation", percentage(2.1))
+        f2 = mk_fact("P2", "inflation", percentage(2.4))
+        fs = mk_fact("S", "inflation", percentage(2.6))
+        res = run_c([f1, f2, fs], {"P1": P1, "P2": P2, "S": speech}, cl)
+        # decision → decision change, speech stays isolated
+        assert len(res.changes) == 1
+        assert res.changes[0].previous_publication_id == "P1"
+        assert res.changes[0].current_publication_id == "P2"
+
+
+# ---------------------------------------------------------------------------
+# central bank fallback
+# ---------------------------------------------------------------------------
+class TestCentralBank:
+    def test_fact_bank_used(self):
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00), bank="ecb")
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25), bank="ecb")
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert res.changes[0].central_bank == "ecb"
+
+    def test_publication_bank_fallback(self):
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00), bank=None)
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25), bank=None)
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+        assert res.changes[0].central_bank == "ecb"  # from Publication.central_bank
+
+    def test_no_bank_is_not_invented(self):
+        nobank = mk_pub("N1", datetime(2026, 1, 15), meeting_date=datetime(2026, 1, 15), bank=None)
+        nobank2 = mk_pub("N2", datetime(2026, 3, 15), meeting_date=datetime(2026, 3, 15), bank=None)
+        f1 = mk_fact("N1", "policy_rate", percentage(4.00), bank=None)
+        f2 = mk_fact("N2", "policy_rate", percentage(4.25), bank=None)
+        res = run([f1, f2], {"N1": nobank, "N2": nobank2})
+        assert len(res.changes) == 1
+        assert res.changes[0].central_bank is None
+
+    def test_fact_bank_used_in_store(self):
+        import tempfile
+
+        store = Store(tempfile.mkdtemp() + "/test.db")
+        for p in (P1, P2):
+            store.upsert_publication(p)
+            classify(store, p.id)
+        store.save_fact(mk_fact("P1", "policy_rate", percentage(4.00)))
+        store.save_fact(mk_fact("P2", "policy_rate", percentage(4.25)))
+        res = analyze_changes(store, bank=BANK)
+        assert res.changes[0].central_bank == "ecb"
+
+
+# ---------------------------------------------------------------------------
+# provenance (per change type, no tautologies)
+# ---------------------------------------------------------------------------
+class TestProvenance:
+    def _assert_full_provenance(self, c: FactChange, ctype, *, previous, current):
+        assert c.change_type is ctype
+        # fact ids
+        assert c.previous_fact_id == previous["fact_id"]
+        assert c.current_fact_id == current["fact_id"]
+        # documents
+        assert c.previous_document_id == previous["doc"]
+        assert c.current_document_id == current["doc"]
+        # publications
+        assert c.previous_publication_id == previous["pub"]
+        assert c.current_publication_id == current["pub"]
+        # periods
+        assert (c.previous_period.canonical() if c.previous_period else None) == previous["period"]
+        assert (c.current_period.canonical() if c.current_period else None) == current["period"]
+        # effective dates
+        assert c.previous_effective_date == previous["effective"]
+        assert c.current_effective_date == current["effective"]
+        # source texts
+        assert c.previous_source_text == previous["source_text"]
+        assert c.current_source_text == current["source_text"]
+        # values
+        assert c.previous_value.value == previous["value"]
+        assert c.current_value.value == current["value"]
+        assert c.subject == "policy_rate"
+        assert c.predicate == "value"
+
+    def test_numeric_provenance(self):
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00),
+                     period=year("2026"), effective=datetime(2026, 1, 16),
+                     source_text="rate at 4.00 percent")
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25),
+                     period=year("2026"), effective=datetime(2026, 3, 16),
+                     source_text="rate at 4.25 percent")
+        c = run([f1, f2], {"P1": P1, "P2": P2}).changes[0]
+        self._assert_full_provenance(
+            c, ChangeType.NUMERIC,
+            previous={"fact_id": f1.fact_id, "doc": "P1", "pub": "P1",
+                      "period": "year:2026", "effective": datetime(2026, 1, 16),
+                      "source_text": "rate at 4.00 percent", "value": 4.00},
+            current={"fact_id": f2.fact_id, "doc": "P2", "pub": "P2",
+                     "period": "year:2026", "effective": datetime(2026, 3, 16),
+                     "source_text": "rate at 4.25 percent", "value": 4.25},
+        )
+        assert c.delta is not None
+        assert c.delta.value == pytest.approx(0.25)
+        assert c.previous_value.unit is None
+        assert c.current_value.unit is None
+
+    def test_qualitative_provenance(self):
+        f1 = mk_fact("P1", "policy_rate", categorical("balanced"),
+                     effective=datetime(2026, 1, 16),
+                     source_text="risks are balanced")
+        f2 = mk_fact("P2", "policy_rate", categorical("upside"),
+                     effective=datetime(2026, 3, 16),
+                     source_text="risks are tilted to the upside")
+        c = run([f1, f2], {"P1": P1, "P2": P2}).changes[0]
+        self._assert_full_provenance(
+            c, ChangeType.QUALITATIVE,
+            previous={"fact_id": f1.fact_id, "doc": "P1", "pub": "P1",
+                      "period": None, "effective": datetime(2026, 1, 16),
+                      "source_text": "risks are balanced", "value": "balanced"},
+            current={"fact_id": f2.fact_id, "doc": "P2", "pub": "P2",
+                     "period": None, "effective": datetime(2026, 3, 16),
+                     "source_text": "risks are tilted to the upside", "value": "upside"},
+        )
+        assert c.delta is None
+
+    def test_text_provenance(self):
+        f1 = mk_fact("P1", "policy_rate", text_value("We stand ready."),
+                     effective=datetime(2026, 1, 16),
+                     source_text="We stand ready.")
+        f2 = mk_fact("P2", "policy_rate", text_value("We stand ready to act."),
+                     effective=datetime(2026, 3, 16),
+                     source_text="We stand ready to act.")
+        c = run([f1, f2], {"P1": P1, "P2": P2}).changes[0]
+        self._assert_full_provenance(
+            c, ChangeType.TEXT,
+            previous={"fact_id": f1.fact_id, "doc": "P1", "pub": "P1",
+                      "period": None, "effective": datetime(2026, 1, 16),
+                      "source_text": "We stand ready.", "value": "We stand ready."},
+            current={"fact_id": f2.fact_id, "doc": "P2", "pub": "P2",
+                     "period": None, "effective": datetime(2026, 3, 16),
+                     "source_text": "We stand ready to act.", "value": "We stand ready to act."},
+        )
+        assert c.delta is None
+
+
+# ---------------------------------------------------------------------------
+# incompatible units
+# ---------------------------------------------------------------------------
+class TestUnits:
+    def test_percentage_vs_basis_points_kinds_never_meet(self):
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", basis_points(400))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert res.changes == []
+
+    def test_same_kind_incompatible_units_no_delta(self):
+        f1 = mk_fact("P1", "spread", number(4.00, unit="pp"))
+        f2 = mk_fact("P2", "spread", number(4.25, unit="%"))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert res.changes == []
+
+    def test_no_bridge_over_incompatible_unit(self):
+        # F1→F2 comparable (same unit "pp"); F2→F3 unit-mismatched; F1→F3 must
+        # NOT be bridged even though F1 and F3 share the lineage key.
+        f1 = mk_fact("P1", "spread", number(4.00, unit="pp"))
+        f2 = mk_fact("P2", "spread", number(4.25, unit="pp"))
+        f3 = mk_fact("P3", "spread", number(4.50, unit="%"))
+        res = run([f1, f2, f3], {"P1": P1, "P2": P2, "P3": P3})
+        assert len(res.changes) == 1
+        assert res.changes[0].previous_publication_id == "P1"
+        assert res.changes[0].current_publication_id == "P2"
+
+
+# ---------------------------------------------------------------------------
+# incompatible observation in the middle of a sequence
+# ---------------------------------------------------------------------------
+class TestIncomparableMiddle:
+    def test_equal_middle_never_bridges(self):
+        # F1→F2 equal (no change); F2→F3 changed; F1→F3 must not be produced.
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.00))
+        f3 = mk_fact("P3", "policy_rate", percentage(4.50))
+        res = run([f1, f2, f3], {"P1": P1, "P2": P2, "P3": P3})
+        assert len(res.changes) == 1
+        assert res.changes[0].previous_publication_id == "P2"
+        assert res.changes[0].current_publication_id == "P3"
+
+    def test_qualifier_split_keeps_lineages_separate(self):
+        # F2 has a different qualifier → it is a separate lineage, so F1→F3 are
+        # the consecutive observations of the no-qualifier lineage.
+        f1 = mk_fact("P1", "inflation", percentage(2.1), qualifier="")
+        f2 = mk_fact("P2", "inflation", percentage(2.4), qualifier="answer:1:0")
+        f3 = mk_fact("P3", "inflation", percentage(2.7), qualifier="")
+        res = run([f1, f2, f3], {"P1": P1, "P2": P2, "P3": P3})
+        assert len(res.changes) == 1
+        assert res.changes[0].previous_publication_id == "P1"
+        assert res.changes[0].current_publication_id == "P3"
+
+
+# ---------------------------------------------------------------------------
+# effective date
+# ---------------------------------------------------------------------------
+class TestEffectiveDate:
+    def test_different_effective_dates_do_not_break_matching(self):
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00), effective=datetime(2026, 1, 16))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25), effective=datetime(2026, 3, 16))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+        assert res.changes[0].previous_effective_date == datetime(2026, 1, 16)
+        assert res.changes[0].current_effective_date == datetime(2026, 3, 16)
+
+    def test_effective_date_not_used_for_ordering(self):
+        # publication dates say P1 < P2; effective dates are reversed — ordering
+        # must follow the publication dates, not effective dates.
+        p1 = mk_pub("P1", datetime(2026, 1, 15), meeting_date=datetime(2026, 1, 15))
+        p2 = mk_pub("P2", datetime(2026, 3, 15), meeting_date=datetime(2026, 3, 15))
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00), effective=datetime(2026, 3, 20))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25), effective=datetime(2026, 1, 10))
+        res = run([f1, f2], {"P1": p1, "P2": p2})
+        assert len(res.changes) == 1
+        assert res.changes[0].previous_publication_id == "P1"
+        assert res.changes[0].current_publication_id == "P2"
+        assert res.changes[0].previous_effective_date == datetime(2026, 3, 20)
+        assert res.changes[0].current_effective_date == datetime(2026, 1, 10)
+
+    def test_effective_date_distinct_from_period(self):
+        f1 = mk_fact("P1", "inflation", percentage(2.1), period=year("2027"),
+                     effective=datetime(2026, 9, 16))
+        f2 = mk_fact("P2", "inflation", percentage(2.4), period=year("2027"),
+                     effective=datetime(2026, 12, 16))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+        assert res.changes[0].previous_period.canonical() == "year:2027"
+        assert res.changes[0].current_period.canonical() == "year:2027"
+        assert res.changes[0].previous_effective_date == datetime(2026, 9, 16)
+        assert res.changes[0].current_effective_date == datetime(2026, 12, 16)
+
+
+# ---------------------------------------------------------------------------
+# publication type boundary
+# ---------------------------------------------------------------------------
+class TestPublicationTypeBoundary:
+    def test_decision_to_decision_comparable(self):
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+
+    def test_speech_to_speech_comparable(self):
+        s1 = mk_pub("S1", datetime(2026, 1, 15), meeting_date=datetime(2026, 1, 15), ptype="speech")
+        s2 = mk_pub("S2", datetime(2026, 3, 15), meeting_date=datetime(2026, 3, 15), ptype="speech")
+        f1 = mk_fact("S1", "inflation", percentage(2.1))
+        f2 = mk_fact("S2", "inflation", percentage(2.4))
+        res = run([f1, f2], {"S1": s1, "S2": s2})
+        assert len(res.changes) == 1
+
+    def test_decision_to_speech_not_comparable(self):
+        speech = mk_pub("S", datetime(2026, 2, 1), ptype="speech")
+        f1 = mk_fact("P1", "inflation", percentage(2.1))
+        f2 = mk_fact("S", "inflation", percentage(2.4))
+        res = run([f1, f2], {"P1": P1, "S": speech})
+        assert res.changes == []
+
+    def test_minutes_to_minutes_comparable(self):
+        m1 = mk_pub("M1", datetime(2026, 1, 15), meeting_date=datetime(2026, 1, 15), ptype="minutes")
+        m2 = mk_pub("M2", datetime(2026, 3, 15), meeting_date=datetime(2026, 3, 15), ptype="minutes")
+        f1 = mk_fact("M1", "risk", categorical("balanced"))
+        f2 = mk_fact("M2", "risk", categorical("upside"))
+        res = run([f1, f2], {"M1": m1, "M2": m2})
+        assert len(res.changes) == 1
+
+    def test_minutes_to_decision_not_comparable(self):
+        m = mk_pub("M", datetime(2026, 2, 1), ptype="minutes")
+        f1 = mk_fact("P1", "risk", categorical("balanced"))
+        f2 = mk_fact("M", "risk", categorical("upside"))
+        res = run([f1, f2], {"P1": P1, "M": m})
+        assert res.changes == []
+
+
+# ---------------------------------------------------------------------------
+# identity qualifier
+# ---------------------------------------------------------------------------
+class TestIdentityQualifier:
+    def test_none_equals_empty(self):
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00), qualifier=None)
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25), qualifier="")
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+        assert res.changes[0].identity_qualifier == ""
+
+    def test_non_empty_qualifiers_never_merge(self):
+        f1 = mk_fact("P1", "inflation", percentage(2.1), qualifier="answer:1:0")
+        f2 = mk_fact("P2", "inflation", percentage(2.4), qualifier="answer:2:0")
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert res.changes == []
+
+
+# ---------------------------------------------------------------------------
+# period
+# ---------------------------------------------------------------------------
+class TestPeriod:
+    def test_same_period_comparable(self):
+        f1 = mk_fact("P1", "inflation", percentage(2.1), period=year("2027"))
+        f2 = mk_fact("P2", "inflation", percentage(2.4), period=year("2027"))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+
+    def test_2027_vs_2028_no_change(self):
+        f1 = mk_fact("P1", "inflation", percentage(2.1), period=year("2027"))
+        f2 = mk_fact("P2", "inflation", percentage(2.4), period=year("2028"))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert res.changes == []
+
+    def test_year_vs_month_no_change(self):
+        f1 = mk_fact("P1", "inflation", percentage(2.1), period=year("2027"))
+        f2 = mk_fact("P2", "inflation", percentage(2.4),
+                     period=FactPeriod(PeriodKind.MONTH, value="2027-08"))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert res.changes == []
+
+    def test_none_vs_year_no_change(self):
+        f1 = mk_fact("P1", "inflation", percentage(2.1))
+        f2 = mk_fact("P2", "inflation", percentage(2.4), period=year("2027"))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert res.changes == []
+
+    def test_both_no_period_comparable(self):
+        f1 = mk_fact("P1", "inflation", percentage(2.1))
+        f2 = mk_fact("P2", "inflation", percentage(2.4))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+
+
+# ---------------------------------------------------------------------------
+# no-change (triple)
+# ---------------------------------------------------------------------------
+class TestNoChange:
+    def test_all_types_identical_no_change(self):
+        num = run(
+            [
+                mk_fact("P1", "policy_rate", percentage(4.00)),
+                mk_fact("P2", "policy_rate", percentage(4.00)),
+            ],
+            {"P1": P1, "P2": P2},
+        )
+        qual = run(
+            [
+                mk_fact("P1", "risk", categorical("balanced")),
+                mk_fact("P2", "risk", categorical("balanced")),
+            ],
+            {"P1": P1, "P2": P2},
+        )
+        text = run(
+            [
+                mk_fact("P1", "guidance", text_value("same wording")),
+                mk_fact("P2", "guidance", text_value("same wording")),
+            ],
+            {"P1": P1, "P2": P2},
+        )
+        assert num.changes == []
+        assert qual.changes == []
+        assert text.changes == []
+
+
+# ---------------------------------------------------------------------------
 # ordering and chaining
 # ---------------------------------------------------------------------------
 class TestOrderingChaining:
@@ -273,6 +769,16 @@ class TestOrderingChaining:
         assert len(res.changes) == 1
         assert res.changes[0].previous_publication_id == "P1"
         assert res.changes[0].current_publication_id == "P2"
+
+    def test_publication_date_fallback_when_no_meeting_date(self):
+        no_meeting = mk_pub("N1", datetime(2026, 1, 15), meeting_date=None)
+        no_meeting2 = mk_pub("N2", datetime(2026, 3, 15), meeting_date=None)
+        f1 = mk_fact("N1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("N2", "policy_rate", percentage(4.25))
+        res = run([f1, f2], {"N1": no_meeting, "N2": no_meeting2})
+        assert len(res.changes) == 1
+        assert res.changes[0].previous_publication_id == "N1"
+        assert res.changes[0].current_publication_id == "N2"
 
     def test_tiebreak_by_publication_id(self):
         p1 = mk_pub("A1", datetime(2026, 1, 15), meeting_date=datetime(2026, 1, 15))
@@ -298,6 +804,26 @@ class TestOrderingChaining:
         assert first.delta.value == pytest.approx(0.25)
         assert second.delta.value == pytest.approx(0.25)
 
+    def test_chaining_f1_f2_f3_f4(self):
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25))
+        f3 = mk_fact("P3", "policy_rate", percentage(4.50))
+        f4 = mk_fact("P4", "policy_rate", percentage(4.75))
+        res = run([f1, f2, f3, f4], {"P1": P1, "P2": P2, "P3": P3, "P4": P4})
+        assert len(res.changes) == 3
+        by_prev = {c.previous_publication_id: c for c in res.changes}
+        assert set(by_prev) == {"P1", "P2", "P3"}
+        assert by_prev["P1"].current_publication_id == "P2"
+        assert by_prev["P2"].current_publication_id == "P3"
+        assert by_prev["P3"].current_publication_id == "P4"
+        # no cross-links F1→F3, F1→F4, F2→F4
+        assert not any(c.previous_publication_id == "P1" and c.current_publication_id == "P3"
+                       for c in res.changes)
+        assert not any(c.previous_publication_id == "P1" and c.current_publication_id == "P4"
+                       for c in res.changes)
+        assert not any(c.previous_publication_id == "P2" and c.current_publication_id == "P4"
+                       for c in res.changes)
+
     def test_interleaved_unrelated_fact_does_not_break_chain(self):
         f1 = mk_fact("P1", "policy_rate", percentage(4.00))
         f2 = mk_fact("P2", "policy_rate", percentage(4.25))
@@ -319,13 +845,12 @@ class TestWarnings:
         assert res.changes == []
         assert any(w.startswith("missing_publication:PX") for w in res.warnings)
 
-    def test_unclassified_publication_warns(self):
-        unknown = mk_pub("U", datetime(2026, 2, 1), ptype="unknown")
+    def test_undocumented_fact_warns(self):
         f1 = mk_fact("P1", "policy_rate", percentage(4.00))
-        f2 = mk_fact("U", "policy_rate", percentage(4.25))
-        res = run([f1, f2], {"P1": P1, "U": unknown})
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25), doc="")
+        res = run([f1, f2], {"P1": P1, "P2": P2})
         assert res.changes == []
-        assert any(w.startswith("unclassified_publication:U") for w in res.warnings)
+        assert any(w.startswith("undocumented_fact") for w in res.warnings)
 
     def test_undated_publication_warns(self):
         undated = mk_pub("N", None)
@@ -344,6 +869,14 @@ class TestWarnings:
         assert res.changes == []
         assert any(w.startswith("valueless_fact") for w in res.warnings)
 
+    def test_unclassified_publication_warns(self):
+        unknown = mk_pub("U", datetime(2026, 2, 1), ptype="unknown")
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("U", "policy_rate", percentage(4.25))
+        res = run([f1, f2], {"P1": P1, "U": unknown})
+        assert res.changes == []
+        assert any(w.startswith("unclassified_publication:U") for w in res.warnings)
+
 
 # ---------------------------------------------------------------------------
 # determinism and identity
@@ -356,34 +889,49 @@ class TestIdentity:
         res2 = run([f1, f2], {"P1": P1, "P2": P2})
         assert res.changes[0].change_id == res2.changes[0].change_id
 
-    def test_change_id_differs_across_kinds(self):
+    def test_change_id_directional(self):
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25))
+        # the analyzer always orders chronologically (P1 < P2) whatever the
+        # input order, so the direction of the change is fully determined.
+        res = run([f2, f1], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+        c = res.changes[0]
+        assert c.previous_fact_id == f1.fact_id
+        assert c.current_fact_id == f2.fact_id
+        # the identity is directional: swapping the two sides changes the id.
+        forward = change_id_of(
+            previous_fact_id=f1.fact_id, current_fact_id=f2.fact_id,
+            change_type=ChangeType.NUMERIC,
+        )
+        reverse = change_id_of(
+            previous_fact_id=f2.fact_id, current_fact_id=f1.fact_id,
+            change_type=ChangeType.NUMERIC,
+        )
+        assert c.change_id == forward
+        assert forward != reverse
+
+    def test_change_id_distinct_across_kinds(self):
         f1 = mk_fact("P1", "policy_rate", percentage(4.00))
         f2 = mk_fact("P2", "policy_rate", percentage(4.25))
         num = run([f1, f2], {"P1": P1, "P2": P2}).changes[0]
-        # same pair but different kind (impossible in practice; pure function check)
         other = change_id_of(
             previous_fact_id=f1.fact_id,
             current_fact_id=f2.fact_id,
             change_type=ChangeType.QUALITATIVE,
         )
         assert num.change_id != other
+        # the three kinds are pairwise distinct for the same fact pair
+        ids = {
+            change_id_of(previous_fact_id=f1.fact_id, current_fact_id=f2.fact_id, change_type=t)
+            for t in ChangeType
+        }
+        assert len(ids) == 3
 
     def test_change_id_of_function(self):
-        a = change_id_of(
-            previous_fact_id="x",
-            current_fact_id="y",
-            change_type=ChangeType.NUMERIC,
-        )
-        b = change_id_of(
-            previous_fact_id="x",
-            current_fact_id="y",
-            change_type=ChangeType.NUMERIC,
-        )
-        c = change_id_of(
-            previous_fact_id="x",
-            current_fact_id="y",
-            change_type=ChangeType.TEXT,
-        )
+        a = change_id_of(previous_fact_id="x", current_fact_id="y", change_type=ChangeType.NUMERIC)
+        b = change_id_of(previous_fact_id="x", current_fact_id="y", change_type=ChangeType.NUMERIC)
+        c = change_id_of(previous_fact_id="x", current_fact_id="y", change_type=ChangeType.TEXT)
         assert a == b
         assert a != c
 
@@ -411,13 +959,40 @@ class TestSerialization:
         assert restored.previous_period.canonical() == "year:2026"
         assert restored.current_period.canonical() == "year:2026"
 
-    def test_no_mutation_of_source_facts(self):
-        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
-        f2 = mk_fact("P2", "policy_rate", percentage(4.25))
-        before = (f1.to_dict(), f2.to_dict())
+    def test_source_facts_immutable_snapshot(self):
+        f1 = mk_fact(
+            "P1", "policy_rate", percentage(4.00),
+            period=year("2026"), effective=datetime(2026, 1, 16),
+            source_text="rate at 4.00 percent",
+        )
+        f2 = mk_fact(
+            "P2", "policy_rate", percentage(4.25),
+            period=year("2026"), effective=datetime(2026, 3, 16),
+            source_text="rate at 4.25 percent",
+        )
+        snap1, snap2 = copy.deepcopy(f1), copy.deepcopy(f2)
         res = run([f1, f2], {"P1": P1, "P2": P2})
         assert res.changes
-        assert (f1.to_dict(), f2.to_dict()) == before
+        # full dataclass equality
+        assert f1 == snap1
+        assert f2 == snap2
+        # identity fields individually untouched
+        assert f1.fact_id == snap1.fact_id
+        assert f1.value == snap1.value
+        assert f1.period == snap1.period
+        assert f1.source_text == snap1.source_text
+        assert f1.source_location == snap1.source_location
+        assert f1.identity_qualifier == snap1.identity_qualifier
+        assert f1.effective_date == snap1.effective_date
+        assert f1.speaker == snap1.speaker
+        assert f2.fact_id == snap2.fact_id
+        assert f2.value == snap2.value
+        assert f2.period == snap2.period
+        assert f2.source_text == snap2.source_text
+        assert f2.source_location == snap2.source_location
+        assert f2.identity_qualifier == snap2.identity_qualifier
+        assert f2.effective_date == snap2.effective_date
+        assert f2.speaker == snap2.speaker
 
 
 # ---------------------------------------------------------------------------
@@ -430,9 +1005,10 @@ class TestStore:
         d = tempfile.mkdtemp()
         return Store(str(d) + "/test.db")
 
-    def _seed(self, store: Store) -> None:
-        for p in (P1, P2, P3):
+    def _seed(self, store: Store, pubs=(P1, P2, P3)) -> None:
+        for p in pubs:
             store.upsert_publication(p)
+            classify(store, p.id)
         store.save_fact(mk_fact("P1", "policy_rate", percentage(4.00)))
         store.save_fact(mk_fact("P2", "policy_rate", percentage(4.25)))
         store.save_fact(mk_fact("P3", "policy_rate", percentage(4.50)))
@@ -440,18 +1016,36 @@ class TestStore:
     def test_analyze_changes_persists(self):
         store = self._store()
         self._seed(store)
-        changes = analyze_changes(store, bank=BANK)
-        assert len(changes) == 2
+        result = analyze_changes(store, bank=BANK)
+        assert len(result.changes) == 2
         assert len(store.get_changes()) == 2
 
     def test_idempotent_rebuild(self):
         store = self._store()
         self._seed(store)
         first = analyze_changes(store, bank=BANK)
-        ids1 = [c.change_id for c in first]
+        ids1 = [c.change_id for c in first.changes]
         second = analyze_changes(store, bank=BANK)
         assert len(store.get_changes()) == 2
-        assert [c.change_id for c in second] == ids1
+        assert [c.change_id for c in second.changes] == ids1
+
+    def test_first_and_second_run_no_duplicates(self):
+        store = self._store()
+        self._seed(store)
+        analyze_changes(store, bank=BANK)
+        analyze_changes(store, bank=BANK)
+        rows = store.get_changes()
+        ids = [c.change_id for c in rows]
+        assert len(ids) == len(set(ids)) == 2
+
+    def test_rebuild_twice_same_state(self):
+        store = self._store()
+        self._seed(store)
+        first = analyze_changes(store, bank=BANK).changes
+        store.rebuild_changes(first, bank=BANK)
+        after = store.get_changes()
+        assert {c.change_id for c in after} == {c.change_id for c in first}
+        assert len(after) == len(first) == 2
 
     def test_empty_result_clears_scope(self):
         store = self._store()
@@ -463,18 +1057,33 @@ class TestStore:
         analyze_changes(store, bank=BANK)
         assert store.get_changes() == []
 
-    def test_bank_scoped_rebuild(self):
+    def test_rebuild_with_zero_changes_clears(self):
         store = self._store()
         self._seed(store)
-        fed_pub = mk_pub("F1", datetime(2026, 1, 15), bank="fed")
-        store.upsert_publication(fed_pub)
+        analyze_changes(store, bank=BANK)
+        assert len(store.get_changes()) == 2
+        store.rebuild_changes([], bank=BANK)
+        assert store.get_changes() == []
+
+    def test_bank_isolation(self):
+        # both banks have real changes; rebuilding A must not touch B.
+        store = self._store()
+        self._seed(store)
+        fed_pub1 = mk_pub("F1", datetime(2026, 1, 15), meeting_date=datetime(2026, 1, 15), bank="fed")
+        fed_pub2 = mk_pub("F2", datetime(2026, 3, 15), meeting_date=datetime(2026, 3, 15), bank="fed")
+        for p in (fed_pub1, fed_pub2):
+            store.upsert_publication(p)
+            classify(store, p.id, bank="fed")
         store.save_fact(mk_fact("F1", "policy_rate", percentage(5.00), bank="fed"))
+        store.save_fact(mk_fact("F2", "policy_rate", percentage(5.25), bank="fed"))
         analyze_changes(store, bank=BANK)
         analyze_changes(store, bank="fed")
-        ecb_changes = store.get_changes(bank=BANK)
-        fed_changes = store.get_changes(bank="fed")
-        assert len(ecb_changes) == 2
-        assert len(fed_changes) == 0  # a single fed observation → no changes
+        fed_before = {c.change_id for c in store.get_changes(bank="fed")}
+        assert len(fed_before) == 1
+        # rebuild bank A only; B stays intact
+        analyze_changes(store, bank=BANK)
+        assert {c.change_id for c in store.get_changes(bank="fed")} == fed_before
+        assert len(store.get_changes(bank=BANK)) == 2
 
     def test_get_changes_filters(self):
         store = self._store()
@@ -495,14 +1104,56 @@ class TestStore:
         assert store.delete_changes(bank=BANK) == 2
         assert store.get_changes() == []
 
-    def test_rebuild_changes_idempotent(self):
+    def test_store_stale_cache_ignored(self):
+        # authoritative classification = decision; denormalized cache corrupted
+        # to speech. analyze_changes must still use the classification.
         store = self._store()
         self._seed(store)
-        changes = analyze_changes(store, bank=BANK)
-        store.rebuild_changes(changes, bank=BANK)
-        assert len(store.get_changes()) == 2
-        store.rebuild_changes([], bank=BANK)
-        assert store.get_changes() == []
+        # corrupt the denormalized cache rows (the classifications table wins)
+        for pid in ("P1", "P2"):
+            store._conn.execute(
+                "UPDATE publications SET publication_type='speech' WHERE id=?", (pid,)
+            )
+        store._conn.commit()
+        result = analyze_changes(store, bank=BANK)
+        assert len(result.changes) == 2  # decision→decision, classification wins
+
+    def test_store_missing_classification_skips(self):
+        # a publication with facts but no classification row is skipped.
+        store = self._store()
+        self._seed(store, pubs=(P1, P2))
+        # P3 exists with facts but no classification → must be skipped
+        store.upsert_publication(P3)
+        store.save_fact(mk_fact("P3", "policy_rate", percentage(4.50)))
+        result = analyze_changes(store, bank=BANK)
+        # P1→P2 change remains; P2→P3 is skipped (P3 unclassified)
+        assert len(result.changes) == 1
+        assert result.changes[0].previous_publication_id == "P1"
+        assert result.changes[0].current_publication_id == "P2"
+        assert any(w.startswith("missing_classification:P3") for w in result.warnings)
+
+    def test_change_traces_to_source_facts_and_publications(self):
+        store = self._store()
+        self._seed(store)
+        result = analyze_changes(store, bank=BANK)
+        change = next(c for c in result.changes if c.previous_publication_id == "P1")
+        prev_fact = store.get_fact(change.previous_fact_id)
+        cur_fact = store.get_fact(change.current_fact_id)
+        assert prev_fact is not None and cur_fact is not None
+        # Change → previous Fact → previous publication/document
+        assert prev_fact.publication_id == change.previous_publication_id == "P1"
+        assert prev_fact.document_id == change.previous_document_id
+        prev_pub = store.get_publication(change.previous_publication_id)
+        assert prev_pub.central_bank == "ecb"
+        assert prev_pub.publication_type == DECISION
+        # Change → current Fact → current publication/document
+        assert cur_fact.publication_id == change.current_publication_id == "P2"
+        assert cur_fact.document_id == change.current_document_id
+        cur_pub = store.get_publication(change.current_publication_id)
+        assert cur_pub.central_bank == "ecb"
+        assert cur_pub.publication_type == DECISION
+        # the change is strictly derived: both sides exist and carry provenance
+        assert change.previous_document_id and change.current_document_id
 
     def test_phase5_11_coexistence(self):
         store = self._store()
@@ -510,10 +1161,11 @@ class TestStore:
         # a speech fact lives in the same store but never becomes a change
         speech = mk_pub("S", datetime(2026, 2, 1), ptype="speech")
         store.upsert_publication(speech)
+        classify(store, "S", ptype="speech")
         store.save_fact(mk_fact("S", "inflation", percentage(2.1)))
         store.save_fact(mk_fact("P2", "inflation", percentage(2.4)))
-        changes = analyze_changes(store, bank=BANK)
+        result = analyze_changes(store, bank=BANK)
         # decision policy-rate chain (2) + inflation across decision vs speech (0)
-        assert len(changes) == 2
+        assert len(result.changes) == 2
         assert len(store.get_facts()) == 5
         assert len(store.get_changes()) == 2

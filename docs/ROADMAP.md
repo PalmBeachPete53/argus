@@ -495,8 +495,21 @@ L'architecture doit rester extensible à d'autres banques centrales.
   comparaison **uniquement entre publications différentes** ; ordre par
   référence temporelle (`meeting_date` sinon `publication_date`, départage par
   `publication_id`) ; chaînage **consécutif** (F1→F2, F2→F3, jamais baseline
-  fixe) ; valeur identique → **aucun changement** ; mismatch de période (2027 vs
-  2028), de type de publication ou de `identity_qualifier` → aucun changement.
+  fixe, **jamais de pont** par-dessus une observation incomparable) ; valeur
+  identique → **aucun changement** ; mismatch de période (2027 vs 2028), de
+  type de publication ou de `identity_qualifier` → aucun changement.
+- **Classification = source de vérité** : le type de publication du matching
+  provient de la table **`classifications`** (jamais du cache dénormalisé
+  `publications.publication_type` quand une classification canonique existe) ;
+  une publication sans classification canonique est **ignorée**
+  (`missing_classification` / `unclassified_publication`) — `UNKNOWN >
+  INVENTION`, cache périmé jamais prioritaire.
+- **Repli `central_bank`** : `FactChange.central_bank = Fact.central_bank` sinon
+  `Publication.central_bank`, jamais inventé si les deux sont absents.
+- **Provenance complète et vérifiée** : les **deux** côtés portent fact_id,
+  document_id, publication_id, période, `effective_date`, `source_text`
+  (verbatim) et `value` — remontée sans ambiguïté `Change → Fact →
+  publication/document`.
 - **Strictement descriptif** : `delta = current − previous` (même kind/unité,
   arrondi à 10 décimales), aucun contenu économique (pas de hawkish/dovish, pas
   de tightening/easing), aucun scoring, pas de comparateur sémantique/fuzzy/LLM.
@@ -504,12 +517,26 @@ L'architecture doit rester extensible à d'autres banques centrales.
   `document_id`, `publication_id`, périodes, `effective_date` et `source_text`
   des deux côtés ; les faits sources ne sont jamais mutés.
 - **Persistance** : `fact_changes` dérivée — recomputation complète du scope
-  banque (ou global) et remplacement (idempotent, vide → purge du scope).
-- **Tests** : `tests/test_changes.py` (37 tests) — les trois types de
-  changement, deltas positifs/négatifs/nuls, no-change exacts, mismatch de
-  période/type/qualifier, ordre et chaînage, avertissements d'observabilité,
-  déterminisme, sérialisation, intégration `Store` idempotente et coexistence
-  Phases 5–11. **Suite complète : 563 tests verts et déterministes.**
+  banque (ou global) et remplacement (idempotent, vide → purge du scope,
+  isolation inter-banques).
+- **Durcissement profond (validation finale)** : `analyze_changes` charge la
+  classification autoritative via `Store.list_classifications` et retourne un
+  `FactChangeResult` (changes + warnings `missing_publication` /
+  `undocumented_fact` / `missing_classification` / `unclassified_publication` /
+  `undated_publication` / `valueless_fact`) ; `identity_qualifier` normalisé
+  (`None` ≡ `""`), unités incompatibles jamais sommées, `effective_date`
+  distincte de l'ordre et de la période, frontière de type de publication
+  verrouillée (decision↔speech, minutes↔decision incomparables), `change_id`
+  directionnel et déterministe, faits sources immuables (snapshot), persistance
+  idempotente/reconstruible isolée par banque ; `analysis_version` v12.1.0.
+- **Tests** : `tests/test_changes.py` (83 tests) — les trois types de
+  changement, deltas, no-change exacts, matching, classification source de
+  vérité (normal / cache périmé / absente / inconnue), repli `central_bank`,
+  provenance exhaustive par type, `source_text` verbatim, observation
+  incomparable sans pont, unités, `effective_date`, frontière de type,
+  qualificateur, période, chaînage F1→F4, identité directionnelle, immuabilité,
+  avertissements, persistance et coexistence Phases 5–11. **Suite complète :
+  609 tests verts et déterministes.**
 
 ## Phase 13 — Policy Reaction Function
 
@@ -667,12 +694,14 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   rejetées ; ancres génériques remplacées ou supprimées), 513 tests verts et
   déterministes.
 - **Phase 12 (Temporal / Cross-Publication Analysis)** : `src/argus/changes/`
-  validé — `FactChangeAnalyzer` pur et déterministe, trois types de changement,
-  matching exact (jamais de comparateur flou/LLM), chaînage consécutif
-  F1→F2→F3, `fact_changes` persistée de façon idempotente et reconstruisible,
-  provenance aux deux faits sources, aucun contenu économique ; 37 tests
-  dédiés, **563 tests verts et déterministes** (documenté dans
-  `docs/CHANGES.md`).
+  validé (**durcissement profond**) — `FactChangeAnalyzer` pur et déterministe,
+  trois types de changement, matching exact (jamais de comparateur flou/LLM),
+  **classification source de vérité** (table `classifications`, cache périmé
+  ignoré), repli `central_bank`, chaînage consécutif F1→F2→F3 sans pont sur
+  observation incomparable, provenance exhaustive aux deux faits sources,
+  `fact_changes` persistée de façon idempotente, reconstruisible et isolée par
+  banque, aucun contenu économique ; 83 tests dédiés, **609 tests verts et
+  déterministes** (documenté dans `docs/CHANGES.md`).
 - **Prochaine phase autorisée : Phase 13 — Policy Reaction Function** (statut
   `NEXT`).
 

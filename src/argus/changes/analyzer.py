@@ -9,19 +9,26 @@ Matching rules (documented in ``docs/CHANGES.md``):
    and to the *same observation lineage*: same central bank, subject,
    predicate, ``value.kind``, canonical period, identity qualifier **and**
    publication type.
-2. The comparison direction is decided by the publication temporal reference
+2. The publication type is the **authoritative classification** (from the
+   ``classifications`` table, passed as a mapping), never the denormalized
+   ``Publication.publication_type`` cache when an authoritative classification
+   is available. A publication without any canonical classification is skipped
+   (``UNKNOWN > INVENTION``).
+3. The comparison direction is decided by the publication temporal reference
    (``meeting_date`` when set, else ``publication_date``); ties are broken by
    publication id. Facts are then chained *consecutively* (F1→F2, F2→F3), never
-   against a fixed baseline.
-3. Identical values produce **no change**. A numeric difference produces
+   against a fixed baseline, and a pair that cannot be compared (e.g.
+   incompatible units) is never jumped over to bridge to a later observation.
+4. Identical values produce **no change**. A numeric difference produces
    ``numeric_changed`` with ``delta = current − previous`` (same kind/unit,
    rounded to 10 decimals); a categorical difference produces
    ``qualitative_changed``; a verbatim wording difference produces
    ``text_changed``. Period mismatch (e.g. a 2027 vs a 2028 forecast) and
    different identity qualifiers never match, so they never change.
-4. Facts whose publication is missing, unclassified (``unknown``/``other``),
-   undated, or which carry no value are skipped with an observability warning
-   (precision over recall: better no change than a spurious one).
+5. Facts whose publication is missing, whose classification is missing/unknown,
+   undated, valueless, or which carry no document id are skipped with an
+   observability warning (precision over recall: better no change than a
+   spurious one).
 
 No economic interpretation is ever attached to a change.
 """
@@ -53,25 +60,35 @@ class _Entry:
     fact: Fact
     publication: Publication
     reference: datetime
+    pub_type: str
 
 
 class FactChangeAnalyzer:
     """Pure temporal/cross-publication analyzer."""
 
-    analysis_version = "12.0.0"
+    analysis_version = "12.1.0"
 
     def analyze(
         self,
         facts: list[Fact],
         *,
         publications: Mapping[str, Publication] | None = None,
+        classifications: Mapping[str, str] | None = None,
     ) -> FactChangeResult:
         """Derive the changes between consecutive comparable observations.
 
         ``facts`` are the Facts to relate; ``publications`` maps
-        ``publication_id → Publication`` and supplies the publication type and
-        the temporal reference used to order observations. Facts whose
-        publication is absent from the mapping are skipped (warning).
+        ``publication_id → Publication`` and supplies the temporal reference
+        used to order observations.
+
+        ``classifications`` maps ``publication_id → publication_type`` and is
+        the **authoritative** source of the publication type. When provided,
+        ``Publication.publication_type`` is never trusted: a publication absent
+        from the mapping has **no canonical classification** and is skipped
+        (``missing_classification`` warning). When ``classifications`` is
+        ``None`` (standalone in-memory use), the analyzer falls back to the
+        denormalized ``Publication.publication_type`` — documented convenience,
+        never used by the production entry point ``analyze_changes``.
         """
         pubs: Mapping[str, Publication] = publications or {}
         result = FactChangeResult()
@@ -79,7 +96,7 @@ class FactChangeAnalyzer:
         # (bank, subject, predicate, value_kind, period, qualifier, pub_type)
         groups: dict[tuple, list[_Entry]] = {}
         for fact in facts:
-            entry = self._prepare(fact, pubs, result.warnings)
+            entry = self._prepare(fact, pubs, classifications, result.warnings)
             if entry is None:
                 continue
             key = self._key(entry)
@@ -106,15 +123,21 @@ class FactChangeAnalyzer:
         self,
         fact: Fact,
         pubs: Mapping[str, Publication],
+        classifications: Mapping[str, str] | None,
         warnings: list[str],
     ) -> _Entry | None:
+        if not fact.publication_id:
+            warnings.append(f"missing_publication:{fact.publication_id}")
+            return None
         pub = pubs.get(fact.publication_id)
         if pub is None:
             warnings.append(f"missing_publication:{fact.publication_id}")
             return None
-        pub_type = pub.publication_type
-        if not pub_type or pub_type in _UNCOMPARABLE_TYPES:
-            warnings.append(f"unclassified_publication:{pub.id}")
+        if not fact.document_id:
+            warnings.append(f"undocumented_fact:{fact.fact_id or fact.compute_fact_id()}")
+            return None
+        pub_type = self._resolve_type(pub, classifications, warnings)
+        if pub_type is None:
             return None
         reference = pub.meeting_date or pub.publication_date
         if reference is None:
@@ -123,7 +146,25 @@ class FactChangeAnalyzer:
         if fact.value is None or fact.value.kind is None or fact.value.kind is ValueKind.NULL:
             warnings.append(f"valueless_fact:{fact.fact_id or fact.compute_fact_id()}")
             return None
-        return _Entry(fact=fact, publication=pub, reference=reference)
+        return _Entry(fact=fact, publication=pub, reference=reference, pub_type=pub_type)
+
+    def _resolve_type(
+        self,
+        pub: Publication,
+        classifications: Mapping[str, str] | None,
+        warnings: list[str],
+    ) -> str | None:
+        if classifications is not None:
+            if pub.id not in classifications:
+                warnings.append(f"missing_classification:{pub.id}")
+                return None
+            pub_type = classifications[pub.id]
+        else:
+            pub_type = pub.publication_type
+        if not pub_type or pub_type in _UNCOMPARABLE_TYPES:
+            warnings.append(f"unclassified_publication:{pub.id}")
+            return None
+        return pub_type
 
     def _key(self, entry: _Entry) -> tuple:
         fact, pub = entry.fact, entry.publication
@@ -133,8 +174,8 @@ class FactChangeAnalyzer:
             fact.predicate,
             fact.value.kind,
             fact.period.canonical() if fact.period else "",
-            fact.identity_qualifier,
-            pub.publication_type,
+            fact.identity_qualifier or "",
+            entry.pub_type,
         )
 
     # ------------------------------------------------------------------
@@ -156,17 +197,21 @@ class FactChangeAnalyzer:
                 value=round(float(after.value) - float(before.value), 10),
                 unit=before.unit,
             )
-            return self._build(prev_fact, cur_fact, ChangeType.NUMERIC, delta)
+            return self._build(prev_fact, cur_fact, previous.publication, ChangeType.NUMERIC, delta)
 
         if before.kind is ValueKind.TEXT:
             if (before.value or "") == (after.value or ""):
                 return None
-            return self._build(prev_fact, cur_fact, ChangeType.TEXT, None)
+            return self._build(
+                prev_fact, cur_fact, previous.publication, ChangeType.TEXT, None
+            )
 
         # categorical / date / boolean / range / null — exact comparison only.
         if self._qualitative_equal(before, after):
             return None
-        return self._build(prev_fact, cur_fact, ChangeType.QUALITATIVE, None)
+        return self._build(
+            prev_fact, cur_fact, previous.publication, ChangeType.QUALITATIVE, None
+        )
 
     @staticmethod
     def _qualitative_equal(before: FactValue, after: FactValue) -> bool:
@@ -180,6 +225,7 @@ class FactChangeAnalyzer:
         self,
         prev_fact: Fact,
         cur_fact: Fact,
+        prev_pub: Publication,
         change_type: ChangeType,
         delta: FactValue | None,
     ) -> FactChange:
@@ -187,14 +233,16 @@ class FactChangeAnalyzer:
             previous_fact_id=prev_fact.fact_id,
             current_fact_id=cur_fact.fact_id,
             change_type=change_type,
-            central_bank=prev_fact.central_bank,
+            # Fact.central_bank wins; the publication's bank is the documented
+            # fallback, and a fully unplaced change keeps None (never invented).
+            central_bank=prev_fact.central_bank or prev_pub.central_bank,
             subject=prev_fact.subject,
             predicate=prev_fact.predicate,
             value_kind=prev_fact.value.kind.value if prev_fact.value else None,
             previous_value=prev_fact.value,
             current_value=cur_fact.value,
             delta=delta,
-            identity_qualifier=prev_fact.identity_qualifier,
+            identity_qualifier=prev_fact.identity_qualifier or "",
             previous_period=prev_fact.period,
             current_period=cur_fact.period,
             previous_publication_id=prev_fact.publication_id,
@@ -214,9 +262,15 @@ def analyze_changes(
     *,
     bank: str | None = None,
     persist: bool = True,
-) -> list[FactChange]:
+) -> FactChangeResult:
     """Recompute the changes of a bank (or the whole store) from the current
-    facts table, persist them idempotently, and return them.
+    facts table, persist them idempotently, and return the result (changes +
+    observability warnings).
+
+    The publication type is taken from the authoritative ``classifications``
+    table (never from the denormalized ``publications.publication_type``
+    cache), matching the architecture: ``classifications → publication type →
+    FactChange matching``.
 
     The ``fact_changes`` table is derived data: ``analyze_changes`` recomputes
     the full bank scope and *replaces* it (``rebuild_changes``), so repeated
@@ -225,8 +279,14 @@ def analyze_changes(
     """
     publications = store.list_publications(bank=bank)
     pubs: dict[str, Publication] = {p.id: p for p in publications if p.id}
+    classifications: dict[str, str] = {
+        c["publication_id"]: c["publication_type"]
+        for c in store.list_classifications(bank=bank)
+    }
     facts = store.get_facts(bank=bank)
-    result = FactChangeAnalyzer().analyze(facts, publications=pubs)
+    result = FactChangeAnalyzer().analyze(
+        facts, publications=pubs, classifications=classifications
+    )
     if persist:
         store.rebuild_changes(result.changes, bank=bank)
-    return result.changes
+    return result
