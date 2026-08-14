@@ -159,28 +159,50 @@ _IGNORE_HEADING_MARKERS = (
     "monetary policy report",
     "note",
 )
-_POLICY_HEADINGS = ("monetary policy developments", "monetary policy", "policy considerations", "policy decisions", "policy stance")
-_RISK_HEADINGS = ("risk assessment", "risks", "risk")
-_INFLATION_HEADINGS = ("prices and costs", "price developments", "inflation")
-_LABOUR_HEADINGS = ("labour market", "employment", "wages")
-_FINANCIAL_HEADINGS = ("financial developments", "financial conditions", "financial markets", "money and credit", "monetary and financial")
-_GROWTH_HEADINGS = ("economic activity", "real economy", "growth", "output", "economic outlook")
-_FISCAL_HEADINGS = ("fiscal developments", "fiscal policy", "fiscal")
-_GENERAL_HEADINGS = (
+# Headings are matched EXACTLY on the normalized heading (lowercased,
+# de-numbered, de-footnoted, leading "the" and trailing punctuation removed).
+# Substring routing is intentionally gone: "Non-economic developments" must
+# never be read as "economic", "Risk management" never as "risk", "Fiscal
+# institutions" never as "fiscal", "Employment policy" never as "employment".
+# Only these controlled, known headings mark a section as mined; any other
+# heading — even one full of economic-looking sentences — is ignored
+# (``UNKNOWN ≠ ECONOMIC``).
+_POLICY_HEADINGS = frozenset({
+    "monetary policy developments", "monetary policy", "policy considerations",
+    "policy decisions", "policy stance", "monetary policy stance",
+})
+_RISK_HEADINGS = frozenset({"risk assessment", "risks", "risk"})
+_INFLATION_HEADINGS = frozenset({"prices and costs", "price developments", "inflation"})
+_LABOUR_HEADINGS = frozenset({
+    "labour market", "labor market", "employment", "wages", "wage developments",
+})
+_FINANCIAL_HEADINGS = frozenset({
+    "financial developments", "financial conditions", "financial markets",
+    "money and credit", "monetary and financial", "financial system",
+})
+_GROWTH_HEADINGS = frozenset({
+    "economic activity", "real economy", "growth", "output",
+    "economic outlook", "euro area economy",
+})
+_FISCAL_HEADINGS = frozenset({"fiscal developments", "fiscal policy", "fiscal", "public finances"})
+_GENERAL_HEADINGS = frozenset({
     "external environment", "international environment", "economic and monetary developments",
     "economic analysis", "overview", "summary", "executive summary", "world economy",
     "global economy", "economic",
-)
+})
 
 _FOOTNOTE_MARK = re.compile(r"\s*(?:\(\d+\)|\[\d+\]|\d+\)|[*†‡]+)\s*$")
 _BOX_PREFIX = re.compile(r"^\s*box\b", re.IGNORECASE)
 _LEADING_NUM = re.compile(r"^\s*(?:[0-9]+(?:\.[0-9]+)*)\s*[-–—.:]?\s*")
+_LEADING_THE = re.compile(r"^the\s+")
+_TRAILING_PUNCT = re.compile(r"[\s.:;,\-–—]+$")
 
 
 def _section_category(heading: str) -> str:
     """Route a section by its normalized heading: ``CAT_IGNORE`` or a mined
-    category label. The label does not constrain the per-sentence
-    classification (content-first), it only marks the section as mined."""
+    category label. Only the controlled exact headings in the sets above are
+    mined; the label does not constrain the per-sentence classification
+    (content-first), it only marks the section as mined."""
     t = normalize_title(heading or "")
     if not t:
         return CAT_IGNORE
@@ -188,23 +210,25 @@ def _section_category(heading: str) -> str:
         return CAT_IGNORE  # analytical boxes are never mined
     t = _LEADING_NUM.sub("", t).strip()
     t = _FOOTNOTE_MARK.sub("", t).strip()
+    t = _LEADING_THE.sub("", t).strip()
+    t = _TRAILING_PUNCT.sub("", t).strip()
     if any(marker in t for marker in _IGNORE_HEADING_MARKERS):
         return CAT_IGNORE
-    if any(marker in t for marker in _POLICY_HEADINGS):
+    if t in _POLICY_HEADINGS:
         return CAT_POLICY
-    if any(marker in t for marker in _RISK_HEADINGS):
+    if t in _RISK_HEADINGS:
         return CAT_RISK
-    if any(marker in t for marker in _INFLATION_HEADINGS):
+    if t in _INFLATION_HEADINGS:
         return CAT_INFLATION
-    if any(marker in t for marker in _LABOUR_HEADINGS):
+    if t in _LABOUR_HEADINGS:
         return CAT_LABOUR
-    if any(marker in t for marker in _FINANCIAL_HEADINGS):
+    if t in _FINANCIAL_HEADINGS:
         return CAT_FINANCIAL
-    if any(marker in t for marker in _GROWTH_HEADINGS):
+    if t in _GROWTH_HEADINGS:
         return CAT_GROWTH
-    if any(marker in t for marker in _FISCAL_HEADINGS):
+    if t in _FISCAL_HEADINGS:
         return CAT_FISCAL
-    if any(marker in t for marker in _GENERAL_HEADINGS):
+    if t in _GENERAL_HEADINGS:
         return CAT_GENERAL
     return CAT_IGNORE
 
@@ -225,20 +249,34 @@ _GUIDANCE_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\bwill\s+keep\s+(?:the\s+)?(?:key\s+)?(?:ecb\s+)?interest\s+rates?\b", re.IGNORECASE),
     re.compile(r"\bexpects?\s+(?:the\s+)?(?:key\s+)?(?:ecb\s+)?interest\s+rates?\s+to\s+remain\b", re.IGNORECASE),
     re.compile(r"\bwill\s+be\s+guided\s+by\b", re.IGNORECASE),
-    re.compile(r"\bwill\s+depend\s+on\b", re.IGNORECASE),
+    re.compile(r"\b(?:future\s+)?(?:policy\s+)?(?:decisions?|rates?)\s+(?:will|would)\s+depend\s+on\b", re.IGNORECASE),
     re.compile(r"\bdata-?dependent\b", re.IGNORECASE),
     re.compile(r"\bwill\s+not\s+pre-?commit\b", re.IGNORECASE),
     re.compile(r"\bfuture\s+(?:policy\s+)?decisions\b", re.IGNORECASE),
     re.compile(r"\bpolicy\s+path\b", re.IGNORECASE),
-    re.compile(r"\bwill\s+continue\s+to\s+(?:monitor|assess|follow)\b", re.IGNORECASE),
+    re.compile(r"\bwill\s+continue\s+to\s+(?:monitor|assess)\b", re.IGNORECASE),
     re.compile(r"\bmeeting\s+by\s+meeting\b", re.IGNORECASE),
 )
 
 # D — policy stance/decisions. Compound signal (a stance word AND a policy
 # term) so "the growth trajectory" is never mined as policy; plus the
 # stance-phrase pattern for unambiguous "accommodative/restrictive stance".
+# The bare tokens "policy", "rate"/"rates" are deliberately absent — generic
+# single words ("policy implementation", "policy rate of change") are not a
+# policy signal; the term must be monetary-policy specific.
 _POLICY_TERM = re.compile(
-    r"\b(?:policy|monetary|rate|rates|interest rates?|governing council|council|instruments? within its mandate)\b",
+    r"\b(?:"
+    r"monetary(?:\s+policy)?"
+    r"|monetary\s+policy\s+stance"
+    r"|interest\s+rates?"
+    r"|key\s+ecb\s+interest\s+rates?"
+    r"|policy\s+rates?"
+    r"|governing\s+council"
+    r"|council"
+    r"|eurosystem"
+    r"|(?:key\s+)?policy\s+instruments?"
+    r"|instruments?\s+within\s+(?:its|the)\s+mandate"
+    r")\b",
     re.IGNORECASE,
 )
 _POLICY_STANCE = re.compile(
@@ -255,7 +293,8 @@ _POLICY_STANCE = re.compile(
     re.IGNORECASE,
 )
 _POLICY_STANCE_PHRASE = re.compile(
-    r"\b(?:appropriate|restrictive|accommodative|neutral|loose)\s+stance\b"
+    r"\b(?:monetary\s+policy\s+stance|policy\s+stance)\b"
+    r"|\b(?:appropriate|restrictive|accommodative|neutral|loose)\s+stance\s+of\s+(?:monetary\s+)?policy\b"
     r"|\bstance\s+of\s+(?:monetary\s+)?policy\b",
     re.IGNORECASE,
 )
@@ -268,23 +307,27 @@ def _is_policy_sentence(sentence: str) -> bool:
 
 
 _RISK_ANCHORS: tuple[re.Pattern, ...] = (
-    re.compile(r"\brisk", re.IGNORECASE),
-    re.compile(r"\buncertain", re.IGNORECASE),
+    re.compile(r"\brisks?\s+(?:to|for|around|surrounding|from|of|are|were|remain|remained|have|has)\b", re.IGNORECASE),
+    re.compile(r"\b(?:downside|upside|two-sided|symmetric|broadly\s+balanced)\s+risks?\b", re.IGNORECASE),
+    re.compile(r"\buncertain(?:ty|ties)?\b", re.IGNORECASE),
     re.compile(r"\btilted\b", re.IGNORECASE),
 )
 
 _FINANCIAL_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\bfinancial conditions\b", re.IGNORECASE),
     re.compile(r"\bfinancing conditions?\b", re.IGNORECASE),
+    # "credit" is kept intentionally: in a monetary policy report the word
+    # reliably denotes credit creation/conditions ("non-financial corporations"
+    # is never caught because it carries no bare "credit" token).
     re.compile(r"\bcredit\b", re.IGNORECASE),
     re.compile(r"\bbank lending\b", re.IGNORECASE),
-    re.compile(r"\blending\b", re.IGNORECASE),
-    re.compile(r"\bspreads?\b", re.IGNORECASE),
-    re.compile(r"\btransmission\b", re.IGNORECASE),
+    re.compile(r"\b(?:bank\s+lending|lending\s+(?:rates?|growth|to|conditions?))\b", re.IGNORECASE),
+    re.compile(r"\b(?:yield|credit|sovereign|bond|rate)\s+spreads?\b", re.IGNORECASE),
+    re.compile(r"\bmonetary\s+policy\s+transmission\b", re.IGNORECASE),
     re.compile(r"\bmarket rates?\b", re.IGNORECASE),
     re.compile(r"\bborrowing costs?\b", re.IGNORECASE),
     re.compile(r"\bbond markets?\b", re.IGNORECASE),
-    re.compile(r"\bfunding\b", re.IGNORECASE),
+    re.compile(r"\b(?:funding\s+(?:conditions?|costs?|markets?|constraints?|gaps?)|bank\s+funding)\b", re.IGNORECASE),
     re.compile(r"\bfinancial stability\b", re.IGNORECASE),
 )
 
@@ -292,7 +335,7 @@ _INFLATION_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\binflation\b", re.IGNORECASE),
     re.compile(r"\bdisinflation\b", re.IGNORECASE),
     re.compile(r"\bhicp\b", re.IGNORECASE),
-    re.compile(r"\bcore\b", re.IGNORECASE),
+    re.compile(r"\bcore\s+(?:inflation|hicp)\b", re.IGNORECASE),
     re.compile(r"\bdeflation\b", re.IGNORECASE),
     re.compile(r"\bprice pressures\b", re.IGNORECASE),
     re.compile(r"\benergy prices\b", re.IGNORECASE),
@@ -303,17 +346,16 @@ _LABOUR_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\blabour market\b", re.IGNORECASE),
     re.compile(r"\blabor market\b", re.IGNORECASE),
     re.compile(r"\bunemployment\b", re.IGNORECASE),
-    re.compile(r"\bemployment\b", re.IGNORECASE),
-    re.compile(r"\bwage\b", re.IGNORECASE),
-    re.compile(r"\bwages\b", re.IGNORECASE),
+    re.compile(r"\bemployment\b(?!\s+policy\b)", re.IGNORECASE),
+    re.compile(r"\bwage(?:s)?\b(?!\s+policy\b)", re.IGNORECASE),
 )
 
 _GROWTH_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\bgrowth\b", re.IGNORECASE),
     re.compile(r"\bgdp\b", re.IGNORECASE),
-    re.compile(r"\bactivity\b", re.IGNORECASE),
+    re.compile(r"\b(?:economic\s+)?activity\b", re.IGNORECASE),
     re.compile(r"\beconom(?:y|ic)\b", re.IGNORECASE),
-    re.compile(r"\boutput\b", re.IGNORECASE),
+    re.compile(r"\b(?:real\s+output|industrial\s+output|output\s+growth|output\s+gaps?|potential\s+output)\b", re.IGNORECASE),
     re.compile(r"\bdemand\b", re.IGNORECASE),
     re.compile(r"\bconsumption\b", re.IGNORECASE),
     re.compile(r"\binvestment\b", re.IGNORECASE),

@@ -995,24 +995,48 @@ identity (subject + predicate + value + unit + period when applicable) +
 provenance. An unknown section — even one full of economic-looking sentences —
 is never mined (`UNKNOWN ≠ ECONOMIC`).
 
-### Conservative section routing
+### Conservative section routing — exact controlled headings
 
-A section is mined only when its normalized heading is a **known economic
-section**; a **known non-economic heading and an unknown heading are both
-ignored** ("absence of proof → absence of extraction"). Known non-economic /
-non-mined headings include the report title (`economic bulletin`,
-`monetary policy report`), `foreword`, `editorial`, `legal notice`,
+A section is mined only when its normalized heading is one of the **controlled
+exact headings** below; a **known non-economic heading and an unknown heading
+are both ignored** ("absence of proof → absence of extraction"). Known
+non-economic / non-mined headings include the report title (`economic
+bulletin`, `monetary policy report`), `foreword`, `editorial`, `legal notice`,
 `disclaimer`, `copyright`, `imprint`, `statistical annex`, `statistics`,
 `annex`, `appendix`, `glossary`, `references`, `bibliography`,
 `abbreviations`, `acknowledgements`, `contents`, `methodology` and `note`.
 Analytical **boxes** ("Box 1 — …") are deliberately never mined: they are
-interpretive essays. Heading numbering ("2 Economic activity 1)") and footnote
-markers are normalized away before routing. Mined economic headings: policy
-(`monetary policy developments`), risk (`risk assessment`), inflation
-(`prices and costs`), labour (`labour market`, `wages`), financial
-(`financial developments`, `money and credit`), growth (`economic activity`,
-`economic outlook`), fiscal (`fiscal developments`) and general (`overview`,
-`external environment`, `economic analysis`).
+interpretive essays.
+
+Heading normalization is **controlled**: lowercase, collapsed whitespace,
+leading numbering ("2 Economic activity 1)"), footnote markers, a leading "the"
+and trailing punctuation are stripped — nothing else. Matching is then
+**exact**: a marker inside a heading is never a match. "Risk management" is
+never read as `risk`, "Non-economic developments" never as `economic`,
+"Fiscal institutions" never as `fiscal`, "Employment policy" never as
+`employment`, "Output developments" never as `output`, "Financial
+institutions" never as `financial`, "Core developments" never as `core`, and
+"Economic history" never as `economic` (all regression-tested near-misses,
+each yielding 0 facts).
+
+Mined economic headings (exact normalized strings):
+
+- **policy**: `monetary policy developments`, `monetary policy`, `policy
+  considerations`, `policy decisions`, `policy stance`, `monetary policy
+  stance`;
+- **risk**: `risk assessment`, `risks`, `risk`;
+- **inflation**: `prices and costs`, `price developments`, `inflation`;
+- **labour**: `labour market`, `labor market`, `employment`, `wages`, `wage
+  developments`;
+- **financial**: `financial developments`, `financial conditions`, `financial
+  markets`, `money and credit`, `monetary and financial`, `financial system`;
+- **growth**: `economic activity`, `real economy`, `growth`, `output`,
+  `economic outlook`, `euro area economy`;
+- **fiscal**: `fiscal developments`, `fiscal policy`, `fiscal`, `public
+  finances`;
+- **general**: `external environment`, `international environment`, `economic
+  and monetary developments`, `economic analysis`, `overview`, `summary`,
+  `executive summary`, `world economy`, `global economy`, `economic`.
 
 ### Content-first classification
 
@@ -1021,6 +1045,34 @@ fixed deterministic precedence: **guidance > policy > risk > financial >
 inflation > labour > growth > fiscal**. The heading only gates *whether* the
 section is mined, never *how* a sentence is classified. An unmatched sentence
 produces no fact (reliability over coverage).
+
+Content anchors are **context-specific markers, never bare generic tokens**
+(the near-miss policy: a single lexical match is insufficient):
+
+- `core` only fires as `core inflation` / `core hicp` ("core developments" is
+  not an inflation signal);
+- `output` only fires as `real output` / `industrial output` / `output growth`
+  / `output gap(s)` / `potential output` ("output of financial institutions"
+  is not a growth signal); `activity` fires as `(economic) activity`;
+- `lending` only as `bank lending` / `lending to …` / `lending rates|growth|
+  conditions`; `spreads` only with an instrument (`yield|credit|sovereign|
+  bond|rate spreads`); `transmission` only as `monetary policy transmission`;
+  `funding` only as `funding conditions|costs|markets|constraints|gaps` or
+  `bank funding`;
+- policy requires a **monetary-specific term** (`monetary policy`,
+  `interest rates`, `policy rates`, `governing council`, `eurosystem`,
+  `policy instruments`, …) — bare `policy` / `rate` are never policy signals
+  ("policy implementation" is not mined);
+- risk requires a connector (`risks to / for / around / surrounding / from /
+  of / are / were / remain …`), a directional qualifier (`downside / upside /
+  two-sided / symmetric / broadly balanced risks`), `uncertainty` /
+  `uncertainties` or `tilted` — a bare "risk management framework" is not a
+  risk signal;
+- `employment` / `wage(s)` exclude a following `policy` ("employment policy"
+  is not a labour signal).
+
+The result is deterministic, local and explainable: no fuzzy matching, no
+embeddings, no semantic similarity, no LLM.
 
 ### Supported facts
 
@@ -1198,6 +1250,15 @@ asserts, per fixture:
   headings and analytical boxes ignored — including economic content under an
   unknown heading → 0 facts), content-first precedence (guidance > policy >
   risk > financial > inflation > labour > growth > fiscal);
+- Phase 10 hardening near-misses: exact heading routing (the nine near-miss
+  headings — `Non-financial developments`, `Non-economic developments`,
+  `Financial institutions`, `Core developments`, `Output developments`,
+  `Risk management`, `Fiscal institutions`, `Employment policy`, `Economic
+  history` — each yield 0 facts while their legitimate counterparts are still
+  mined; heading normalization covers case, numbering, punctuation and a
+  leading "the") and context-specific content anchors (per-category near-miss
+  sentences yield 0 facts while the contextual positives are mined with the
+  correct subject, predicate, value and source_text);
 - the value gate: explicit claim verbs only, share units ("% of GDP") never
   percentages, basis points never percentages, forecasts without a period
   ignored, periods from wording (year / month / quarter);

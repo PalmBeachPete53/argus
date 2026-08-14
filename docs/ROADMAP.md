@@ -379,7 +379,8 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4.
 - **Critères de validation** : les affirmations contextuelles sont reliées à
   leur source.
-- **Statut** : `COMPLETE` — extracteur `EcbReportsExtractor` (v10.0.0,
+- **Statut** : `IN PROGRESS` — **durcissement Phase 10** (validation finale en
+  cours) de l'extracteur `EcbReportsExtractor` (v10.0.0,
   `src/argus/reports/`). Implémenté : routage **conservateur** par titre de
   section (titres économiques connus extraits — activité économique, prix et
   coûts, développements financiers, développements budgétaires, développements
@@ -409,11 +410,25 @@ L'architecture doit rester extensible à d'autres banques centrales.
   institutionnelle collective), `identity_qualifier`
   `report:{subject}:{ordinal}`, gating strict par classification
   (`monetary_policy_report`), persistance idempotente (résultats vides
-  compris). 5 fixtures (`ecb_report.html`, `ecb_report_tables.html`,
+  compris). **Durcissement en cours** : routage des titres par correspondance
+  **exacte** sur les titres contrôlés (plus aucun routage par sous-chaîne —
+  « Risk management », « Non-economic developments », « Fiscal institutions »,
+  « Employment policy », « Output developments », « Financial institutions »,
+  « Core developments », « Economic history » → 0 fait, testé) et ancres de
+  contenu **contextuelles** (multi-mots requis : `core inflation`/`core hicp`,
+  `real output`/`output growth`/`output gap(s)`/`potential output`,
+  `(economic) activity`, `bank lending`/`lending to …`, `yield|credit|
+  sovereign|bond|rate spreads`, `monetary policy transmission`,
+  `funding conditions|costs|markets|constraints|gaps`, terme de politique
+  **monétaire-spécifique** — `policy`/`rate` seuls retirés —, `risks to/for/
+  around/surrounding/from/of/are/were/remain…` ou qualificatif directionnel,
+  `employment`/`wage(s)` excluant `policy`). 5 fixtures
+  (`ecb_report.html`, `ecb_report_tables.html`,
   `ecb_report_risks.html`, `ecb_report_unknown.html`,
   `ecb_report_minimal.html`), golden tests (valeurs exactes, provenance
   verbatim section/tableau, routage, garde de valeur, déduplication, aucun
-  fait inventé), extraction déterministe, persistance idempotente, gating par
+  fait inventé), tests near-miss (titres et contenu), extraction déterministe,
+  persistance idempotente, gating par
   classification et coexistence Phases 5/6/7/8/9 vérifiées ;
   `docs/EXTRACTORS.md` documente la couverture réelle.
 
@@ -580,16 +595,19 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 ## Current Position
 
-- Argus se situe au début de la **Phase 11 (Speeches & Interviews)**.
-- Les phases 0 à 10 sont marquées `COMPLETE` après vérification du repository
+- Argus est au **durcissement de la Phase 10 (Monetary Policy Reports)** —
+  validation finale (routage exact des titres + ancres de contenu
+  contextuelles) en cours ; la Phase 10 n'est pas marquée `COMPLETE` avant
+  cette validation.
+- Les phases 0 à 9 sont marquées `COMPLETE` après vérification du repository
   (adapters, discovery, collector/fetcher, normalization, classification,
   modèle `Fact`, extracteurs ECB `EcbDecisionExtractor` v5.2.0,
   `EcbMonetaryPolicyStatementExtractor` v6.0.0,
-  `EcbPressConferenceExtractor` v7.0.0, `EcbMinutesExtractor` v8.0.0,
-  `EcbProjectionsExtractor` v9.0.0 et `EcbReportsExtractor` v10.0.0, tables
+  `EcbPressConferenceExtractor` v7.0.0, `EcbMinutesExtractor` v8.0.0 et
+  `EcbProjectionsExtractor` v9.0.0, tables
   SQLite correspondantes, tests).
 - **Prochaine phase autorisée : Phase 11 — Speeches & Interviews** (statut
-  `NOT STARTED`).
+  `NOT STARTED`), seulement après validation finale de la Phase 10.
 
 ## Out of Scope
 

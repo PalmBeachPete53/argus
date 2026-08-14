@@ -355,6 +355,263 @@ def test_known_general_overview_heading_is_mined():
 
 
 # ---------------------------------------------------------------------------
+# Phase 10 hardening — exact heading routing (near-miss + identity)
+# ---------------------------------------------------------------------------
+
+NEAR_MISS_HEADINGS = [
+    "Non-financial developments",
+    "Non-economic developments",
+    "Financial institutions",
+    "Core developments",
+    "Output developments",
+    "Risk management",
+    "Fiscal institutions",
+    "Employment policy",
+    "Economic history",
+]
+
+NEAR_MISS_TEXT = (
+    "Inflation is projected to average 2.4% in 2026. "
+    "Risks to growth were tilted to the downside."
+)
+
+
+def test_near_miss_headings_are_never_mined():
+    # substring routing is gone: a marker inside a near-miss heading ("risk"
+    # in "Risk management", "economic" in "Non-economic developments",
+    # "fiscal" in "Fiscal institutions", "employment" in "Employment policy",
+    # "output" in "Output developments", "financial" in "Financial
+    # institutions") must never route the section.
+    for heading in NEAR_MISS_HEADINGS:
+        result = EcbReportsExtractor().extract(
+            reports_publication(), _doc_with_sections([_section(heading, NEAR_MISS_TEXT)])
+        )
+        assert result.facts == [], heading
+        assert result.warnings == ["no_economic_sections", "no_risk_assessment", "no_forward_guidance"], heading
+
+
+LEGIT_HEADING_ROUTING = {
+    "Financial developments": ("Financing conditions remained tight.", SUBJECT_FINANCIAL_CONDITIONS),
+    "Economic activity": ("Real GDP is projected to grow by 1.2% in 2026.", SUBJECT_GDP),
+    "Prices and costs": ("Inflation is projected to average 2.0% in 2026.", SUBJECT_INFLATION),
+    "Risk assessment": ("Risks to growth were broadly balanced.", SUBJECT_GROWTH_RISK),
+    "Fiscal developments": ("Fiscal policy is expected to remain neutral.", SUBJECT_FISCAL_POLICY),
+    "Monetary policy developments": ("The Governing Council decided to keep its key interest rates unchanged.", SUBJECT_MONETARY_POLICY),
+    "Labour market": ("The labour market remained resilient.", SUBJECT_LABOUR_MARKET),
+    "Overview": ("Inflation averaged 2.4% in 2024.", SUBJECT_INFLATION),
+    "External environment": ("Global growth remained moderate.", SUBJECT_GROWTH),
+}
+
+
+def test_legitimate_heading_variants_are_still_mined():
+    for heading, (text, subject) in LEGIT_HEADING_ROUTING.items():
+        result = EcbReportsExtractor().extract(
+            reports_publication(), _doc_with_sections([_section(heading, text)])
+        )
+        assert result.facts, heading
+        assert {f.subject for f in result.facts} == {subject}, heading
+
+
+def test_heading_normalization_controls_case_numbering_punctuation_and_the():
+    for heading in (
+        "ECONOMIC ACTIVITY",
+        "3.2 Economic activity",
+        "Economic activity:",
+        "Economic activity.",
+        "The economic activity",
+        "Economic activity 2)",
+    ):
+        result = EcbReportsExtractor().extract(
+            reports_publication(),
+            _doc_with_sections([_section(heading, "Real GDP is projected to grow by 1.2% in 2026.")]),
+        )
+        assert result.facts, heading
+        assert result.facts[0].subject == SUBJECT_GDP, heading
+
+
+def test_heading_routing_is_exact_identity_not_substring():
+    mined = EcbReportsExtractor().extract(
+        reports_publication(), _doc_with_sections([_section("Risk", "Downside risks increased.")])
+    )
+    assert mined.facts
+    ignored = EcbReportsExtractor().extract(
+        reports_publication(), _doc_with_sections([_section("Risk management", "Downside risks increased.")])
+    )
+    assert ignored.facts == []
+    assert ignored.warnings == ["no_economic_sections", "no_risk_assessment", "no_forward_guidance"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 10 hardening — content anchors require context, never a bare token
+# ---------------------------------------------------------------------------
+
+
+def test_inflation_near_misses_require_inflation_context():
+    result = EcbReportsExtractor().extract(
+        reports_publication(),
+        _doc_with_sections([_section("Prices and costs", "Core developments remained broadly based.")]),
+    )
+    assert result.facts == []
+
+
+def test_inflation_context_variants_are_mined():
+    sections = [
+        _section("Prices and costs", "Inflation expectations increased."),
+        _section("Prices and costs", "Core inflation increased."),
+    ]
+    result = EcbReportsExtractor().extract(reports_publication(), _doc_with_sections(sections))
+    assert {f.subject for f in result.facts} == {SUBJECT_INFLATION_EXPECTATIONS, SUBJECT_CORE_INFLATION}
+
+
+def test_growth_near_misses_require_growth_context():
+    result = EcbReportsExtractor().extract(
+        reports_publication(),
+        _doc_with_sections([_section("Economic activity", "Output of financial institutions remained stable.")]),
+    )
+    assert result.facts == []
+
+
+def test_growth_context_variants_are_mined():
+    sections = [
+        _section("Economic activity", "Economic activity remained broadly stable."),
+        _section("Economic activity", "Real GDP growth increased."),
+    ]
+    result = EcbReportsExtractor().extract(reports_publication(), _doc_with_sections(sections))
+    assert {f.subject for f in result.facts} == {SUBJECT_GROWTH}
+    assert len(result.facts) == 2
+    assert all(f.predicate == "assessment" for f in result.facts)
+
+
+def test_financial_near_misses_require_financial_context():
+    result = EcbReportsExtractor().extract(
+        reports_publication(),
+        _doc_with_sections([_section("Financial developments", "Non-financial corporations remained resilient.")]),
+    )
+    assert result.facts == []
+
+
+def test_financial_context_variants_are_mined():
+    sections = [
+        _section("Financial developments", "Financial conditions tightened."),
+        _section("Financial developments", "Bank lending weakened."),
+    ]
+    result = EcbReportsExtractor().extract(reports_publication(), _doc_with_sections(sections))
+    assert {f.subject for f in result.facts} == {SUBJECT_FINANCIAL_CONDITIONS}
+    assert len(result.facts) == 2
+    assert all(f.predicate == "assessment" for f in result.facts)
+
+
+def test_risk_near_misses_require_risk_context():
+    result = EcbReportsExtractor().extract(
+        reports_publication(),
+        _doc_with_sections([_section("Risk assessment", "Risk management framework was strengthened.")]),
+    )
+    assert result.facts == []
+
+
+def test_risk_context_variants_are_mined():
+    sections = [
+        _section("Risk assessment", "Downside risks increased."),
+    ]
+    result = EcbReportsExtractor().extract(reports_publication(), _doc_with_sections(sections))
+    assert len(result.facts) == 1
+    assert result.facts[0].subject == SUBJECT_RISK
+    assert result.facts[0].predicate == "assessment"
+    assert result.facts[0].value.value == "downside"
+    assert result.facts[0].value.kind is ValueKind.CATEGORICAL
+
+
+def test_policy_near_misses_require_policy_context():
+    result = EcbReportsExtractor().extract(
+        reports_publication(),
+        _doc_with_sections([_section("Monetary policy developments", "Policy implementation continued at a steady pace.")]),
+    )
+    assert result.facts == []
+
+
+def test_policy_context_variants_are_mined():
+    sections = [
+        _section("Monetary policy developments", "The monetary policy stance remained appropriately calibrated."),
+    ]
+    result = EcbReportsExtractor().extract(reports_publication(), _doc_with_sections(sections))
+    assert len(result.facts) == 1
+    assert result.facts[0].subject == SUBJECT_MONETARY_POLICY
+    assert result.facts[0].predicate == "statement"
+    assert result.facts[0].source_text == "The monetary policy stance remained appropriately calibrated."
+
+
+def test_labour_near_misses_require_labour_context():
+    result = EcbReportsExtractor().extract(
+        reports_publication(),
+        _doc_with_sections([_section("Labour market", "Employment policy remained stable.")]),
+    )
+    assert result.facts == []
+
+
+def test_labour_context_variants_are_mined():
+    sections = [
+        _section("Labour market", "Employment increased further."),
+    ]
+    result = EcbReportsExtractor().extract(reports_publication(), _doc_with_sections(sections))
+    assert len(result.facts) == 1
+    assert result.facts[0].subject == SUBJECT_LABOUR_MARKET
+    assert result.facts[0].predicate == "assessment"
+    assert result.facts[0].value.kind is ValueKind.TEXT
+
+
+# ---------------------------------------------------------------------------
+# Phase 10 hardening — content-first precedence is fixed and deterministic
+# ---------------------------------------------------------------------------
+
+
+def test_content_precedence_is_fixed_and_unchanged():
+    cases = [
+        ("The Council stood ready to adjust its instruments within its mandate.", SUBJECT_POLICY_GUIDANCE),
+        ("The monetary policy stance remained appropriately calibrated.", SUBJECT_MONETARY_POLICY),
+        ("Downside risks increased.", SUBJECT_RISK),
+        ("Financial conditions tightened.", SUBJECT_FINANCIAL_CONDITIONS),
+        ("Inflation increased.", SUBJECT_INFLATION),
+        ("Employment increased.", SUBJECT_LABOUR_MARKET),
+        ("Economic activity remained stable.", SUBJECT_GROWTH),
+        ("Fiscal policy is expected to remain neutral.", SUBJECT_FISCAL_POLICY),
+    ]
+    for sentence, subject in cases:
+        result = EcbReportsExtractor().extract(
+            reports_publication(), _doc_with_sections([_section("Overview", sentence)])
+        )
+        assert {f.subject for f in result.facts} == {subject}, sentence
+
+
+def test_precedence_guidance_over_policy_risk_is_deterministic():
+    sentence = (
+        "The Council stood ready to adjust its instruments within its mandate, "
+        "and downside risks to growth remained."
+    )
+    doc = _doc_with_sections([_section("Risk assessment", sentence)])
+    first = EcbReportsExtractor().extract(reports_publication(), doc)
+    second = EcbReportsExtractor().extract(reports_publication(), doc)
+    assert [f.subject for f in first.facts] == [SUBJECT_POLICY_GUIDANCE]
+    assert [f.subject for f in second.facts] == [SUBJECT_POLICY_GUIDANCE]
+
+
+def test_content_near_miss_positives_carry_full_fact_fields():
+    sections = [
+        _section("Prices and costs", "Inflation expectations increased."),
+        _section("Economic activity", "Real GDP growth increased."),
+    ]
+    result = EcbReportsExtractor().extract(reports_publication(), _doc_with_sections(sections))
+    expectations = facts_by(result, SUBJECT_INFLATION_EXPECTATIONS, "assessment")[0]
+    assert expectations.value.kind is ValueKind.TEXT
+    assert expectations.value.source_text == "Inflation expectations increased."
+    assert expectations.source_text == "Inflation expectations increased."
+    assert expectations.period is None
+    growth = facts_by(result, SUBJECT_GROWTH, "assessment")[0]
+    assert growth.predicate == "assessment"
+    assert growth.period is None
+    assert growth.source_text == "Real GDP growth increased."
+
+
+# ---------------------------------------------------------------------------
 # content-first classification precedence
 # ---------------------------------------------------------------------------
 
