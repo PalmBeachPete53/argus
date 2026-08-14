@@ -253,10 +253,22 @@ class StatementExtractor(ABC):
   `ExtractionResult`; persistence is a caller concern.
 - `extract_statement(store, publication, *, document=None)` runs the right
   extractor and persists facts through `Store.rebuild_facts_for_document`,
-  keeping re-runs idempotent.
-- Extraction is **gated on classification**: a publication classified as
-  anything other than `monetary_policy_statement` (authoritatively in the
-  `classifications` table) is never mined for statement facts.
+  keeping re-runs idempotent. Rebuild runs for **every** valid normalized
+  document — **including when the extraction yields zero facts** — so the
+  current extraction result is the source of truth for the persisted state and
+  a re-extraction that now produces nothing clears the stale facts of that
+  document instead of leaving them behind (scoped to the requested document;
+  facts of other documents/publications are untouched).
+- Extraction is **gated on classification**: the `classifications` table is the
+  **single source of truth**. A publication is mined for statement facts only
+  when an authoritative classification record exists and its `publication_type`
+  is `monetary_policy_statement`. A publication classified as anything else, a
+  publication with **no** classification record, and the denormalized
+  `publication.publication_type` cache (which **never** authorizes extraction on
+  its own) are all refused — classification runs first
+  (classification → extraction). A gating refusal never deletes facts that an
+  earlier authorized extraction persisted (pipeline-wide classification changes
+  are out of Phase 6's scope).
 
 ## ECB statement extractor
 
@@ -368,6 +380,30 @@ slice and asserts, per fixture:
 - deterministic extraction and idempotent Store persistence;
 - classification gating (`extract_statement` skips non-statement
   publications) and Phase 5/6 coexistence.
+
+In addition, `tests/test_statements.py` holds dedicated **hardening regression
+tests** (no new fixtures, documents built inline):
+
+- **Classification precedence**: a `monetary_policy_statement` classification
+  wins against a contradictory `publication.publication_type` cache; a
+  `minutes` / unknown classification with a statement cache is refused; an
+  absent classification (even with a statement cache) is refused; a gating
+  refusal never deletes facts that an earlier authorized extraction persisted;
+  every other phase's publication type (decision, press conference, minutes,
+  report, speech) refuses statement extraction.
+- **Batch/single consistency**: `extract_statement_batch` applies exactly the
+  same gating — a mixed store (one classified, one unclassified) extracts only
+  the classified publication.
+- **Empty-result persistence**: re-extracting a persisted document with an
+  extractor that now yields zero facts clears that document's stale facts
+  (idempotently on repeated runs), while facts of other documents **and of
+  other publications** are preserved.
+- **Routing & content classification**: an unknown heading with pure category
+  content is never mined (`UNKNOWN ≠ ECONOMIC`); the narrow content-first
+  fallback fires only for guidance / risk / rationale anchors; the documented
+  priority (guidance > risk > rationale) is deterministic for ambiguous
+  sentences; target/expectation phrasing without an explicit value claim
+  ("will return to the 2% target", "remains solid") never becomes a value fact.
 
 ---
 

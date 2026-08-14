@@ -347,6 +347,95 @@ def test_empty_document_warns_no_sections():
 
 
 # ---------------------------------------------------------------------------
+# routing + content classification (hardening regression)
+# ---------------------------------------------------------------------------
+
+
+def _inline_statement(sections):
+    return NormalizedDocument(
+        publication_id="pub-ecb-stmt",
+        document_id="sha-inline",
+        source_url=ECB_URL,
+        local_path=None,
+        document_kind="html",
+        sections=[DocumentSection(order=i, heading=h, level=0, text=t) for i, (h, t) in enumerate(sections)],
+    )
+
+
+def test_unknown_heading_with_category_content_is_never_mined():
+    """An unknown heading is never a known economic section: pure category
+    content (quantitative / assessment sentences) under it yields no fact —
+    UNKNOWN ≠ ECONOMIC."""
+    result = EcbMonetaryPolicyStatementExtractor().extract(
+        statement_publication(),
+        _inline_statement(
+            [("Additional information", "Inflation is projected to average 2.0% in 2027. The labour market is tight.")]
+        ),
+    )
+    assert not any(f.predicate == "value" for f in result.facts)
+    assert not any(f.subject in (SUBJECT_GROWTH, SUBJECT_LABOUR_MARKET, SUBJECT_INFLATION) for f in result.facts)
+
+
+def test_unknown_heading_content_first_fallback_is_narrow():
+    """The narrow content-first fallback fires only for guidance / risk /
+    rationale anchors — category content under an unknown heading is not mined,
+    and an unrecognized sentence yields nothing."""
+    result = EcbMonetaryPolicyStatementExtractor().extract(
+        statement_publication(),
+        _inline_statement(
+            [
+                ("Annex", "The Governing Council will be guided by the incoming data."),
+                ("Disclaimer", "This document was prepared by the ECB secretariat."),
+            ]
+        ),
+    )
+    guidance = [f for f in result.facts if f.subject == SUBJECT_POLICY_GUIDANCE]
+    assert len(guidance) == 1
+    assert guidance[0].value.value == "The Governing Council will be guided by the incoming data."
+    assert not any(f.subject == SUBJECT_MONETARY_POLICY for f in result.facts)  # no rationale from the disclaimer
+
+
+def test_content_first_priority_guidance_over_rationale():
+    """A sentence matching both a guidance and a rationale anchor is classified
+    as guidance (documented priority guidance > risk > rationale), deterministically."""
+    result = EcbMonetaryPolicyStatementExtractor().extract(
+        statement_publication(),
+        _inline_statement(
+            [("", "The Governing Council stands ready to adjust all of its instruments within its mandate to ensure that inflation returns to its 2% target.")]
+        ),
+    )
+    subjects = [f.subject for f in result.facts]
+    assert subjects == [SUBJECT_POLICY_GUIDANCE]
+    assert result.facts[0].value.value.startswith("The Governing Council stands ready to adjust")
+
+
+def test_value_gating_target_phrasing_is_never_a_value():
+    """Target / expectation phrasing without an explicit value claim yields no
+    value fact — only a verbatim assessment."""
+    result = EcbMonetaryPolicyStatementExtractor().extract(
+        statement_publication(),
+        _inline_statement(
+            [("Inflation", "Inflation will return to the 2% target over the coming quarters. Inflation expectations remain well anchored.")]
+        ),
+    )
+    assert not any(f.predicate == "value" for f in result.facts)
+    assert any(f.subject == SUBJECT_INFLATION and f.predicate == "assessment" for f in result.facts)
+
+
+def test_value_gating_description_vs_assertion():
+    """A description of a level ("stood at") is an explicit value claim; a
+    bare qualitative expectation is not mined as a number."""
+    result = EcbMonetaryPolicyStatementExtractor().extract(
+        statement_publication(),
+        _inline_statement(
+            [("Economic activity", "GDP is projected to grow by 1.4% in 2027. Growth is expected to remain solid overall.")]
+        ),
+    )
+    values = [(f.value.value, f.period.canonical() if f.period else None) for f in result.facts if f.subject == SUBJECT_GDP and f.predicate == "value"]
+    assert values == [(1.4, "year:2027")]
+
+
+# ---------------------------------------------------------------------------
 # determinism + idempotent persistence (vertical slice)
 # ---------------------------------------------------------------------------
 
@@ -451,6 +540,38 @@ def test_gating_statement_classification_allows_extraction(tmp_path):
     assert len(store.get_facts(publication_id="pub-ecb-stmt")) == 18
 
 
+def test_gating_statement_classification_wins_over_contradictory_cache(tmp_path):
+    """Classification `monetary_policy_statement` always wins against a
+    contradictory `publication.publication_type` cache."""
+    store = _store_statement(tmp_path)
+    classify_statement(store)  # authoritative classification → statement
+    results = extract_statement(store, statement_publication(publication_type="monetary_policy_decision"))
+    assert len(results) == 1
+    persisted = store.get_facts(publication_id="pub-ecb-stmt")
+    assert len(persisted) == 18
+    assert (SUBJECT_MONETARY_POLICY, "rationale") in {(f.subject, f.predicate) for f in persisted}
+    assert any(f.subject == SUBJECT_POLICY_GUIDANCE for f in persisted)
+
+
+def test_gating_statement_cache_cannot_override_minutes_classification(tmp_path):
+    """The cache saying `monetary_policy_statement` can never bypass a `minutes`
+    classification — extraction is refused and no Phase 6 fact is produced."""
+    store = _store_statement(tmp_path)
+    classify_statement(store, publication_type="minutes")
+    assert extract_statement(store, statement_publication(publication_type="monetary_policy_statement")) == []
+    assert store.get_facts(publication_id="pub-ecb-stmt") == []
+
+
+def test_gating_unknown_classification_with_statement_cache_is_refused(tmp_path):
+    """An unsupported/unknown classification refuses extraction even when the
+    cache says `monetary_policy_statement` — gating is an exact match against
+    STATEMENT_PUBLICATION_TYPE, with no permissive fallback."""
+    store = _store_statement(tmp_path)
+    classify_statement(store, publication_type="some_unsupported_type")
+    assert extract_statement(store, statement_publication(publication_type="monetary_policy_statement")) == []
+    assert store.get_facts(publication_id="pub-ecb-stmt") == []
+
+
 def test_gating_other_classification_refuses_extraction(tmp_path):
     store = _store_statement(tmp_path)
     classify_statement(store, publication_type="minutes")
@@ -473,6 +594,36 @@ def test_gating_publication_type_cache_alone_never_authorizes(tmp_path):
     assert store.get_facts(publication_id="pub-ecb-stmt") == []
 
 
+def test_gating_refusal_never_deletes_existing_facts(tmp_path):
+    """A classification that refuses extraction must NOT delete facts that an
+    earlier authorized extraction persisted — pipeline-wide classification
+    changes are not Phase 6's concern."""
+    store = _store_statement(tmp_path)
+    classify_statement(store)
+    assert len(extract_statement(store, statement_publication())) == 1
+    assert len(store.get_facts(publication_id="pub-ecb-stmt")) == 18
+    classify_statement(store, publication_type="minutes")
+    assert extract_statement(store, statement_publication()) == []
+    assert len(store.get_facts(publication_id="pub-ecb-stmt")) == 18
+
+
+def test_gating_cross_phase_types_all_refuse_statement(tmp_path):
+    """Phase 6 refuses publications of every other phase's type — gating is on
+    the authoritative classification, never on the cache."""
+    for other_type in (
+        "monetary_policy_decision",
+        "press_conference",
+        "minutes",
+        "monetary_policy_report",
+        "speech",
+    ):
+        store = _store_statement(tmp_path)
+        classify_statement(store, publication_type=other_type)
+        assert extract_statement(store, statement_publication()) == [], other_type
+        assert extract_statement_batch(store) == [], other_type
+        assert store.get_facts(publication_id="pub-ecb-stmt") == [], other_type
+
+
 def test_gating_batch_respects_classification(tmp_path):
     store = _store_statement(tmp_path)
     assert extract_statement_batch(store) == []  # unclassified → nothing extracted
@@ -481,6 +632,28 @@ def test_gating_batch_respects_classification(tmp_path):
     results = extract_statement_batch(store)
     assert len(results) == 1
     assert len(store.get_facts(bank="ecb")) == 18
+
+
+def test_gating_batch_mixed_classified_and_unclassified(tmp_path):
+    """The batch entry point applies the same gating as the single entry point:
+    a classified statement publication is extracted, an unclassified one is
+    skipped — never persisted."""
+    store = _store_statement(tmp_path)
+    # second statement publication, left unclassified
+    store.upsert_publication(statement_publication(id="pub-ecb-stmt-2"))
+    doc = Document(
+        publication_id="pub-ecb-stmt-2",
+        url=ECB_URL,
+        kind="html",
+        status=DocumentStatus.FETCHED,
+        local_path=str(FIXTURES / "ecb_statement_minimal.html"),
+    )
+    store.upsert_normalized_document(Normalizer().parse(doc))
+    classify_statement(store)
+    results = extract_statement_batch(store)
+    assert len(results) == 1
+    assert len(store.get_facts(publication_id="pub-ecb-stmt")) == 18
+    assert store.get_facts(publication_id="pub-ecb-stmt-2") == []
 
 
 def test_gating_never_persists_facts_when_not_authorized(tmp_path):
@@ -535,6 +708,40 @@ def test_empty_result_persistence_is_idempotent(tmp_path):
     extract_statement(store, pub, extractor=zero)
     extract_statement(store, pub, extractor=zero)
     assert store.get_facts(publication_id="pub-ecb-stmt") == []
+
+
+def test_empty_result_persistence_preserves_other_publications(tmp_path):
+    """An empty rebuild is scoped to the requested document only: facts of
+    another publication's document are never touched."""
+    store = _store_statement(tmp_path)
+    classify_statement(store)
+    store.upsert_publication(statement_publication(id="pub-ecb-stmt-2"))
+    doc2 = Document(
+        publication_id="pub-ecb-stmt-2",
+        url=ECB_URL,
+        kind="html",
+        status=DocumentStatus.FETCHED,
+        local_path=str(FIXTURES / "ecb_statement_minimal.html"),
+    )
+    store.upsert_normalized_document(Normalizer().parse(doc2))
+    store.set_classification(
+        "pub-ecb-stmt-2",
+        central_bank="ecb",
+        publication_type=STATEMENT_PUBLICATION_TYPE,
+        confidence=Confidence.HIGH.value,
+        method="url_pattern",
+        evidence=[],
+    )
+    extract_statement(store, statement_publication())
+    extract_statement(store, statement_publication(id="pub-ecb-stmt-2"))
+    assert len(store.get_facts(publication_id="pub-ecb-stmt")) == 18
+    assert len(store.get_facts(publication_id="pub-ecb-stmt-2")) == 1
+    # zero-out publication A only; publication B's facts stay intact
+    extract_statement(store, statement_publication(), extractor=_ZeroFactStatementExtractor())
+    assert store.get_facts(publication_id="pub-ecb-stmt") == []
+    persisted_b = store.get_facts(publication_id="pub-ecb-stmt-2")
+    assert len(persisted_b) == 1
+    assert persisted_b[0].document_id == Normalizer().parse(doc2).document_id
 
 
 def test_extract_statement_batch_runs_all_statements(tmp_path):

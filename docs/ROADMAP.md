@@ -270,7 +270,13 @@ L'architecture doit rester extensible à d'autres banques centrales.
   exactes, périodes, provenance verbatim, aucun fait inventé), extraction
   déterministe, persistance idempotente, gating par classification et
   coexistence Phase 5/6 vérifiées ; `docs/EXTRACTORS.md` documente la
-  couverture réelle. La frontière avec la Phase 5 (décision, taux) et avec la
+  couverture réelle. Durcissement : gating strict par classification (la table
+  `classifications` est la source de vérité unique ; une classification absente,
+  non-statement ou la seule cache dénormalisée `publication_type` refusent
+  l'extraction, et un refus ne supprime jamais les faits déjà persistés) et
+  persistance idempotente résultats vides compris (une ré-extraction vide efface
+  les faits périmés du document, sans toucher aux autres documents ni aux autres
+  publications). La frontière avec la Phase 5 (décision, taux) et avec la
   Phase 12 (analyse des changements de formulation, seulement préservés
   verbatim) est mise en œuvre et testée.
 
