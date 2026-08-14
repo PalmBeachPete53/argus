@@ -547,7 +547,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
   incomparable sans pont, unités, `effective_date`, frontière de type,
   qualificateur, période, chaînage F1→F4, identité directionnelle, immuabilité,
   avertissements, persistance et coexistence Phases 5–11. **Suite complète :
-  615 tests verts et déterministes.**
+  640 tests verts et déterministes.**
 
 ## Phase 13 — Policy Reaction Function
 
@@ -711,7 +711,7 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   ignoré), repli `central_bank`, chaînage consécutif F1→F2→F3 sans pont sur
   observation incomparable, provenance exhaustive aux deux faits sources,
   `fact_changes` persistée de façon idempotente, reconstruisible et isolée par
-  banque, aucun contenu économique ; 89 tests dédiés, **615 tests verts et
+  banque, aucun contenu économique ; 89 tests dédiés, **640 tests verts et
   déterministes** (documenté dans `docs/CHANGES.md`).
 - **Prochaine phase autorisée : Phase 13 — Policy Reaction Function** (statut
   `NEXT`).
