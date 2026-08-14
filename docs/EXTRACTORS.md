@@ -1538,6 +1538,10 @@ sentence produces no fact.
   (`inflation` / `core_inflation` / `inflation_expectations`), growth
   (qualitative `growth` / quantitative `gdp`), labour market
   (`unemployment` / `wages` / `labour_market`), `financial_conditions`.
+  The Phase 10 GDP near-miss policy applies identically: "GDP deflator",
+  "GDP per capita" and "per capita GDP" never anchor a growth sentence and
+  never leak a GDP value ("Real GDP growth held steady while the GDP
+  deflator rose by 2.1%" yields no fact).
   Phase 11 hardening keeps the generic vocabulary out of the anchors: `credit`
   fires only as a contextual credit-conditions marker ("credit growth", "credit
   standards", …), `lending` as `bank lending` / `lending to …` / `lending

@@ -579,6 +579,40 @@ def test_quantitative_growth_is_gdp_value():
     assert result.facts[0].value.value == 1.2
 
 
+def test_gdp_near_misses_never_anchor_growth():
+    # "GDP deflator", "GDP per capita" and "per capita GDP" are distinct
+    # measures and must never anchor (or emit) a GDP value fact (same guard as
+    # Phase 10 reports).
+    sections = [
+        _section("Economic outlook", "The GDP deflator rose by 2.1% in 2026."),
+        _section("Economic outlook", "GDP per capita increased by 1.1% in 2026."),
+        _section("Economic outlook", "Per capita GDP increased by 1.1% in 2026."),
+    ]
+    result = EcbSpeechExtractor().extract(speeches_publication(), _doc_with_sections(sections))
+    assert result.facts == []
+
+
+def test_gdp_near_miss_never_leaks_into_a_growth_value():
+    # a deflator / per-capita mention inside an otherwise-growth sentence must
+    # not leak into a GDP value fact (precision first).
+    sections = [
+        _section("Economic outlook", "Real GDP growth held steady while the GDP deflator rose by 2.1%."),
+        _section("Economic outlook", "Growth remained solid and GDP per capita rose by 1.1%."),
+    ]
+    result = EcbSpeechExtractor().extract(speeches_publication(), _doc_with_sections(sections))
+    assert result.facts == []
+
+
+def test_gdp_value_facts_still_mined_when_not_a_near_miss():
+    sections = [
+        _section("Economic outlook", "GDP growth is projected to reach 1.4% in 2027."),
+        _section("Economic outlook", "GDP increased by 0.4% in the first quarter of 2026."),
+    ]
+    result = EcbSpeechExtractor().extract(speeches_publication(), _doc_with_sections(sections))
+    values = facts_by(result, SUBJECT_GDP, "value")
+    assert {(f.value.value, period_of(f)) for f in values} == {(1.4, "year:2027"), (0.4, "quarter:2026-Q1")}
+
+
 def test_labour_market_subjects():
     sections = [
         _section("Labour market", "The unemployment rate is projected to average 6.2% in 2026."),

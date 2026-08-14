@@ -751,6 +751,21 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   économiques contrôlés restent intacts (testé : identité exacte IGNORE,
   near-misses, familles, déterminisme catégoriel). **680 tests verts et
   déterministes**.
+- **PHASES 9–12 — DERNIER PASS DE DURCISSEMENT** (avant Phase 13) : la garde
+  near-miss GDP des discours (Phase 11) est alignée sur les rapports
+  (Phase 10) — « GDP deflator », « GDP per capita » et « per capita GDP » ne
+  sont jamais des ancres de croissance et ne fuient jamais en valeur `gdp`,
+  même dans une phrase qui mentionne par ailleurs la croissance ; la matrice
+  de gating Phase 9 est complétée par la variante explicite `unknown`
+  (UNKNOWN ≠ ECONOMIC : une classification `unknown` refuse l'extraction même
+  avec un cache `economic_projections`, et un refus ne supprime jamais les
+  faits d'une extraction antérieure autorisée) ; audits Phases 9–12 vérifiés
+  (gating A–E, tables/unités, near-misses variables, déterminisme,
+  routage par identité exacte, ancres de contenu, gate de valeur, attribution
+  orateur explicite, dédup intra-run, clé de matching Phase 12 exacte,
+  chaînage consécutif F1→F2→F3 sans pont, règles delta, provenance verbatim,
+  persistance idempotente, isolation par banque). **685 tests verts et
+  déterministes**.
 - **Prochaine phase autorisée : Phase 13 — Policy Reaction Function** (statut
   `NEXT`).
 

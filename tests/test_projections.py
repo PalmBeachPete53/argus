@@ -869,6 +869,29 @@ def test_gating_other_classification_with_correct_cache_is_refused(tmp_path):
     assert store.get_facts(publication_id="pub-ecb-projections") == []
 
 
+def test_gating_unknown_classification_is_refused(tmp_path):
+    """An explicit `unknown` classification refuses extraction even when the
+    cache says `economic_projections` — UNKNOWN ≠ ECONOMIC (gating contract B)."""
+    store = _store_projections(tmp_path)
+    classify_projections(store, publication_type="unknown")
+    pub = projections_publication(publication_type="economic_projections")
+    assert extract_projections(store, pub) == []
+    assert extract_projections_batch(store) == []
+    assert store.get_facts(publication_id="pub-ecb-projections") == []
+
+
+def test_gating_unknown_classification_never_deletes_existing_facts(tmp_path):
+    """Re-classifying an authorized publication to `unknown` refuses new
+    extraction but never deletes facts a prior authorized run persisted."""
+    store = _store_projections(tmp_path)
+    classify_projections(store)
+    assert len(extract_projections(store, projections_publication())) == 1
+    assert len(store.get_facts(publication_id="pub-ecb-projections")) == 12
+    classify_projections(store, publication_type="unknown")
+    assert extract_projections(store, projections_publication()) == []
+    assert len(store.get_facts(publication_id="pub-ecb-projections")) == 12
+
+
 def test_gating_classification_wins_against_contradictory_cache(tmp_path):
     """An explicit `economic_projections` classification always wins against a
     contradictory `publication.publication_type` cache (D9-1 variant C)."""

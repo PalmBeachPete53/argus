@@ -391,9 +391,22 @@ _LABOUR_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\bwage(?:s)?\b(?!\s+policy\b)", re.IGNORECASE),
 )
 
+# Near-misses that must never be read as GDP growth: "GDP deflator" and
+# "GDP per capita" (and the reversed "per capita GDP") are distinct measures
+# and must never anchor (or emit) a GDP value fact on their own (same guard as
+# Phase 10 reports).
+_GDP_NEAR_MISS = re.compile(
+    r"(?:\bgdp\b\s+(?:deflator|per\s+capita)\b|per\s+capita\s+\bgdp\b)",
+    re.IGNORECASE,
+)
+_GDP_ANCHOR = re.compile(
+    r"(?<!per\scapita\s)\bgdp\b(?!\s+(?:deflator|per\s+capita)\b)",
+    re.IGNORECASE,
+)
+
 _GROWTH_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\bgrowth\b", re.IGNORECASE),
-    re.compile(r"\bgdp\b", re.IGNORECASE),
+    _GDP_ANCHOR,
     re.compile(r"\b(?:economic\s+)?activity\b", re.IGNORECASE),
     re.compile(r"\beconom(?:y|ic)\b", re.IGNORECASE),
     # bare "output" is a growth marker ("output increased"); the gate still
@@ -963,6 +976,10 @@ class EcbSpeechExtractor(SpeechExtractor):
 
     @classmethod
     def _add_growth_facts(cls, result: ExtractionResult, document: NormalizedDocument, index: int, sentence: str, counters: dict, seen: set, speaker: str | None, *, strict: bool) -> None:
+        # A GDP deflator / per-capita mention inside an otherwise-growth
+        # sentence must not leak into a GDP value fact (precision first).
+        if _GDP_NEAR_MISS.search(sentence):
+            return
         if cls._add_value_facts(result, document, index, sentence, SUBJECT_GDP, counters, seen, speaker):
             return
         if not strict and _is_economic_assertion(sentence):
