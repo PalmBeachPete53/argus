@@ -9,9 +9,10 @@ from argus.classification.base import Confidence
 from argus.decisions import EcbDecisionExtractor, extract_decision
 from argus.documents import Normalizer
 from argus.documents.base import DocumentSection, NormalizedDocument
-from argus.facts import ValueKind
+from argus.facts import ExtractionResult, ValueKind
 from argus.models import Document, DocumentStatus, Publication
 from argus.statements import (
+    STATEMENT_PUBLICATION_TYPE,
     SUBJECT_CORE_INFLATION,
     SUBJECT_FINANCIAL_CONDITIONS,
     SUBJECT_GDP,
@@ -27,6 +28,7 @@ from argus.statements import (
     SUBJECT_UNEMPLOYMENT,
     SUBJECT_WAGES,
     EcbMonetaryPolicyStatementExtractor,
+    StatementExtractor,
     extract_statement,
     extract_statement_batch,
 )
@@ -356,8 +358,34 @@ def _store_statement(tmp_path, name: str = "ecb_statement.html") -> Store:
     return store
 
 
+def classify_statement(store: Store, *, publication_type: str = STATEMENT_PUBLICATION_TYPE) -> None:
+    store.set_classification(
+        "pub-ecb-stmt",
+        central_bank="ecb",
+        publication_type=publication_type,
+        confidence=Confidence.HIGH.value,
+        method="url_pattern",
+        evidence=[],
+    )
+
+
+class _ZeroFactStatementExtractor(StatementExtractor):
+    """Stub statement extractor that yields no facts — used to simulate a
+    re-extraction of an already-persisted document that now produces nothing."""
+
+    bank = "ecb"
+    extraction_version = "test-zero"
+
+    def extract(self, publication, document):
+        return ExtractionResult(
+            publication_id=publication.id or publication.dedup_key or "",
+            document_id=document.document_id,
+        )
+
+
 def test_extract_statement_persists_facts(tmp_path):
     store = _store_statement(tmp_path)
+    classify_statement(store)
     results = extract_statement(store, statement_publication())
     assert len(results) == 1
     persisted = store.get_facts(publication_id="pub-ecb-stmt")
@@ -376,10 +404,14 @@ def test_extract_statement_persists_facts(tmp_path):
 
 def test_extract_statement_is_idempotent(tmp_path):
     store = _store_statement(tmp_path)
+    classify_statement(store)
     pub = statement_publication()
     extract_statement(store, pub)
+    first = sorted((f.fact_id, f.subject, f.predicate, f.value.value) for f in store.get_facts(publication_id="pub-ecb-stmt"))
     extract_statement(store, pub)  # re-run: same deterministic fact_ids
-    assert len(store.get_facts(publication_id="pub-ecb-stmt")) == 18
+    second = sorted((f.fact_id, f.subject, f.predicate, f.value.value) for f in store.get_facts(publication_id="pub-ecb-stmt"))
+    assert first == second
+    assert len(second) == 18
 
 
 def test_extraction_is_deterministic(tmp_path):
@@ -402,19 +434,112 @@ def test_extract_statement_skips_non_statement_publications(tmp_path):
     assert extract_statement(store, pub) == []
     assert store.get_facts(publication_id="pub-ecb-stmt") == []
     # authoritative classification record also gates extraction
-    store.set_classification(
-        "pub-ecb-stmt",
-        central_bank="ecb",
-        publication_type="minutes",
-        confidence=Confidence.HIGH.value,
-        method="title_pattern",
-        evidence=[],
-    )
+    classify_statement(store, publication_type="minutes")
     assert extract_statement(store, statement_publication()) == []
+
+
+# ---------------------------------------------------------------------------
+# classification gating (single source of truth = classifications table)
+# ---------------------------------------------------------------------------
+
+
+def test_gating_statement_classification_allows_extraction(tmp_path):
+    store = _store_statement(tmp_path)
+    classify_statement(store)
+    results = extract_statement(store, statement_publication())
+    assert len(results) == 1
+    assert len(store.get_facts(publication_id="pub-ecb-stmt")) == 18
+
+
+def test_gating_other_classification_refuses_extraction(tmp_path):
+    store = _store_statement(tmp_path)
+    classify_statement(store, publication_type="minutes")
+    assert extract_statement(store, statement_publication()) == []
+    assert store.get_facts(publication_id="pub-ecb-stmt") == []
+
+
+def test_gating_absent_classification_refuses_extraction(tmp_path):
+    store = _store_statement(tmp_path)
+    assert extract_statement(store, statement_publication()) == []
+    assert store.get_facts(publication_id="pub-ecb-stmt") == []
+
+
+def test_gating_publication_type_cache_alone_never_authorizes(tmp_path):
+    store = _store_statement(tmp_path)
+    pub = statement_publication(publication_type="monetary_policy_statement")
+    # the denormalized cache says statement, but there is no authoritative
+    # classification record → extraction must be refused
+    assert extract_statement(store, pub) == []
+    assert store.get_facts(publication_id="pub-ecb-stmt") == []
+
+
+def test_gating_batch_respects_classification(tmp_path):
+    store = _store_statement(tmp_path)
+    assert extract_statement_batch(store) == []  # unclassified → nothing extracted
+    assert store.get_facts(publication_id="pub-ecb-stmt") == []
+    classify_statement(store)
+    results = extract_statement_batch(store)
+    assert len(results) == 1
+    assert len(store.get_facts(bank="ecb")) == 18
+
+
+def test_gating_never_persists_facts_when_not_authorized(tmp_path):
+    store = _store_statement(tmp_path)
+    classify_statement(store, publication_type="monetary_policy_report")
+    assert extract_statement(store, statement_publication()) == []
+    assert extract_statement_batch(store) == []
+    assert store.get_facts(publication_id="pub-ecb-stmt") == []
+
+
+# ---------------------------------------------------------------------------
+# empty-result persistence: the current extraction result is the source of truth
+# ---------------------------------------------------------------------------
+
+
+def test_empty_result_persistence_clears_stale_facts(tmp_path):
+    store = _store_statement(tmp_path)
+    classify_statement(store)
+    pub = statement_publication()
+    extract_statement(store, pub)
+    assert len(store.get_facts(publication_id="pub-ecb-stmt")) == 18
+    # re-extraction of the same document now yields zero facts
+    results = extract_statement(store, pub, extractor=_ZeroFactStatementExtractor())
+    assert len(results) == 1
+    assert results[0].facts == []
+    assert store.get_facts(publication_id="pub-ecb-stmt") == []
+
+
+def test_empty_result_persistence_preserves_other_documents(tmp_path):
+    store = _store_statement(tmp_path)
+    classify_statement(store)
+    pub = statement_publication()
+    extract_statement(store, pub)
+    # add a second document (minimal → 1 rationale fact)
+    extract_statement(store, pub, document=normalized_fixture("ecb_statement_minimal.html"))
+    assert len(store.get_facts(publication_id="pub-ecb-stmt")) == 19
+    # zero-out only the nominal document; the other document's facts must stay
+    extract_statement(store, pub, document=normalized_fixture("ecb_statement.html"), extractor=_ZeroFactStatementExtractor())
+    persisted = store.get_facts(publication_id="pub-ecb-stmt")
+    assert len(persisted) == 1
+    assert persisted[0].subject == SUBJECT_MONETARY_POLICY
+    assert persisted[0].document_id == normalized_fixture("ecb_statement_minimal.html").document_id
+
+
+def test_empty_result_persistence_is_idempotent(tmp_path):
+    store = _store_statement(tmp_path)
+    classify_statement(store)
+    pub = statement_publication()
+    extract_statement(store, pub)
+    assert len(store.get_facts(publication_id="pub-ecb-stmt")) == 18
+    zero = _ZeroFactStatementExtractor()
+    extract_statement(store, pub, extractor=zero)
+    extract_statement(store, pub, extractor=zero)
+    assert store.get_facts(publication_id="pub-ecb-stmt") == []
 
 
 def test_extract_statement_batch_runs_all_statements(tmp_path):
     store = _store_statement(tmp_path)
+    classify_statement(store)
     results = extract_statement_batch(store)
     assert len(results) == 1
     assert len(store.get_facts(bank="ecb")) == 18

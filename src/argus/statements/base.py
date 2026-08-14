@@ -71,8 +71,14 @@ def extract_statement(
 
     Offline by construction: nothing here touches the network.
 
+    The current extraction result is the source of truth for the persisted
+    state: ``rebuild_facts_for_document`` (delete + insert) runs for every
+    valid normalized document, **including when the result is empty**, so a
+    re-extraction that now yields no facts clears the stale facts of that
+    document instead of leaving them behind.
+
     Returns the list of ``ExtractionResult`` (empty if no extractor applies or
-    the publication is not classified as a statement).
+    the publication is not classified as ``monetary_policy_statement``).
     """
     extractor = extractor or get_extractor(publication.central_bank)
     if extractor is None:
@@ -85,8 +91,7 @@ def extract_statement(
         if not getattr(doc, "ok", False):
             continue
         result = extractor.extract(publication, doc)
-        if result.facts:
-            store.rebuild_facts_for_document(doc.document_id, result)
+        store.rebuild_facts_for_document(doc.document_id, result)
         results.append(result)
     return results
 
@@ -106,17 +111,19 @@ def extract_statement_batch(store, *, bank: str | None = None) -> list[Extractio
 def _is_statement_publication(store, publication, *, expected_type: str) -> bool:
     """Gate extraction to statement publications.
 
-    The authoritative record lives in ``classifications``; the denormalized
-    ``publication.publication_type`` cache is only a fallback. Publications with
-    *no* classification yet are allowed (classification may run afterwards).
+    The ``classifications`` table is the **single source of truth**: extraction
+    is authorized only when an authoritative classification record exists for
+    the publication and its ``publication_type`` is ``monetary_policy_statement``.
+    The denormalized ``publication.publication_type`` cache is never used to
+    infer authorization, and an absent classification refuses extraction —
+    classification must run first (classification → extraction).
     """
-    record = store.get_classification(publication.id or "") if publication.id else None
-    if record is not None:
-        return record["publication_type"] == expected_type
-    cached = publication.publication_type
-    if cached and cached != expected_type:
+    if not publication.id:
         return False
-    return True
+    record = store.get_classification(publication.id)
+    if record is None:
+        return False
+    return record["publication_type"] == expected_type
 
 
 from .ecb import EcbMonetaryPolicyStatementExtractor  # noqa: E402  (see below)
