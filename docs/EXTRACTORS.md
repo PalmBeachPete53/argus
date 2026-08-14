@@ -777,6 +777,11 @@ unit** integrity of the source table:
 
 - **columns** are years (`20xx` header cells);
 - **rows** are variables (the leading cell of each row);
+- **the unit is identified at the table level**, from the table's own caption
+  (real ECB projection tables state it in the title line, e.g.
+  "(annual percentage changes)"). A table whose unit is missing, unknown or
+  incompatible is **ignored as a whole** — a value is never assumed to be a
+  percentage, and the unit of one table never authorises the numbers of another;
 - a cell becomes a Fact **only** when it is identified by a recognised variable
   (row label) + a year (column header) + an explicit unit.
 
@@ -785,6 +790,23 @@ header-less tables, unlabelled rows, scenario columns without years
 ("Baseline / Adverse / Severe"), the **Technical assumptions** table (oil
 price, exchange rates, interest rates — assumptions, not projections) and the
 methodology / disclaimer / legal-notice sections all yield nothing.
+
+The unit gate checks the caption in a fixed order: *share* units
+(`% of GDP`, `percentage of total`) are rejected first (ratios, not
+changes), then percentage markers are matched (`annual percentage changes`,
+whole-word `percent`/`per cent`, `% growth`, `(%)`, … — so the real caption
+"(annual percentage changes; revisions in percentage points)" still
+authorises the table), then incompatible units (`index`, `points`, currencies,
+energy units) are rejected. `\bpercent\b` (whole word) deliberately does not
+match "percentage", so "(percentage points)" alone never authorises a table.
+
+Variables are identified by **exact canonical label matching** (row label
+normalised, footnote markers stripped, then compared verbatim against the
+controlled vocabulary): near-misses ("GDP deflator", "GDP per capita", "HICP
+excluding energy", "HICP excluding energy, food and changes in indirect
+taxes", …) never match a core variable and are ignored, while the real ECB
+wording ("Real GDP", "GDP growth", "HICP", "HICP excluding energy and food")
+keeps working.
 
 ### Supported facts
 
@@ -809,6 +831,9 @@ the controlled predicate vocabulary (documented here, per
   percentage changes — a `2.1` cell stays `2.1%`, never a plain number);
   revision deltas are `number` with `unit = "pp"` (percentage points — a `-0.2`
   percentage-point revision is never turned into basis points or into `-0.2%`).
+  A projection value is produced **only when** its table's unit is explicitly
+  recognised as a percentage — never assumed from the value itself, and the
+  unit gate applies to revision columns too.
 - **Revisions are only ever the explicitly stated ones.** The ECB publishes
   revisions *relative to the previous projections* as an explicit
   `Revisions vs {Month Year}` column block; those stated deltas are kept as
@@ -885,6 +910,19 @@ asserts, per fixture:
 - the value gate: a bare cell without variable + year + unit identity is never
   a Fact — scenario columns, unlabelled rows and technical assumptions produce
   nothing;
+- the unit gate: an explicit percentage caption is extracted; a missing,
+  unknown or incompatible unit (`% of GDP`, `index`, `(percentage points)`,
+  `USD/barrel`) is ignored and never assumed/converted; percentage variants
+  (`percent`, `per cent`, `(%)`, `% growth`, `annual growth rates`) are
+  accepted; a unit never leaks across tables; revision columns are gated by
+  the same percentage unit;
+- variable near-miss protection: `Real GDP` / `GDP growth` / `Real GDP growth`
+  and `HICP` / core-HICP canonical labels are extracted, while "GDP deflator",
+  "GDP per capita", "GDP price deflator", "HICP excluding energy", "HICP
+  excluding energy, food and changes in indirect taxes", … are ignored;
+- integrity: variable × period × value × unit → one Fact; no unit → no Fact;
+  a unit in another table cannot authorise; two number columns are never a
+  revision without an explicit `Revisions vs` block;
 - revisions only from explicit column blocks, never computed as
   `current − previous`, current vs previous distinguished by
   `identity_qualifier`;

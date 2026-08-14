@@ -19,16 +19,25 @@ Projection tables are recognised structurally (``DocumentTable``):
 
 - the **columns** are years (``20xx`` header cells);
 - the **rows** are variables (the leading cell of each row);
+- the **unit is identified at the table level**, from the table's own caption:
+  real ECB projection tables state their unit in the title line (e.g.
+  "(annual percentage changes)"). A table whose unit is missing, unknown or
+  incompatible is **ignored as a whole** — a value is never assumed to be a
+  percentage, and the unit of one table can never authorise the numbers of
+  another table;
 - a cell is a Fact **only when** it can be identified by a recognised variable
-  (row label) + a year (column header) + an explicit unit. A bare number
-  without that identity — a header-less table, an unlabelled row, a scenario or
-  assumption column — is never a Fact (``UNKNOWN ≠ PROJECTION``).
+  (row label, matched as an exact canonical label) + a year (column header) +
+  an explicit unit. A bare number without that identity — a header-less table,
+  an unlabelled row, a scenario or assumption column — is never a Fact
+  (``UNKNOWN ≠ PROJECTION``).
 
 Only the three core variables are mined; any other row (private consumption,
 unemployment, oil prices, exchange rates, …) is **ignored** — reliability over
-coverage. In particular the "Technical assumptions" box (oil price, exchange
-rates, interest rates) is a set of *assumptions*, not projections, and yields
-nothing.
+coverage. Variable identification is by **exact canonical label matching**:
+near-misses ("GDP deflator", "GDP per capita", "HICP excluding energy", …) are
+never coerced into a core variable. In particular the "Technical assumptions"
+box (oil price, exchange rates, interest rates) is a set of *assumptions*, not
+projections, and yields nothing.
 
 Deliberately NOT extracted (Phase 9 boundary):
 
@@ -50,7 +59,9 @@ Design rules
 - Units are kept explicitly: projection values are ``percentage`` (annual
   percentage changes), revision deltas are plain numbers with
   ``unit = "pp"`` (percentage points) — a ``0.4`` percentage-point revision is
-  never silently turned into ``0.4%`` or basis points.
+  never silently turned into ``0.4%`` or basis points. A projection value is
+  produced **only when** its table's unit is explicitly recognised as a
+  percentage — never assumed from the value itself.
 - Periods come from the **table headers** (``year:2026`` …), never guessed from
   text position.
 - ``Fact.speaker`` is always ``None`` (projections are collective staff
@@ -97,23 +108,40 @@ PREDICATE_PROJECTION = "projection"
 PREDICATE_REVISION = "revision"
 
 # ---------------------------------------------------------------------------
-# Variable recognition (row labels). Order matters: core HICP is checked
-# before headline HICP.
+# Variable recognition (row labels). Identification is by **exact canonical
+# label matching**: the row label is normalised and stripped of footnote
+# markers, then compared against the controlled-vocabulary sets below. A label
+# is a core variable only when it equals one of these entries verbatim —
+# substring "near-misses" ("GDP deflator", "GDP per capita", "HICP excluding
+# energy", …) never match, so they are ignored rather than coerced.
 # ---------------------------------------------------------------------------
-_VAR_CORE = ("hicp excluding energy and food", "hicp excluding energy, food", "hicpx", "core hicp", "core inflation")
-_VAR_HICP = ("hicp",)
-_VAR_GDP = ("real gdp", "gdp growth", "gdp")
+_VAR_CORE = frozenset(
+    {"hicp excluding energy and food", "hicpx", "core hicp", "core inflation"}
+)
+_VAR_HICP = frozenset({"hicp", "hicp inflation"})
+_VAR_GDP = frozenset({"real gdp", "gdp growth", "real gdp growth"})
+
+_FOOTNOTE = re.compile(r"\s*(?:\(\d+\)|\[\d+\]|\d+\)|[*†‡]+)\s*$")
+
+
+def _canonical_label(cell: str) -> str:
+    """Normalise a row label: strip footnote markers, collapse whitespace,
+    lowercase. Empty string when the label is empty or pure markers."""
+    raw = normalize_title(cell or "")
+    raw = _FOOTNOTE.sub("", raw).strip()
+    raw = " ".join(raw.split())
+    return raw
 
 
 def _subject_of(label: str) -> str | None:
-    t = normalize_title(label or "")
+    t = _canonical_label(label)
     if not t:
         return None
-    if any(marker in t for marker in _VAR_CORE):
+    if t in _VAR_CORE:
         return SUBJECT_CORE_INFLATION
-    if any(marker in t for marker in _VAR_HICP):
+    if t in _VAR_HICP:
         return SUBJECT_INFLATION
-    if any(marker in t for marker in _VAR_GDP):
+    if t in _VAR_GDP:
         return SUBJECT_GDP
     return None
 
@@ -160,7 +188,6 @@ def _asof_ref(name: str) -> str | None:
 # explicit about "no data" placeholders. A non-numeric cell is skipped, never
 # coerced.
 # ---------------------------------------------------------------------------
-_FOOTNOTE = re.compile(r"\s*(?:\(\d+\)|\[\d+\]|\d+\)|[*†‡]+)\s*$")
 _NO_DATA = {"", "-", "–", "—", "…", "..", ".", "n.a.", "n/a", "na", "nd"}
 
 
@@ -180,6 +207,75 @@ def _numeric(cell: str) -> float | None:
 
 def _row_text(row: list[str]) -> str:
     return " | ".join(str(cell or "") for cell in row)
+
+
+# ---------------------------------------------------------------------------
+# Unit gate (table level). A projection Fact is only produced from a table
+# whose caption explicitly states a percentage unit. The unit is read from the
+# table's own caption — never inferred from the values and never borrowed from
+# another table. The checks run in this order:
+#
+#   1. *share* units (``% of GDP``, ``percentage of total``, …) are rejected
+#      first — those are ratios, not percentage *changes*;
+#   2. percentage markers are then matched (``annual percentage changes``,
+#      ``percent``/``per cent`` as whole words, ``% growth``, ``(%)``, …) so
+#      the real ECB caption "(annual percentage changes; revisions in
+#      percentage points)" still authorises the table;
+#   3. incompatible units (index, points, currencies, energy units, …) are
+#      rejected.
+#
+# A missing, unknown or incompatible unit means the whole table is ignored:
+# no unit is ever assumed. ``\bpercent\b`` (whole word) deliberately does not
+# match "percentage", so "(percentage points)" alone never authorises a table.
+# ---------------------------------------------------------------------------
+_UNIT_SHARE = (
+    r"%\s*of\s*gdp",
+    r"percentage\s*of\s*gdp",
+    r"\bper\s?cent\s*of\s*gdp\b",
+    r"%\s*of\s*total",
+    r"%\s*of\s*disposable\s*income",
+)
+
+_UNIT_PERCENTAGE = (
+    r"annual\s+percentage\s+changes?",
+    r"percentage\s+changes?",
+    r"annual\s+growth\s+rates?",
+    r"\bper\s?cent\b",
+    r"\bpercent\b",
+    r"%\s*changes?",
+    r"%\s*growth",
+    r"\(\s*%\s*\)",
+)
+
+_UNIT_INCOMPATIBLE = (
+    r"\bindex\b",
+    r"\bpoints\b",
+    r"\busd\b",
+    r"\bus\$\b",
+    r"\beur\b",
+    r"\beuro\b",
+    r"\bmwh\b",
+    r"\bkwh\b",
+    r"\btonnes?\b",
+    r"\bbarrel\b",
+    r"\$\b",
+    r"€",
+)
+
+
+def _table_unit(name: str) -> str | None:
+    """Return ``"percentage"`` when the table caption explicitly states a
+    percentage unit, else ``None`` (missing, unknown or incompatible)."""
+    t = (name or "").strip().lower()
+    if not t:
+        return None
+    if any(re.search(marker, t) for marker in _UNIT_SHARE):
+        return None
+    if any(re.search(marker, t) for marker in _UNIT_PERCENTAGE):
+        return "percentage"
+    if any(re.search(marker, t) for marker in _UNIT_INCOMPATIBLE):
+        return None
+    return None
 
 
 class EcbProjectionsExtractor(ProjectionsExtractor):
@@ -232,6 +328,9 @@ class EcbProjectionsExtractor(ProjectionsExtractor):
 
         if not value_cols:
             return False  # no projection year columns → not a projection table
+
+        if _table_unit(table.name) != "percentage":
+            return False  # no explicit percentage unit → not a projection table
 
         asof = _asof_ref(table.name)
         projection_qualifier = f"projections:{asof}" if asof else "projections:current"

@@ -213,7 +213,7 @@ def test_source_location_pins_table_row_column():
 def test_unrecognized_variables_are_ignored():
     table = DocumentTable(
         order=0,
-        name="Real GDP, trade and labour market projections",
+        name="Real GDP, trade and labour market projections (annual percentage changes)",
         headers=["Variable", "2026", "2027", "2028"],
         rows=[
             ["Real GDP", "1.2", "1.4", "1.6"],
@@ -231,7 +231,7 @@ def test_unrecognized_variables_are_ignored():
 def test_technical_assumptions_table_is_never_mined():
     table = DocumentTable(
         order=0,
-        name="Technical assumptions",
+        name="Technical assumptions (annual percentage changes)",
         headers=["Variable", "2026", "2027", "2028"],
         rows=[
             ["Oil price (USD/barrel)", "60", "62", "63"],
@@ -247,7 +247,7 @@ def test_technical_assumptions_table_is_never_mined():
 def test_scenario_columns_without_years_are_not_projection_columns():
     table = DocumentTable(
         order=0,
-        name="Growth and inflation projections under alternative scenarios",
+        name="Growth and inflation projections under alternative scenarios (annual percentage changes)",
         headers=["Variable", "Baseline", "Adverse scenario", "Severe scenario"],
         rows=[
             ["HICP", "2.0", "2.2", "2.4"],
@@ -261,12 +261,12 @@ def test_scenario_columns_without_years_are_not_projection_columns():
 def test_value_gate_bare_cell_without_identity_is_never_a_fact():
     # year headers but no variable label -> no identity -> no facts
     unlabelled = DocumentTable(
-        order=0, name="Assumed paths", headers=["2026", "2027", "2028"],
+        order=0, name="Assumed paths (annual percentage changes)", headers=["2026", "2027", "2028"],
         rows=[["", "2.0", "1.9"], ["", "1.2", "1.4"]],
     )
     # variable + year, but empty/placeholder cells only -> no facts
     empty_cells = DocumentTable(
-        order=1, name="Partial projections", headers=["Variable", "2026", "2027"],
+        order=1, name="Partial projections (annual percentage changes)", headers=["Variable", "2026", "2027"],
         rows=[["HICP", "", "-"], ["Real GDP", "–", "…"]],
     )
     result = EcbProjectionsExtractor().extract(
@@ -279,7 +279,7 @@ def test_value_gate_bare_cell_without_identity_is_never_a_fact():
 def test_footnote_markers_are_stripped_not_invented():
     table = DocumentTable(
         order=0,
-        name="Price and cost developments",
+        name="Price and cost developments (annual percentage changes)",
         headers=["Variable", "2026", "2027"],
         rows=[
             ["HICP", "2.0 1)", "1.9*"],
@@ -293,6 +293,275 @@ def test_footnote_markers_are_stripped_not_invented():
     hicp_2027 = next(f for f in facts_by(result, SUBJECT_INFLATION, "projection") if period_of(f) == "year:2027")
     assert hicp_2027.value.value == 1.9
     assert hicp_2027.value.source_text == "1.9*"
+
+
+# ---------------------------------------------------------------------------
+# unit gate: a Fact requires an explicitly recognised unit, never assumed
+# ---------------------------------------------------------------------------
+
+
+def _projection_table(name: str, rows: list[list[str]], headers: list[str] | None = None) -> DocumentTable:
+    return DocumentTable(
+        order=0,
+        name=name,
+        headers=headers or ["Variable", "2026", "2027", "2028"],
+        rows=rows,
+    )
+
+
+def test_unit_gate_explicit_percentage_caption_is_extracted():
+    table = _projection_table(
+        "Table 1 — Macroeconomic projections (annual percentage changes)",
+        [["HICP", "2.0", "1.9", "2.1"], ["Real GDP", "1.2", "1.4", "1.6"]],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert len(result.facts) == 6
+    assert all(f.predicate == "projection" for f in result.facts)
+
+
+def test_unit_gate_missing_unit_is_ignored():
+    table = _projection_table(
+        "Table 1 — Macroeconomic projections",
+        [["HICP", "2.0", "1.9", "2.1"], ["Real GDP", "1.2", "1.4", "1.6"]],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert result.facts == []
+    assert result.warnings == ["no_projection_table"]
+
+
+def test_unit_gate_unknown_unit_is_ignored():
+    table = _projection_table(
+        "Table 1 — Projections for the euro area",
+        [["HICP", "2.0", "1.9", "2.1"], ["Real GDP", "1.2", "1.4", "1.6"]],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert result.facts == []
+
+
+def test_unit_gate_incompatible_unit_is_ignored_never_converted():
+    for caption in (
+        "Table 1 — General government deficits (% of GDP)",
+        "Table 1 — HICP index (index 2015 = 100)",
+        "Table 1 — Government debt (% of GDP)",
+        "Table 1 — Assumptions (USD/barrel)",
+    ):
+        table = _projection_table(caption, [["HICP", "2.0", "1.9", "2.1"]])
+        result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+        assert result.facts == [], caption
+
+
+def test_unit_gate_unknown_unit_is_never_assumed_from_value():
+    # a bare caption with no unit: even though the values "look like"
+    # percentages, nothing is mined and nothing is assumed to be percentage.
+    table = _projection_table(
+        "Table 1 — Projections",
+        [["HICP", "2.0", "1.9", "2.1"], ["Real GDP", "1.2", "1.4", "1.6"]],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert result.facts == []
+
+
+def test_unit_gate_percentage_variants_are_accepted():
+    for caption in (
+        "Table 1 — Projections (percent)",
+        "Table 1 — Projections (per cent)",
+        "Table 1 — Projections (%)",
+        "Table 1 — Projections, % growth",
+        "Table 1 — Projections (annual growth rates)",
+        "Table 1 — Projections (percentage changes)",
+        "Table 1 — Projections, annual percentage change",
+    ):
+        table = _projection_table(caption, [["HICP", "2.0", "1.9", "2.1"]])
+        result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+        assert len(result.facts) == 3, caption
+        assert all(f.value.kind is ValueKind.PERCENTAGE for f in result.facts), caption
+
+
+def test_unit_gate_does_not_leak_across_tables():
+    authorised = _projection_table(
+        "Table 1 — Projections (annual percentage changes)",
+        [["HICP", "2.0", "1.9", "2.1"]],
+    )
+    unitless = _projection_table(
+        "Table 2 — Projections",  # same variables + years, but no unit
+        [["HICP", "3.0", "2.9", "3.1"]],
+    )
+    result = EcbProjectionsExtractor().extract(
+        projections_publication(), _doc_with_tables([authorised, unitless])
+    )
+    assert len(result.facts) == 3
+    assert {(f.value.value, period_of(f)) for f in result.facts} == {
+        (2.0, "year:2026"), (1.9, "year:2027"), (2.1, "year:2028")
+    }
+    # the unit of Table 1 never authorises Table 2's numbers
+    assert all(f.source_location.table == 0 for f in result.facts)
+
+
+def test_unit_gate_gates_revisions_too():
+    # revision columns alone, without an explicit percentage unit in the
+    # caption, are ignored — a percentage-point block is not a projection table.
+    table = DocumentTable(
+        order=0,
+        name="Table 1 — Revisions (percentage points)",
+        headers=["Variable", "2026", "2027", "2028", "Revisions vs December 2025", "2026", "2027", "2028"],
+        rows=[["HICP", "2.0", "1.9", "2.1", "", "0.1", "-0.2", "0.0"]],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert result.facts == []
+
+
+def test_unit_gate_revisions_authorised_by_percentage_caption():
+    table = DocumentTable(
+        order=0,
+        name="Table 1 — Projections (annual percentage changes)",
+        headers=["Variable", "2026", "2027", "2028", "Revisions vs December 2025", "2026", "2027", "2028"],
+        rows=[["HICP", "2.0", "1.9", "2.1", "", "0.1", "-0.2", "0.0"]],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    projections = [f for f in result.facts if f.predicate == "projection"]
+    revisions = [f for f in result.facts if f.predicate == "revision"]
+    assert len(projections) == 3
+    assert len(revisions) == 3
+    revision = next(f for f in revisions if period_of(f) == "year:2027")
+    assert revision.value.value == -0.2
+    assert revision.value.unit == "pp"
+
+
+# ---------------------------------------------------------------------------
+# variable near-miss protection: exact canonical label matching
+# ---------------------------------------------------------------------------
+
+
+def test_real_gdp_gdp_growth_and_real_gdp_growth_are_extracted():
+    table = _projection_table(
+        "Table 1 — Projections (annual percentage changes)",
+        [
+            ["Real GDP", "1.2", "1.4", "1.6"],
+            ["GDP growth", "1.1", "1.3", "1.5"],
+            ["Real GDP growth", "1.0", "1.2", "1.4"],
+        ],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert {f.subject for f in result.facts} == {SUBJECT_GDP}
+    assert len(result.facts) == 9
+
+
+def test_gdp_near_misses_are_ignored():
+    table = _projection_table(
+        "Table 1 — Projections (annual percentage changes)",
+        [
+            ["GDP deflator", "1.8", "1.9", "2.0"],
+            ["GDP per capita", "0.5", "0.6", "0.7"],
+            ["GDP price deflator", "1.8", "1.9", "2.0"],
+            ["Real GDP with modified domestic demand and trade projections", "1.2", "1.4", "1.6"],
+            ["GDP at market prices", "1.2", "1.4", "1.6"],
+        ],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert result.facts == []
+
+
+def test_hicp_is_extracted_and_near_misses_ignored():
+    table = _projection_table(
+        "Table 1 — Projections (annual percentage changes)",
+        [
+            ["HICP", "2.0", "1.9", "2.1"],
+            ["HICP excluding energy", "2.2", "2.1", "2.0"],
+            ["HICP excluding ETS2", "2.2", "2.1", "2.0"],
+            ["HICP services", "2.5", "2.4", "2.3"],
+            ["HICP non-energy industrial goods", "1.0", "1.1", "1.2"],
+            ["HICP energy", "-1.5", "-1.0", "0.5"],
+            ["HICP food", "2.8", "2.7", "2.6"],
+            ["HICP excluding energy, food and changes in indirect taxes", "2.3", "2.2", "2.1"],
+        ],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert {f.subject for f in result.facts} == {SUBJECT_INFLATION}
+    assert {(f.value.value, period_of(f)) for f in result.facts} == {
+        (2.0, "year:2026"), (1.9, "year:2027"), (2.1, "year:2028")
+    }
+
+
+def test_core_hicp_canonical_labels_are_extracted():
+    table = _projection_table(
+        "Table 1 — Projections (annual percentage changes)",
+        [
+            ["HICP excluding energy and food", "2.3", "2.2", "2.1"],
+            ["HICPX", "2.3", "2.2", "2.0"],
+            ["Core HICP", "2.3", "2.2", "2.1"],
+            ["Core inflation", "2.3", "2.2", "2.1"],
+        ],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert {f.subject for f in result.facts} == {SUBJECT_CORE_INFLATION}
+    assert len(result.facts) == 12
+
+
+def test_core_hicp_near_misses_are_ignored():
+    table = _projection_table(
+        "Table 1 — Projections (annual percentage changes)",
+        [["HICP excluding energy", "2.2", "2.1", "2.0"]],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert result.facts == []
+
+
+def test_exact_match_survives_footnote_markers_and_case():
+    table = _projection_table(
+        "Table 1 — Projections (annual percentage changes)",
+        [["Real GDP 1)", "1.2", "1.4", "1.6"], ["hicp*", "2.0", "1.9", "2.1"]],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert {f.subject for f in result.facts} == {SUBJECT_GDP, SUBJECT_INFLATION}
+
+
+# ---------------------------------------------------------------------------
+# integrity: variable × period × value × unit -> one Fact; no invented revision
+# ---------------------------------------------------------------------------
+
+
+def test_projection_fact_carries_full_identity():
+    table = _projection_table(
+        "Table 1 — Projections (annual percentage changes)",
+        [["HICP", "2.0", "1.9", "2.1"]],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    fact = next(f for f in result.facts if period_of(f) == "year:2027")
+    assert fact.subject == SUBJECT_INFLATION
+    assert fact.predicate == "projection"
+    assert fact.value.kind is ValueKind.PERCENTAGE
+    assert fact.value.value == 1.9
+    assert fact.period.kind.value == "year"
+    assert fact.period.value == "2027"
+    assert fact.identity_qualifier == "projections:current"
+    assert fact.source_location.kind is LocationKind.TABLE
+    assert fact.source_location.row == 0
+    assert fact.confidence is Confidence.HIGH
+
+
+def test_two_number_columns_are_never_a_revision_without_explicit_block():
+    # a table can carry several year columns (e.g. previous projections) with
+    # no "Revisions vs {Month Year}" block: the difference must never be
+    # computed and no revision predicate may appear.
+    table = DocumentTable(
+        order=0,
+        name="Table 1 — Projections (annual percentage changes)",
+        headers=["Variable", "2026", "2027", "2028"],
+        rows=[["HICP", "2.0", "1.9", "2.1"]],
+    )
+    result = EcbProjectionsExtractor().extract(projections_publication(), _doc_with_tables([table]))
+    assert all(f.predicate == "projection" for f in result.facts)
+    assert all(f.predicate != "revision" for f in result.facts)
+    assert all(f.previous_value is None for f in result.facts)
+
+
+def test_hardened_pipeline_persists_only_unit_authorized_facts(tmp_path):
+    store = _store_projections(tmp_path, "ecb_projections_minimal.html")
+    classify_projections(store)
+    extract_projections(store, projections_publication())
+    persisted = store.get_facts(publication_id="pub-ecb-projections")
+    assert len(persisted) == 2
+    assert all(f.value.kind.value == "percentage" for f in persisted)
 
 
 # ---------------------------------------------------------------------------
