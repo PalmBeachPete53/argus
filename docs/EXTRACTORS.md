@@ -933,3 +933,283 @@ asserts, per fixture:
 - deterministic extraction and idempotent Store persistence (including
   empty-result persistence and the `economic_projections` gating),
   classification gating and Phase 5/6/7/8 coexistence.
+
+---
+
+# Type-Specific Extractors — Phase 10 (Monetary Policy Report / Reports)
+
+## Pipeline
+
+```
+NormalizedDocument                          ← Phase 2
+    ↓  ReportsExtractor.extract(publication, document)
+ExtractionResult(publication_id, document_id, facts, warnings)
+    ↓  Store.rebuild_facts_for_document (delete + insert, idempotent)
+facts table
+```
+
+- a classified **monetary policy report** publication (`monetary_policy_report`)
+- its normalized document(s)
+- the ECB report extractor producing structured **Facts**
+- an `ExtractionResult` handed to the existing `Store`
+
+A monetary policy report is a large **narrative** document: economic outlook,
+inflation drivers, growth outlook, labour market, financial conditions, fiscal
+developments, risks and policy rationale. The ECB's report-like publication of
+the euro area is the **Economic Bulletin**; the extractor models a
+report-shaped document generically so it applies to any bank's analogous
+report.
+
+## Extractor contract
+
+`src/argus/reports/base.py`:
+
+```python
+class ReportsExtractor(ABC):
+    bank: str
+    extraction_version: str
+    def extract(self, publication, document) -> ExtractionResult: ...
+```
+
+- One extractor per bank; the generic code only dispatches on `central_bank`.
+- Extractors are **pure**: they read the normalized document and return an
+  `ExtractionResult`; persistence is a caller concern.
+- `extract_report(store, publication, *, document=None)` runs the right
+  extractor and persists facts through `Store.rebuild_facts_for_document`,
+  keeping re-runs idempotent (delete + insert, **including empty results**).
+- Extraction is **gated on classification**: a publication classified as
+  `monetary_policy_report` (authoritatively in the `classifications` table) is
+  mined; anything else — and an absent classification — is refused
+  (`REPORT_PUBLICATION_TYPES = ("monetary_policy_report",)`).
+
+## ECB report extractor
+
+`src/argus/reports/ecb.py` — `EcbReportsExtractor` (`extraction_version
+10.0.0`). It answers *"what does the report explicitly state about the economy,
+its risks and about monetary policy?"*.
+
+Phase 10 is the most over-extraction-prone phase, so its cardinal rule is
+**precision over recall**: a Fact is only produced from a known economic
+section (conservative routing) + an explicit economic assertion with sufficient
+identity (subject + predicate + value + unit + period when applicable) +
+provenance. An unknown section — even one full of economic-looking sentences —
+is never mined (`UNKNOWN ≠ ECONOMIC`).
+
+### Conservative section routing
+
+A section is mined only when its normalized heading is a **known economic
+section**; a **known non-economic heading and an unknown heading are both
+ignored** ("absence of proof → absence of extraction"). Known non-economic /
+non-mined headings include the report title (`economic bulletin`,
+`monetary policy report`), `foreword`, `editorial`, `legal notice`,
+`disclaimer`, `copyright`, `imprint`, `statistical annex`, `statistics`,
+`annex`, `appendix`, `glossary`, `references`, `bibliography`,
+`abbreviations`, `acknowledgements`, `contents`, `methodology` and `note`.
+Analytical **boxes** ("Box 1 — …") are deliberately never mined: they are
+interpretive essays. Heading numbering ("2 Economic activity 1)") and footnote
+markers are normalized away before routing. Mined economic headings: policy
+(`monetary policy developments`), risk (`risk assessment`), inflation
+(`prices and costs`), labour (`labour market`, `wages`), financial
+(`financial developments`, `money and credit`), growth (`economic activity`,
+`economic outlook`), fiscal (`fiscal developments`) and general (`overview`,
+`external environment`, `economic analysis`).
+
+### Content-first classification
+
+Sentence classification is **content-first for every mined section** with a
+fixed deterministic precedence: **guidance > policy > risk > financial >
+inflation > labour > growth > fiscal**. The heading only gates *whether* the
+section is mined, never *how* a sentence is classified. An unmatched sentence
+produces no fact (reliability over coverage).
+
+### Supported facts
+
+| subject | predicate | value | source |
+|---|---|---|---|
+| `policy_guidance` | `statement` | text (verbatim) | forward guidance ("stood ready to adjust … within its mandate", "for as long as necessary", "would be guided by the incoming data", …) |
+| `monetary_policy` | `statement` | text (verbatim) | policy sentences ("The Governing Council decided to keep its key interest rates unchanged") |
+| `inflation` | `value` / `assessment` | percentage (+ period) / text | prices and costs / overview |
+| `core_inflation` | `value` / `assessment` | percentage (+ period) / text | same |
+| `inflation_expectations` | `assessment` | text (verbatim) | same |
+| `growth` | `assessment` | text (verbatim) | economic activity |
+| `gdp` | `value` | percentage (+ period) | quantitative growth claims ("projected to increase from 1.2% in 2026 to 1.4% in 2027") |
+| `labour_market` | `assessment` | text (verbatim) | labour market |
+| `unemployment` | `value` | percentage (+ period) | explicit unemployment claims |
+| `wages` | `value` | percentage (+ period) | explicit wage-growth claims |
+| `financial_conditions` | `value` / `assessment` | percentage (+ period) / text | financial developments ("bank lending rates … reached 4.2% in June 2026") |
+| `fiscal_policy` | `assessment` | text (verbatim) | fiscal developments |
+| `risk` | `assessment` | categorical or text | risk assessment |
+| `inflation_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
+| `growth_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
+
+`fiscal_policy` is the Phase 10 addition to the controlled subject vocabulary.
+
+### Quantitative values — explicit value claims only
+
+A percentage becomes a Fact only from a sentence with an **explicit value
+claim verb** ("projected / expected / forecast to average / stand at / be /
+reach / grow by / increase from …", "stood at / averaged / reached / rose to /
+fell to / remained at …"). So target phrasing ("converging towards 2%",
+"the 2% target") is never read as a value, and "Inflation is 2.4% in 2025" (no
+claim verb) yields nothing.
+
+- **Units are explicit.** A value is kept as `percentage` only when the
+  sentence states a percentage; **share/ratio units** ("% of GDP", "% of total",
+  "% of disposable income") are **never** converted into percentage facts.
+- **Periods come from the wording** (year, named month, "first/second/…
+  quarter of <year>" → `year:` / `month:` / `quarter:`), never guessed from
+  proximity. `Fact.effective_date` is always `None`.
+- **A forecast value without an explicit reference period is ignored** —
+  "Inflation is projected to average 2.4%." is under-determined, so no value
+  (and no downgraded assessment) is produced. A non-forecast percentage without
+  a stated period (e.g. "Inflation stood at 2.4%.") is kept without one.
+- Basis points, index levels and currency/energy units are never percentages.
+
+### Risk assessment
+
+Identical to Phases 6–8: a categorical orientation fact (`upside` /
+`downside` / `balanced`, with `two-sided` / `symmetric` normalized to
+`balanced`) **only when an explicit orientation word is present**; otherwise a
+verbatim text assessment ("risks remained elevated" is never forced into a
+category). The risk target is read from the wording (`inflation` →
+`inflation_risk`, `growth`/`activity`/`gdp` → `growth_risk`, otherwise
+`risk`). Absence never becomes an invented orientation — it is surfaced as a
+`no_risk_assessment` warning.
+
+### Tables — variable × year × value × unit integrity
+
+The extractor also reads economic data tables (same value-gate philosophy as
+Phase 9):
+
+- **columns** are years (`20xx` header cells);
+- **rows** are variables, identified by **exact canonical label matching**
+  (`_clean_row_label` normalizes the label, strips footnote markers and
+  parentheticals, then matches verbatim): `hicp` / `hicp inflation` /
+  `inflation` → `inflation`; `core inflation` / `hicp excluding energy and
+  food` / `hicpx` → `core_inflation`; `real gdp` / `gdp growth` → `gdp`;
+  `unemployment (rate)` → `unemployment`; `employment` → `labour_market`;
+  `wages` / `wage growth` / `compensation per employee` → `wages`; near-misses
+  never match;
+- **the unit is read from the table's own caption** — share units
+  (`% of GDP`, …) are rejected first, then percentage markers
+  (`annual percentage changes`, whole-word `percent` / `per cent`, `% growth`,
+  `(%)`, …), then incompatible units (`index`, `points`, `usd`, `eur`,
+  `mwh`, `barrel`, …). A table with a missing, unknown or incompatible unit is
+  ignored **as a whole**, and a unit never authorises another table's numbers;
+- a cell becomes a Fact only when it is identified by a recognised variable +
+  a year + an explicit percentage unit. Placeholder cells (`–`, `…`, `n.a.`)
+  and unrecognised rows (private consumption, technical assumptions, …) are
+  ignored.
+
+### Deduplication
+
+The same assertion stated twice (overview + detail section, prose + table,
+two risk paragraphs with the same wording) is emitted **once**, within a run:
+a quantitative duplicate is defined by subject + predicate + period + value; a
+qualitative one by subject + predicate + period + normalized verbatim wording.
+Sections are processed before tables, so a prose value claim is the provenance
+that survives when the same value appears in a table.
+
+### Provenance — no invented identities
+
+Every Fact carries `source_location` (`LocationKind.SECTION` with the section
+index, or `LocationKind.TABLE` with `table` / `row` / `column`), `source_text`
+(the verbatim supporting sentence or the exact row of the source table),
+`value.source_text` (the verbatim token/cell), `extraction_method`
+(`regex` for prose, `table_extraction` for tables),
+`extraction_version = 10.0.0`, `confidence`, `effective_date = None` and:
+
+- **`speaker` is always `None`** — a monetary policy report is a collective
+  institutional publication; "the Governing Council" is never turned into an
+  individual;
+- **`identity_qualifier`** — `report:{subject}:{ordinal}` (ordinal per
+  subject + predicate + period), which keeps `fact_id`s unique across a
+  document without inventing identity.
+
+### Confidence
+
+- `HIGH` — quantitative percentages and categorical risk orientations
+  (explicit source wording);
+- `MEDIUM` — verbatim qualitative assessments (sentence-level category
+  identification).
+
+### Warnings (fixed order)
+
+`no_sections` (early return), `no_economic_sections` (no recognized economic
+section was mined and no table produced a fact), `no_risk_assessment`,
+`no_forward_guidance`.
+
+### Not covered — Phase 10 boundaries
+
+- **No interpretation**: hawkish/dovish, bullish/bearish, stance or market
+  reaction, forex or trading logic — never.
+- **The decision itself** (wording, rates, changes, effective date) stays
+  Phase 5, gated on decision publications; the report's *narrative* of policy
+  is kept verbatim (`monetary_policy / statement`), never priced, and
+  "unchanged" is never recast as a categorical outcome.
+- **The structured economic projections tables** stay Phase 9, gated on
+  `economic_projections`; prose forecasts inside a report are kept as value
+  claims only when they carry an explicit reference period.
+- **Phases 11** (speeches) — not this layer.
+- **No LLM** (invariant 8); an absent optional section (no risk assessment, no
+  forward guidance) never becomes an invented fact, only a warning.
+
+### Phase 5 / 6 / 7 / 8 / 9 / 10 boundary
+
+The six extractors are disjoint by **publication type** (classification
+gating): decisions, statements, press conferences, minutes, economic
+projections and monetary policy reports are never cross-mined.
+`get_extractor` dispatches on `central_bank`, and each extractor refuses
+publications whose authoritative classification is not its own type.
+
+## Golden tests
+
+`tests/fixtures/documents/ecb_report*.html` (modeled on the ECB Economic
+Bulletin layout: title, foreword, external environment, economic activity,
+prices and costs, financial developments, fiscal developments, monetary policy
+developments, risk assessment, boxes, data tables, legal notice):
+
+- `ecb_report.html` — the full narrative fixture: growth assessments, GDP
+  values (quarter + year periods), inflation / core inflation /
+  inflation_expectations, financial conditions (value + assessment),
+  fiscal policy, a monetary policy statement, forward guidance and risk
+  orientations (17 facts, no warnings);
+- `ecb_report_tables.html` — prose value claims plus an "annual percentage
+  changes" data table (HICP / core HICP / Real GDP / unemployment / wages ×
+  2024–2026), a unit-less scenario table and a "% of GDP" table (16 facts,
+  `no_risk_assessment` + `no_forward_guidance`; the unit of one table never
+  authorises another, and a prose value deduplicates with the identical table
+  value);
+- `ecb_report_risks.html` — inflation value + balanced / upside / downside
+  risk orientations + a verbatim "elevated" risk assessment (5 facts,
+  `no_forward_guidance`);
+- `ecb_report_unknown.html` — economic-looking content under unknown /
+  appendix / methodology headings → 0 facts + all three warnings
+  (`UNKNOWN ≠ ECONOMIC`);
+- `ecb_report_minimal.html` — a single inflation value (1 fact,
+  `no_risk_assessment` + `no_forward_guidance`).
+
+`tests/test_reports.py` runs the normalizer → extractor → store slice and
+asserts, per fixture:
+
+- the exact expected facts (per-subject value sets with periods, and verbatim
+  texts) with warnings;
+- conservative routing (known economic headings mined, non-economic / unknown
+  headings and analytical boxes ignored — including economic content under an
+  unknown heading → 0 facts), content-first precedence (guidance > policy >
+  risk > financial > inflation > labour > growth > fiscal);
+- the value gate: explicit claim verbs only, share units ("% of GDP") never
+  percentages, basis points never percentages, forecasts without a period
+  ignored, periods from wording (year / month / quarter);
+- table extraction: row × column × year × value × unit integrity, unit from the
+  table's own caption, unit leakage prevented, unrecognised rows and
+  placeholder cells ignored;
+- within-run deduplication (repeated assertion across sections → one fact;
+  identical prose + table value → one fact);
+- no invented facts — no Phase 5/6/7/8/9 subjects, `speaker` always `None`,
+  no hawkish/dovish / stance / forex interpretation;
+- verbatim provenance: each `fact.source_text` and `fact.value.source_text` is
+  a substring of the referenced section/row;
+- deterministic extraction and idempotent Store persistence (including
+  empty-result persistence and the `monetary_policy_report` gating),
+  classification gating and Phase 5/6/7/8/9 coexistence.

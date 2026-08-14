@@ -379,7 +379,43 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4.
 - **Critères de validation** : les affirmations contextuelles sont reliées à
   leur source.
-- **Statut** : `NOT STARTED`.
+- **Statut** : `COMPLETE` — extracteur `EcbReportsExtractor` (v10.0.0,
+  `src/argus/reports/`). Implémenté : routage **conservateur** par titre de
+  section (titres économiques connus extraits — activité économique, prix et
+  coûts, développements financiers, développements budgétaires, développements
+  de politique monétaire, évaluation des risques, overview — ; titre du
+  bulletin, avant-propos, notice légale, statistiques, annexes, méthodologie,
+  boîtes analytiques (« Box N — … ») et **titres inconnus ignorés** —
+  `UNKNOWN ≠ ECONOMIC`), classification **content-first** par phrase avec
+  précédence déterministe (guidance > policy > risk > financial > inflation >
+  labour > growth > fiscal), affirmations contextuelles reliées à leur source
+  (sujets inflation / core inflation / inflation expectations / croissance
+  (`growth` qualitatif, `gdp` quantitatif) / labour market / unemployment /
+  wages / financial conditions / fiscal_policy / monetary_policy /
+  policy_guidance / risk / inflation_risk / growth_risk, prédicats
+  `assessment` / `statement` / `value`), valeurs quantitatives à partir de
+  revendications de valeur explicites uniquement (verbe de revendication +
+  pourcentage + période de référence explicite année/mois/trimestre depuis le
+  libellé ; **unités de part (« % of GDP ») jamais converties en pourcentage** ;
+  **prévision sans période de référence ignorée** ; points de base jamais
+  pourcentages), évaluation des risques (orientations catégoriques
+  upside/downside/balanced uniquement quand l'orientation est énoncée,
+  sinon texte verbatim), **tableaux de données** avec garde d'unité par
+  légende (unités de part rejetées, marqueurs de pourcentage acceptés, unités
+  incompatibles rejetées, ligne de variable reconnue + colonnes d'années
+  requises, `table`/`row`/`column` provenance), déduplication intra-course
+  (la même assertion répétée en prose + tableau = un fait), `Fact.speaker`
+  toujours `None` et `effective_date` toujours `None` (publication
+  institutionnelle collective), `identity_qualifier`
+  `report:{subject}:{ordinal}`, gating strict par classification
+  (`monetary_policy_report`), persistance idempotente (résultats vides
+  compris). 5 fixtures (`ecb_report.html`, `ecb_report_tables.html`,
+  `ecb_report_risks.html`, `ecb_report_unknown.html`,
+  `ecb_report_minimal.html`), golden tests (valeurs exactes, provenance
+  verbatim section/tableau, routage, garde de valeur, déduplication, aucun
+  fait inventé), extraction déterministe, persistance idempotente, gating par
+  classification et coexistence Phases 5/6/7/8/9 vérifiées ;
+  `docs/EXTRACTORS.md` documente la couverture réelle.
 
 ## Phase 11 — Speeches & Interviews
 
@@ -544,14 +580,15 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 ## Current Position
 
-- Argus se situe au début de la **Phase 10 (Monetary Policy Reports)**.
-- Les phases 0 à 9 sont marquées `COMPLETE` après vérification du repository
+- Argus se situe au début de la **Phase 11 (Speeches & Interviews)**.
+- Les phases 0 à 10 sont marquées `COMPLETE` après vérification du repository
   (adapters, discovery, collector/fetcher, normalization, classification,
   modèle `Fact`, extracteurs ECB `EcbDecisionExtractor` v5.2.0,
   `EcbMonetaryPolicyStatementExtractor` v6.0.0,
-  `EcbPressConferenceExtractor` v7.0.0, `EcbMinutesExtractor` v8.0.0 et
-  `EcbProjectionsExtractor` v9.0.0, tables SQLite correspondantes, tests).
-- **Prochaine phase autorisée : Phase 10 — Monetary Policy Reports** (statut
+  `EcbPressConferenceExtractor` v7.0.0, `EcbMinutesExtractor` v8.0.0,
+  `EcbProjectionsExtractor` v9.0.0 et `EcbReportsExtractor` v10.0.0, tables
+  SQLite correspondantes, tests).
+- **Prochaine phase autorisée : Phase 11 — Speeches & Interviews** (statut
   `NOT STARTED`).
 
 ## Out of Scope
