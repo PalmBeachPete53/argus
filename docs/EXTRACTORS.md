@@ -1538,6 +1538,18 @@ projections, monetary policy reports and speeches are never cross-mined.
 `get_extractor` dispatches on `central_bank`, and each extractor refuses
 publications whose authoritative classification is not its own type.
 
+### Phase 12 — extraction vs temporal analysis boundary
+
+Phase 12 (`src/argus/changes/`) is **not** an extractor: it never creates
+Facts, never reads source documents, and never invents content. It is a
+strictly **descriptive** analytic layer that compares **existing Facts** over
+time (previous → current) and records *that* an observation changed — never
+*what* the change means. Because the two layers are separate, no `Fact` is
+ever mutated by the analysis, and every `FactChange` keeps the identities of
+both source Facts (with their documents, publications, periods and
+`effective_date`) so the extraction provenance of both sides stays intact.
+The exact matching rules are documented in `docs/CHANGES.md`.
+
 ## Golden tests
 
 `tests/fixtures/documents/ecb_speech*.html` (modeled on the ECB Speech layout:

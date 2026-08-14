@@ -14,7 +14,7 @@ Type-Specific Extractor                  ← Phases 5+ (decisions, statements, p
     ↓
 Fact                                     ← Phase 4 (this layer)
     ↓
-Temporal / Cross-Publication Analysis    ← Phases 12+ (NOT implemented yet)
+Temporal / Cross-Publication Analysis    ← Phase 12 (src/argus/changes/, see docs/CHANGES.md)
 ```
 
 The Fact model is the **canonical interface** between publication-specific

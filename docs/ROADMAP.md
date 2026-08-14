@@ -480,7 +480,36 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phases 4–11 (historique de faits disponible).
 - **Critères de validation** : chaque changement identifié est rattaché aux deux
   faits sources.
-- **Statut** : `NEXT`.
+- **Statut** : `COMPLETE`.
+
+### Phase 12 — Livré (validation finale)
+
+- **Module** : `src/argus/changes/` — `FactChange`, `ChangeType`
+  (`numeric_changed` / `qualitative_changed` / `text_changed`),
+  `FactChangeAnalyzer` (analyse pure, déterministe), `change_id_of`
+  (identité déterministe SHA-256 sur les deux faits sources + type), et
+  `analyze_changes(store, *, bank)` (persistance idempotente par
+  `fact_changes`, table et méthodes dédiées dans `Store`).
+- **Règles de matching** : clé `(central_bank, subject, predicate,
+  value.kind, period.canonical(), identity_qualifier, publication_type)` ;
+  comparaison **uniquement entre publications différentes** ; ordre par
+  référence temporelle (`meeting_date` sinon `publication_date`, départage par
+  `publication_id`) ; chaînage **consécutif** (F1→F2, F2→F3, jamais baseline
+  fixe) ; valeur identique → **aucun changement** ; mismatch de période (2027 vs
+  2028), de type de publication ou de `identity_qualifier` → aucun changement.
+- **Strictement descriptif** : `delta = current − previous` (même kind/unité,
+  arrondi à 10 décimales), aucun contenu économique (pas de hawkish/dovish, pas
+  de tightening/easing), aucun scoring, pas de comparateur sémantique/fuzzy/LLM.
+- **Provenance** : chaque changement garde les **deux** `fact_id`, les
+  `document_id`, `publication_id`, périodes, `effective_date` et `source_text`
+  des deux côtés ; les faits sources ne sont jamais mutés.
+- **Persistance** : `fact_changes` dérivée — recomputation complète du scope
+  banque (ou global) et remplacement (idempotent, vide → purge du scope).
+- **Tests** : `tests/test_changes.py` (37 tests) — les trois types de
+  changement, deltas positifs/négatifs/nuls, no-change exacts, mismatch de
+  période/type/qualifier, ordre et chaînage, avertissements d'observabilité,
+  déterminisme, sérialisation, intégration `Store` idempotente et coexistence
+  Phases 5–11. **Suite complète : 563 tests verts et déterministes.**
 
 ## Phase 13 — Policy Reaction Function
 
@@ -493,7 +522,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 12.
 - **Critères de validation** : le caractère inféré est explicite et non
   présenté comme factuel.
-- **Statut** : `NOT STARTED`.
+- **Statut** : `NEXT`.
 
 ## Phase 14 — Monetary Policy State
 
@@ -637,8 +666,15 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   **durcissement** (gate qualitatif : assertion explicite requise, platitudes
   rejetées ; ancres génériques remplacées ou supprimées), 513 tests verts et
   déterministes.
-- **Prochaine phase autorisée : Phase 12 — Temporal / Cross-Publication
-  Analysis** (statut `NEXT`).
+- **Phase 12 (Temporal / Cross-Publication Analysis)** : `src/argus/changes/`
+  validé — `FactChangeAnalyzer` pur et déterministe, trois types de changement,
+  matching exact (jamais de comparateur flou/LLM), chaînage consécutif
+  F1→F2→F3, `fact_changes` persistée de façon idempotente et reconstruisible,
+  provenance aux deux faits sources, aucun contenu économique ; 37 tests
+  dédiés, **563 tests verts et déterministes** (documenté dans
+  `docs/CHANGES.md`).
+- **Prochaine phase autorisée : Phase 13 — Policy Reaction Function** (statut
+  `NEXT`).
 
 ## Out of Scope
 

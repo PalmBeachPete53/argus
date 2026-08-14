@@ -1,0 +1,123 @@
+# Data Model — Fact Changes (Phase 12)
+
+This document is the authoritative reference for the **temporal /
+cross-publication change layer** of Argus (`src/argus/changes/`). It defines
+what a `FactChange` is, what it is not, and every design decision behind the
+analyzer, the identity scheme and the persistence.
+
+## Where Fact Changes sit in the pipeline
+
+```
+Type-Specific Extractor                 ← Phases 5–11
+    ↓
+Fact                                    ← Phase 4 (src/argus/facts/)
+    ↓
+Temporal / Cross-Publication Analysis   ← Phase 12 (src/argus/changes/, THIS layer)
+    ↓
+Policy Reaction Function                ← Phase 13
+Monetary Policy State                   ← Phase 14
+Forex Fundamentals                      ← Phase 15
+```
+
+Phase 12 is an **analysis layer**, not an extractor. It consumes the existing
+`fact_changes`-independent fact history, relates Facts over time, and persists
+the relations. It never creates Facts, never reads source documents and never
+mutates the Facts it compares.
+
+## What a FactChange is
+
+A `FactChange` is an **analytic relation between two existing Facts**
+(`previous_fact_id → current_fact_id`) recording the observable difference
+between a previous observation and the next one, together with the complete
+provenance of BOTH sides (document, publication, period, `effective_date`,
+`source_text`). "Why does Argus say this value changed?" is therefore always
+answerable by "Fact A in document A had X, Fact B in document B has Y".
+
+```
+Fact #1 (P1, 2026-01-15): policy_rate = 4.00 %
+Fact #2 (P2, 2026-03-15): policy_rate = 4.25 %
+→ FactChange(previous_fact_id=#1, current_fact_id=#2,
+             change_type=numeric_changed, delta=+0.25 percentage, …)
+```
+
+## What a FactChange is NOT
+
+- **Not a new Fact** — it does not create a fact, and the source Facts are
+  never modified.
+- **Not an interpretation** — no hawkish/dovish, no tightening/easing, no
+  market reading. `delta` is `current − previous`, nothing more.
+- **Not a judgement by Argus** — no forecast, no policy recommendation.
+- **Not produced by a fuzzy/semantic/LLM comparator** — matching is exact and
+  fully explainable (see below).
+
+## Change types
+
+| `ChangeType`           | When                              | Payload                              |
+|------------------------|-----------------------------------|--------------------------------------|
+| `numeric_changed`      | a numeric value changed           | `delta = current − previous`, same kind/unit, rounded to 10 decimals |
+| `qualitative_changed`  | a categorical/other value changed | `delta = None` (values compared exactly) |
+| `text_changed`         | a verbatim wording changed        | `delta = None` (both texts preserved) |
+
+Identical values produce **no change** at all (see "no-change" rules below).
+
+## Matching rules (exact, explainable, deterministic)
+
+1. **Observation lineage.** Two Facts are candidates only when they share the
+   same `(central_bank, subject, predicate, value.kind,
+   period.canonical(), identity_qualifier, publication_type)`. The period is
+   compared via its canonical form, so a 2027 forecast never meets a 2028
+   forecast; a different `identity_qualifier` (e.g. Q&A answer 1 vs answer 2,
+   minutes dissent vs members) never merges; a decision rate never meets a
+   speech value.
+2. **Cross-publication only.** Facts belonging to the **same publication** are
+   never compared (two statements inside one document are not a change).
+3. **Temporal ordering.** Observations are ordered by the publication temporal
+   reference — `meeting_date` when set, else `publication_date` — with ties
+   broken by `publication_id`. A publication without any date is skipped
+   (observability warning).
+4. **Consecutive chaining.** Only **adjacent** observations in the ordered
+   lineage are compared: F1→F2, F2→F3, … A fixed baseline (F1→F3) is never
+   used, so the chain is exact and reproducible.
+5. **No-change.** Equal values → no change. This keeps the table minimal and
+   the signal exact.
+6. **Incomparable publications.** Facts whose publication is missing,
+   unclassified (`unknown`/`other`), undated or valueless (`NULL`) are skipped
+   with an observability warning. Precision over recall: better no change than
+   a spurious one.
+
+## Ordering reference vs period vs effective date
+
+- The **ordering reference** is a publication-level attribute
+  (`meeting_date`, else `publication_date`): it decides *which observation is
+  previous*.
+- The **period** is a Fact-level attribute (e.g. the forecast year) and is part
+  of the matching key: a 2027 and a 2028 forecast are different lineages.
+- The **`effective_date`** is a Fact-level attribute and is preserved on both
+  sides of the change, but is never used to order or match.
+
+## Deterministic identity
+
+`change_id` is a SHA-256 over `previous_fact_id + current_fact_id +
+change_type` (`src/argus/changes/identity.py`). The same pair of facts, seen
+the same way, always yields the same id — stable across rebuilds, self
+explanatory, and never "invented" (both sides are real Facts).
+
+## Persistence (`fact_changes`)
+
+- The `fact_changes` table is **derived data**. `analyze_changes(store, *,
+  bank=None)` recomputes the full scope (one bank, or the whole store) from the
+  current `facts` + `publications` tables and **replaces** it atomically
+  (`rebuild_changes`).
+- Consequences: re-analysis is **idempotent**; an empty result **clears** the
+  scope; a change can never survive the disappearance of the facts it relates;
+  no per-document invalidation is needed.
+- Read filters (`get_changes`) support `bank`, `subject`, `change_type`,
+  `previous_fact_id`, `current_fact_id`, `publication_id` (either side) and
+  `limit`.
+
+## Observability
+
+`FactChangeAnalyzer.analyze` returns a `FactChangeResult` with `changes` and
+`warnings`. Warnings are machine-readable (`missing_publication:<id>`,
+`unclassified_publication:<id>`, `undated_publication:<id>`,
+`valueless_fact:<id>`) so skipped facts are never silent.

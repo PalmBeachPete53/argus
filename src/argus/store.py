@@ -180,6 +180,51 @@ CREATE INDEX IF NOT EXISTS idx_facts_subject
     ON facts(subject, predicate);
 CREATE INDEX IF NOT EXISTS idx_facts_bank_subject
     ON facts(central_bank, subject);
+CREATE TABLE IF NOT EXISTS fact_changes (
+    -- Phase 12 — analytic relations between two existing Facts over time
+    -- (previous → current). `change_id` is a deterministic SHA-256 over the
+    -- two source fact ids + the change kind, so re-running the analysis
+    -- updates the row instead of duplicating it, and a change can never be
+    -- "invented": both sides keep their fact/document/publication identity.
+    change_id TEXT PRIMARY KEY,
+    previous_fact_id TEXT NOT NULL,
+    current_fact_id TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    central_bank TEXT,
+    subject TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    value_kind TEXT,
+    previous_value_json TEXT,
+    current_value_json TEXT,
+    delta_json TEXT,
+    identity_qualifier TEXT,
+    previous_period_kind TEXT,
+    previous_period_value TEXT,
+    previous_period_label TEXT,
+    current_period_kind TEXT,
+    current_period_value TEXT,
+    current_period_label TEXT,
+    previous_publication_id TEXT NOT NULL,
+    current_publication_id TEXT NOT NULL,
+    previous_document_id TEXT NOT NULL,
+    current_document_id TEXT NOT NULL,
+    previous_effective_date TEXT,
+    current_effective_date TEXT,
+    previous_source_text TEXT,
+    current_source_text TEXT,
+    analysis_version TEXT,
+    analyzed_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fact_changes_previous
+    ON fact_changes(previous_fact_id);
+CREATE INDEX IF NOT EXISTS idx_fact_changes_current
+    ON fact_changes(current_fact_id);
+CREATE INDEX IF NOT EXISTS idx_fact_changes_bank_subject
+    ON fact_changes(central_bank, subject);
+CREATE INDEX IF NOT EXISTS idx_fact_changes_publications
+    ON fact_changes(previous_publication_id, current_publication_id);
 """
 
 
@@ -1153,4 +1198,327 @@ class Store:
             speaker=row["speaker"],
             identity_qualifier=row["identity_qualifier"] or "",
             extracted_at=from_iso(row["extracted_at"]),
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 12 — fact changes
+    # ------------------------------------------------------------------
+    def save_change(self, change) -> None:
+        """Persist one ``FactChange``, upserting by its deterministic id.
+
+        Idempotent: re-saving the same change overwrites the row in place,
+        preserving ``created_at``.
+        """
+        from .changes.base import ChangeType, FactChange
+
+        if not isinstance(change, FactChange):
+            raise TypeError(f"expected FactChange, got {type(change).__name__}")
+        change_id = change.resolve_id()
+        now_iso = iso(now_utc())
+        existing = self._conn.execute(
+            "SELECT created_at FROM fact_changes WHERE change_id = ?", (change_id,)
+        ).fetchone()
+        created_at = existing["created_at"] if existing else now_iso
+        self._conn.execute(
+            """
+            INSERT INTO fact_changes
+                (change_id, previous_fact_id, current_fact_id, change_type,
+                 central_bank, subject, predicate, value_kind,
+                 previous_value_json, current_value_json, delta_json,
+                 identity_qualifier,
+                 previous_period_kind, previous_period_value, previous_period_label,
+                 current_period_kind, current_period_value, current_period_label,
+                 previous_publication_id, current_publication_id,
+                 previous_document_id, current_document_id,
+                 previous_effective_date, current_effective_date,
+                 previous_source_text, current_source_text,
+                 analysis_version, analyzed_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(change_id) DO UPDATE SET
+                previous_fact_id=excluded.previous_fact_id,
+                current_fact_id=excluded.current_fact_id,
+                change_type=excluded.change_type,
+                central_bank=excluded.central_bank,
+                subject=excluded.subject,
+                predicate=excluded.predicate,
+                value_kind=excluded.value_kind,
+                previous_value_json=excluded.previous_value_json,
+                current_value_json=excluded.current_value_json,
+                delta_json=excluded.delta_json,
+                identity_qualifier=excluded.identity_qualifier,
+                previous_period_kind=excluded.previous_period_kind,
+                previous_period_value=excluded.previous_period_value,
+                previous_period_label=excluded.previous_period_label,
+                current_period_kind=excluded.current_period_kind,
+                current_period_value=excluded.current_period_value,
+                current_period_label=excluded.current_period_label,
+                previous_publication_id=excluded.previous_publication_id,
+                current_publication_id=excluded.current_publication_id,
+                previous_document_id=excluded.previous_document_id,
+                current_document_id=excluded.current_document_id,
+                previous_effective_date=excluded.previous_effective_date,
+                current_effective_date=excluded.current_effective_date,
+                previous_source_text=excluded.previous_source_text,
+                current_source_text=excluded.current_source_text,
+                analysis_version=excluded.analysis_version,
+                analyzed_at=excluded.analyzed_at,
+                updated_at=excluded.updated_at
+            """,
+            (
+                change_id,
+                change.previous_fact_id,
+                change.current_fact_id,
+                change.change_type.value,
+                change.central_bank,
+                change.subject,
+                change.predicate,
+                change.value_kind,
+                json.dumps(change.previous_value.to_dict()) if change.previous_value else None,
+                json.dumps(change.current_value.to_dict()) if change.current_value else None,
+                json.dumps(change.delta.to_dict()) if change.delta else None,
+                change.identity_qualifier,
+                change.previous_period.kind.value if change.previous_period else None,
+                change.previous_period.value if change.previous_period else None,
+                change.previous_period.label if change.previous_period else None,
+                change.current_period.kind.value if change.current_period else None,
+                change.current_period.value if change.current_period else None,
+                change.current_period.label if change.current_period else None,
+                change.previous_publication_id,
+                change.current_publication_id,
+                change.previous_document_id,
+                change.current_document_id,
+                iso(change.previous_effective_date),
+                iso(change.current_effective_date),
+                change.previous_source_text,
+                change.current_source_text,
+                change.analysis_version,
+                iso(change.analyzed_at),
+                created_at,
+                now_iso,
+            ),
+        )
+        self._conn.commit()
+
+    def save_changes(self, changes) -> int:
+        """Persist a list of ``FactChange`` (or a ``FactChangeResult``). Returns count."""
+        if hasattr(changes, "changes"):
+            changes = changes.changes
+        count = 0
+        for change in changes:
+            self.save_change(change)
+            count += 1
+        return count
+
+    def get_change(self, change_id: str):
+        row = self._conn.execute(
+            "SELECT * FROM fact_changes WHERE change_id = ?", (change_id,)
+        ).fetchone()
+        return self._change_from_row(row) if row else None
+
+    def get_changes(
+        self,
+        *,
+        bank: str | tuple[str, ...] | None = None,
+        subject: str | None = None,
+        change_type: str | None = None,
+        previous_fact_id: str | None = None,
+        current_fact_id: str | None = None,
+        publication_id: str | None = None,
+        limit: int | None = None,
+    ) -> list:
+        query = "SELECT * FROM fact_changes"
+        clauses: list[str] = []
+        params: list = []
+        if bank is not None:
+            banks = (bank,) if isinstance(bank, str) else tuple(bank)
+            if banks:
+                clauses.append(f"central_bank IN ({','.join('?' * len(banks))})")
+                params.extend(banks)
+        if subject is not None:
+            clauses.append("subject = ?")
+            params.append(subject)
+        if change_type is not None:
+            clauses.append("change_type = ?")
+            params.append(change_type)
+        if previous_fact_id is not None:
+            clauses.append("previous_fact_id = ?")
+            params.append(previous_fact_id)
+        if current_fact_id is not None:
+            clauses.append("current_fact_id = ?")
+            params.append(current_fact_id)
+        if publication_id is not None:
+            clauses.append("(previous_publication_id = ? OR current_publication_id = ?)")
+            params.extend((publication_id, publication_id))
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY subject, previous_publication_id, current_publication_id, change_id"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._change_from_row(r) for r in rows]
+
+    def delete_changes_for_document(self, document_id: str) -> int:
+        """Delete every change involving a document (either side)."""
+        cursor = self._conn.execute(
+            "DELETE FROM fact_changes WHERE previous_document_id = ? OR current_document_id = ?",
+            (document_id, document_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def delete_changes_for_publication(self, publication_id: str) -> int:
+        """Delete every change involving a publication (either side)."""
+        cursor = self._conn.execute(
+            "DELETE FROM fact_changes WHERE previous_publication_id = ? OR current_publication_id = ?",
+            (publication_id, publication_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def delete_changes(self, *, bank: str | None = None) -> int:
+        """Delete every change of a bank (or of the whole store)."""
+        if bank is not None:
+            cursor = self._conn.execute(
+                "DELETE FROM fact_changes WHERE central_bank = ?", (bank,)
+            )
+        else:
+            cursor = self._conn.execute("DELETE FROM fact_changes")
+        self._conn.commit()
+        return cursor.rowcount
+
+    def rebuild_changes(self, changes, *, bank: str | None = None) -> int:
+        """Replace a bank's (or the store's) changes with ``changes`` in one
+        transaction.
+
+        ``changes`` is a list of ``FactChange`` or a ``FactChangeResult``.
+        ``fact_changes`` is derived data: the bank scope is fully recomputed
+        each time, so re-analysis is idempotent, an empty result clears the
+        scope, and no stale change survives the facts it relates.
+        """
+        from .changes.base import FactChange
+
+        if hasattr(changes, "changes"):
+            changes = changes.changes
+        try:
+            if bank is not None:
+                self._conn.execute("DELETE FROM fact_changes WHERE central_bank = ?", (bank,))
+            else:
+                self._conn.execute("DELETE FROM fact_changes")
+            count = 0
+            for change in changes:
+                if not isinstance(change, FactChange):
+                    raise TypeError(f"expected FactChange, got {type(change).__name__}")
+                change_id = change.resolve_id()
+                now_iso = iso(now_utc())
+                self._conn.execute(
+                    """
+                    INSERT INTO fact_changes
+                        (change_id, previous_fact_id, current_fact_id, change_type,
+                         central_bank, subject, predicate, value_kind,
+                         previous_value_json, current_value_json, delta_json,
+                         identity_qualifier,
+                         previous_period_kind, previous_period_value, previous_period_label,
+                         current_period_kind, current_period_value, current_period_label,
+                         previous_publication_id, current_publication_id,
+                         previous_document_id, current_document_id,
+                         previous_effective_date, current_effective_date,
+                         previous_source_text, current_source_text,
+                         analysis_version, analyzed_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        change_id,
+                        change.previous_fact_id,
+                        change.current_fact_id,
+                        change.change_type.value,
+                        change.central_bank,
+                        change.subject,
+                        change.predicate,
+                        change.value_kind,
+                        json.dumps(change.previous_value.to_dict()) if change.previous_value else None,
+                        json.dumps(change.current_value.to_dict()) if change.current_value else None,
+                        json.dumps(change.delta.to_dict()) if change.delta else None,
+                        change.identity_qualifier,
+                        change.previous_period.kind.value if change.previous_period else None,
+                        change.previous_period.value if change.previous_period else None,
+                        change.previous_period.label if change.previous_period else None,
+                        change.current_period.kind.value if change.current_period else None,
+                        change.current_period.value if change.current_period else None,
+                        change.current_period.label if change.current_period else None,
+                        change.previous_publication_id,
+                        change.current_publication_id,
+                        change.previous_document_id,
+                        change.current_document_id,
+                        iso(change.previous_effective_date),
+                        iso(change.current_effective_date),
+                        change.previous_source_text,
+                        change.current_source_text,
+                        change.analysis_version,
+                        iso(change.analyzed_at),
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                count += 1
+            self._conn.commit()
+            return count
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    @staticmethod
+    def _change_from_row(row: sqlite3.Row):
+        from .changes.base import ChangeType, FactChange
+        from .facts.base import FactPeriod, FactValue
+
+        return FactChange(
+            change_id=row["change_id"],
+            previous_fact_id=row["previous_fact_id"],
+            current_fact_id=row["current_fact_id"],
+            change_type=ChangeType(row["change_type"]),
+            central_bank=row["central_bank"],
+            subject=row["subject"],
+            predicate=row["predicate"],
+            value_kind=row["value_kind"],
+            previous_value=(
+                FactValue.from_dict(json.loads(row["previous_value_json"]))
+                if row["previous_value_json"]
+                else None
+            ),
+            current_value=(
+                FactValue.from_dict(json.loads(row["current_value_json"]))
+                if row["current_value_json"]
+                else None
+            ),
+            delta=FactValue.from_dict(json.loads(row["delta_json"])) if row["delta_json"] else None,
+            identity_qualifier=row["identity_qualifier"] or "",
+            previous_period=(
+                FactPeriod(
+                    kind=row["previous_period_kind"],
+                    value=row["previous_period_value"],
+                    label=row["previous_period_label"],
+                )
+                if row["previous_period_kind"]
+                else None
+            ),
+            current_period=(
+                FactPeriod(
+                    kind=row["current_period_kind"],
+                    value=row["current_period_value"],
+                    label=row["current_period_label"],
+                )
+                if row["current_period_kind"]
+                else None
+            ),
+            previous_publication_id=row["previous_publication_id"],
+            current_publication_id=row["current_publication_id"],
+            previous_document_id=row["previous_document_id"],
+            current_document_id=row["current_document_id"],
+            previous_effective_date=from_iso(row["previous_effective_date"]),
+            current_effective_date=from_iso(row["current_effective_date"]),
+            previous_source_text=row["previous_source_text"],
+            current_source_text=row["current_source_text"],
+            analysis_version=row["analysis_version"],
+            analyzed_at=from_iso(row["analyzed_at"]),
         )
