@@ -711,8 +711,26 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   ignoré), repli `central_bank`, chaînage consécutif F1→F2→F3 sans pont sur
   observation incomparable, provenance exhaustive aux deux faits sources,
   `fact_changes` persistée de façon idempotente, reconstruisible et isolée par
-  banque, aucun contenu économique ; 89 tests dédiés, **640 tests verts et
-  déterministes** (documenté dans `docs/CHANGES.md`).
+  banque, aucun contenu économique ; 100 tests dédiés.
+- **PRE-PHASE-13 HARDENING** (Phases 6–12, avant Phase 13) : durcissement de
+  précision des extracteurs existants, sans Phase 13 — ancres de risque des
+  Phases 6/7/8 alignées sur la norme contrôlée des Phases 10/11 (plus de
+  `\brisk` nu : « risky », « risk-free », « riskiness » ne sont jamais des
+  ancres) ; routage des titres des Phases 6/7/8 converti en **identité exacte
+  sur titre nettoyé** (fini le sous-chaîne : « Non-economic developments » ne
+  mappe plus `economic`, « Risk management » ne mappe plus `risk`,
+  « Introductory note » / « Questions and answers on monetary policy » ne
+  mappent plus les titres connus) ; marqueurs Q&A Phase 7 bornés au format
+  labellisé « Question : » / « Answer : » (une phrase naturelle « Question
+  marks remain … » n'est jamais un marqueur) ; ancrage `gdp` Phase 10 protégé
+  des near-misses « GDP deflator », « GDP per capita », « per capita GDP » ;
+  gates de refus Phases 7–11 testés (un refus ne supprime jamais les faits
+  d'une extraction antérieure autorisée) ; surface API Phase 12 complétée
+  (`persist=False`, `limit`, `delete_changes_for_document` /
+  `delete_changes_for_publication`, `created_at` préservé, deltas CURRENCY /
+  DATE, entrée vide) ; attributions minutes `one_member` / `voted against`
+  testées. **674 tests verts et déterministes** (documenté dans
+  `docs/CHANGES.md`).
 - **Prochaine phase autorisée : Phase 13 — Policy Reaction Function** (statut
   `NEXT`).
 

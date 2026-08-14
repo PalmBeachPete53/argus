@@ -958,6 +958,18 @@ def test_gating_never_persists_facts_when_not_authorized(tmp_path):
     assert store.get_facts(publication_id="pub-ecb-speech") == []
 
 
+def test_gating_refusal_never_deletes_existing_facts(tmp_path):
+    """A classification that refuses extraction must NOT delete facts that an
+    earlier authorized extraction persisted (X-1)."""
+    store = _store_speech(tmp_path)
+    classify_speech(store)
+    assert len(extract_speech(store, speeches_publication())) == 1
+    assert len(store.get_facts(publication_id="pub-ecb-speech")) == 16
+    classify_speech(store, publication_type="press_conference")
+    assert extract_speech(store, speeches_publication()) == []
+    assert len(store.get_facts(publication_id="pub-ecb-speech")) == 16
+
+
 # ---------------------------------------------------------------------------
 # empty-result persistence: the current extraction result is the source of truth
 # ---------------------------------------------------------------------------

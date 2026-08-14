@@ -40,6 +40,7 @@ from argus.press_conferences import (
     extract_press_conference,
     extract_press_conference_batch,
 )
+from argus.press_conferences.ecb import _mode_from_text
 from argus.statements import extract_statement
 from argus.store import Store
 
@@ -687,6 +688,61 @@ def test_closing_remarks_heading_is_not_remarks():
     assert "no_remarks" in result.warnings
 
 
+def test_risk_near_misses_require_risk_context():
+    # X-2: "risky", "risk-free", "riskiness" carry the prefix "risk" but are
+    # never risk anchors — precision first, near-misses yield nothing.
+    doc = _one_section_doc(
+        "Introductory statement",
+        "The current approach is risky. The alternative is risk-free. There is riskiness in the plan.",
+    )
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert result.facts == []
+
+
+def test_heading_routing_is_exact_identity_not_substring():
+    # X-3: a marker inside a near-miss heading is not enough. "Introductory
+    # note" is not an introductory statement; "Questions and answers on
+    # monetary policy" is not the Q&A heading.
+    doc = _one_section_doc("Introductory note", "Inflation is projected to average 2.2% in 2027.")
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert result.facts == []
+    assert "no_remarks" in result.warnings
+
+    doc = _one_section_doc(
+        "Questions and answers on monetary policy",
+        "Inflation is projected to average 2.2% in 2027.",
+    )
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert result.facts == []
+    assert "no_remarks" in result.warnings
+    assert "no_qna" in result.warnings
+
+
+def test_question_word_without_colon_is_never_a_qna_marker():
+    # X-3: a natural sentence beginning with "Question marks …" is not a Q&A
+    # marker — only the labelled "Question:" / "Answer:" lines are.
+    assert _mode_from_text("Question marks remain over the outlook for growth.") == "ignore"
+    assert _mode_from_text("Question: What is the outlook?\nAnswer: Inflation is expected to average 2.0% in 2027.") == "qna"
+    assert _mode_from_text("Question marks remain over the outlook.\nAnswer: Inflation is expected to average 2.0% in 2027.") == "qna"
+
+
+def test_heading_normalization_controls_case_numbering_punctuation_and_the():
+    for heading in ("1. Introductory statement", "Introductory Statement.", "The Introductory Statement"):
+        doc = _one_section_doc(heading, "Inflation is projected to average 2.2% in 2027.", document_id=f"sha-{heading}")
+        result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+        assert len(result.facts) == 1, heading
+        assert result.facts[0].identity_qualifier.startswith("remarks:"), heading
+    for heading in ("Questions and Answers", "The Q&A", "1. Answers"):
+        doc = _one_section_doc(
+            heading,
+            "Question: What is the outlook?\nAnswer: Inflation is projected to average 2.2% in 2027.",
+            document_id=f"sha-{heading}",
+        )
+        result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+        assert len(result.facts) == 1, heading
+        assert result.facts[0].identity_qualifier.startswith("answer:"), heading
+
+
 # ---------------------------------------------------------------------------
 # determinism + idempotent persistence (vertical slice)
 # ---------------------------------------------------------------------------
@@ -831,6 +887,18 @@ def test_gating_never_persists_facts_when_not_authorized(tmp_path):
     assert extract_press_conference(store, press_conference_publication()) == []
     assert extract_press_conference_batch(store) == []
     assert store.get_facts(publication_id="pub-ecb-pressconf") == []
+
+
+def test_gating_refusal_never_deletes_existing_facts(tmp_path):
+    """A classification that refuses extraction must NOT delete facts that an
+    earlier authorized extraction persisted (X-1)."""
+    store = _store_press_conf(tmp_path)
+    classify_press_conference(store)
+    assert len(extract_press_conference(store, press_conference_publication())) == 1
+    assert len(store.get_facts(publication_id="pub-ecb-pressconf")) == 13
+    classify_press_conference(store, publication_type="minutes")
+    assert extract_press_conference(store, press_conference_publication()) == []
+    assert len(store.get_facts(publication_id="pub-ecb-pressconf")) == 13
 
 
 # ---------------------------------------------------------------------------

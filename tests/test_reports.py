@@ -572,6 +572,35 @@ def test_growth_context_variants_are_mined():
     assert all(f.predicate == "assessment" for f in result.facts)
 
 
+def test_gdp_near_misses_never_anchor_growth():
+    sections = [
+        _section("Economic activity", "The GDP deflator rose by 2.1% in 2026."),
+        _section("Economic activity", "GDP per capita increased by 1.1% in 2026."),
+        _section("Economic activity", "Per capita GDP increased by 1.1% in 2026."),
+    ]
+    result = EcbReportsExtractor().extract(reports_publication(), _doc_with_sections(sections))
+    assert result.facts == []
+
+
+def test_gdp_near_miss_never_leaks_into_a_growth_value():
+    sections = [
+        _section("Economic activity", "Real GDP growth held steady while the GDP deflator rose by 2.1%."),
+        _section("Economic activity", "Growth remained solid and GDP per capita rose by 1.1%."),
+    ]
+    result = EcbReportsExtractor().extract(reports_publication(), _doc_with_sections(sections))
+    assert result.facts == []
+
+
+def test_gdp_value_facts_still_mined_when_not_a_near_miss():
+    sections = [
+        _section("Economic activity", "GDP growth is projected to reach 1.4% in 2027."),
+        _section("Economic activity", "GDP increased by 0.4% in the first quarter of 2026."),
+    ]
+    result = EcbReportsExtractor().extract(reports_publication(), _doc_with_sections(sections))
+    values = facts_by(result, SUBJECT_GDP, "value")
+    assert {(f.value.value, period_of(f)) for f in values} == {(1.4, "year:2027"), (0.4, "quarter:2026-Q1")}
+
+
 def test_financial_near_misses_require_financial_context():
     result = EcbReportsExtractor().extract(
         reports_publication(),
@@ -1285,6 +1314,18 @@ def test_gating_never_persists_facts_when_not_authorized(tmp_path):
     assert extract_report(store, reports_publication()) == []
     assert extract_report_batch(store) == []
     assert store.get_facts(publication_id="pub-ecb-report") == []
+
+
+def test_gating_refusal_never_deletes_existing_facts(tmp_path):
+    """A classification that refuses extraction must NOT delete facts that an
+    earlier authorized extraction persisted (X-1)."""
+    store = _store_report(tmp_path)
+    classify_report(store)
+    assert len(extract_report(store, reports_publication())) == 1
+    assert len(store.get_facts(publication_id="pub-ecb-report")) == 17
+    classify_report(store, publication_type="economic_projections")
+    assert extract_report(store, reports_publication()) == []
+    assert len(store.get_facts(publication_id="pub-ecb-report")) == 17
 
 
 def test_report_publication_types_are_recognized():

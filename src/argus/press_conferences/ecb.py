@@ -135,13 +135,13 @@ MODE_REMARKS = "remarks"
 MODE_QNA = "qna"
 MODE_IGNORE = "ignore"
 
-_REMARKS_HEADINGS = (
+_REMARKS_HEADINGS = frozenset({
     "introductory statement",
     "opening statement",
     "introductory remarks",
     "opening remarks",
-)
-_QNA_HEADINGS = (
+})
+_QNA_HEADINGS = frozenset({
     "questions and answers",
     "questions",
     "question",
@@ -149,16 +149,31 @@ _QNA_HEADINGS = (
     "answers to questions",
     "q&a",
     "questions from",
-)
+})
+
+_LEADING_NUM = re.compile(r"^\s*(?:[0-9]+(?:\.[0-9]+)*)\s*[-–—.:]?\s*")
+_FOOTNOTE_MARK = re.compile(r"\s*(?:\(\d+\)|\[\d+\]|\d+\)|[*†‡]+)\s*$")
+_LEADING_THE = re.compile(r"^the\s+")
+_TRAILING_PUNCT = re.compile(r"[\s.:;,\-–—]+$")
+
+
+def _clean_heading(heading: str) -> str:
+    t = normalize_title(heading or "")
+    if not t:
+        return ""
+    t = _LEADING_NUM.sub("", t).strip()
+    t = _FOOTNOTE_MARK.sub("", t).strip()
+    t = _LEADING_THE.sub("", t).strip()
+    return _TRAILING_PUNCT.sub("", t).strip()
 
 
 def _section_mode(heading: str, text: str) -> str:
-    t = normalize_title(heading or "")
+    t = _clean_heading(heading)
     if not t:
         return _mode_from_text(text)
-    if any(k in t for k in _REMARKS_HEADINGS):
+    if t in _REMARKS_HEADINGS:
         return MODE_REMARKS
-    if any(k in t for k in _QNA_HEADINGS):
+    if t in _QNA_HEADINGS:
         return MODE_QNA
     return _mode_from_text(text)
 
@@ -173,16 +188,17 @@ def _mode_from_text(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Transcript label detection (ECB-specific structure).
 #
-# - "Question: …" / "Answer: …" lines mark the Q&A turn boundaries. Question
-#   content is the journalist's, never mined.
+# - "Question: …" / "Answer: …" lines (colon required — a natural sentence
+#   like "Question marks remain over the outlook…" is never a Q&A marker) mark
+#   the Q&A turn boundaries. Question content is the journalist's, never mined.
 # - Role + name labels ("President Christine Lagarde", "Vice-President Luis de
 #   Guindos") identify the official answering; the label is preserved verbatim
 #   in ``Fact.speaker``, never invented. An unlabelled answer keeps
 #   ``speaker=None`` (the answer is still the central bank's, but no name is
 #   guessed).
 # ---------------------------------------------------------------------------
-_QUESTION_PREFIX = re.compile(r"^\s*question\b[.:]?\s*(?P<content>.*)$", re.IGNORECASE)
-_ANSWER_PREFIX = re.compile(r"^\s*answer\b[.:]?\s*(?P<content>.*)$", re.IGNORECASE)
+_QUESTION_PREFIX = re.compile(r"^\s*question\s*:\s*(?P<content>.*)$", re.IGNORECASE)
+_ANSWER_PREFIX = re.compile(r"^\s*answer\s*:\s*(?P<content>.*)$", re.IGNORECASE)
 
 _SPEAKER_ROLE = (
     r"(?:vice[-\s]?president|president|governor|chair(?:man|woman)?|"
@@ -287,8 +303,9 @@ def _is_policy_sentence(sentence: str) -> bool:
 
 
 _RISK_ANCHORS: tuple[re.Pattern, ...] = (
-    re.compile(r"\brisk", re.IGNORECASE),
-    re.compile(r"\buncertain", re.IGNORECASE),
+    re.compile(r"\brisks?\s+(?:to|for|around|surrounding|from|of|are|were|remain|remained|have|has)\b", re.IGNORECASE),
+    re.compile(r"\b(?:downside|upside|two-sided|symmetric|broadly\s+balanced)\s+risks?\b", re.IGNORECASE),
+    re.compile(r"\buncertain(?:ty|ties)?\b", re.IGNORECASE),
     re.compile(r"\btilted\b", re.IGNORECASE),
 )
 

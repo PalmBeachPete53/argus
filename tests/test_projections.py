@@ -858,6 +858,27 @@ def test_gating_publication_type_cache_alone_never_authorizes(tmp_path):
     assert store.get_facts(publication_id="pub-ecb-projections") == []
 
 
+def test_gating_other_classification_with_correct_cache_is_refused(tmp_path):
+    """A non-economic classification refuses extraction even when the cache says
+    `economic_projections` — the authoritative record wins (D9-1 variant B)."""
+    store = _store_projections(tmp_path)
+    classify_projections(store, publication_type="minutes")
+    pub = projections_publication(publication_type="economic_projections")
+    assert extract_projections(store, pub) == []
+    assert extract_projections_batch(store) == []
+    assert store.get_facts(publication_id="pub-ecb-projections") == []
+
+
+def test_gating_classification_wins_against_contradictory_cache(tmp_path):
+    """An explicit `economic_projections` classification always wins against a
+    contradictory `publication.publication_type` cache (D9-1 variant C)."""
+    store = _store_projections(tmp_path)
+    classify_projections(store)
+    results = extract_projections(store, projections_publication(publication_type="monetary_policy_report"))
+    assert len(results) == 1
+    assert len(store.get_facts(publication_id="pub-ecb-projections")) == 12
+
+
 def test_gating_batch_respects_classification(tmp_path):
     store = _store_projections(tmp_path)
     assert extract_projections_batch(store) == []  # unclassified -> nothing extracted
@@ -874,6 +895,18 @@ def test_gating_never_persists_facts_when_not_authorized(tmp_path):
     assert extract_projections(store, projections_publication()) == []
     assert extract_projections_batch(store) == []
     assert store.get_facts(publication_id="pub-ecb-projections") == []
+
+
+def test_gating_refusal_never_deletes_existing_facts(tmp_path):
+    """A classification that refuses extraction must NOT delete facts that an
+    earlier authorized extraction persisted (X-1)."""
+    store = _store_projections(tmp_path)
+    classify_projections(store)
+    assert len(extract_projections(store, projections_publication())) == 1
+    assert len(store.get_facts(publication_id="pub-ecb-projections")) == 12
+    classify_projections(store, publication_type="press_conference")
+    assert extract_projections(store, projections_publication()) == []
+    assert len(store.get_facts(publication_id="pub-ecb-projections")) == 12
 
 
 def test_projections_publication_types_are_recognized():

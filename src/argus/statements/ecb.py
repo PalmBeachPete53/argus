@@ -121,26 +121,81 @@ CAT_GUIDANCE = "guidance"
 CAT_UNCLASSIFIED = "unclassified"
 
 
-def _section_category(heading: str) -> str:
+_INTRO_HEADINGS = frozenset({
+    "monetary policy statement",
+    "monetary policy decisions",
+    "monetary policy",
+    "policy",
+    "policy stance",
+    "monetary policy stance",
+    "policy considerations",
+    "policy conclusions",
+})
+_RISK_HEADINGS = frozenset({"risk assessment", "risks", "risk"})
+_GUIDANCE_HEADINGS = frozenset({"forward guidance", "guidance"})
+_INFLATION_HEADINGS = frozenset({"inflation", "prices and costs", "price developments", "inflation outlook"})
+_GROWTH_HEADINGS = frozenset({
+    "economic activity",
+    "real economy",
+    "growth",
+    "economic outlook",
+    "euro area economy",
+    "the euro area economy",
+    "economic developments",
+})
+_LABOUR_HEADINGS = frozenset({
+    "labour market",
+    "labour market developments",
+    "employment",
+    "unemployment",
+})
+_FINANCIAL_HEADINGS = frozenset({
+    "financial conditions",
+    "financial market conditions",
+    "financing conditions",
+    "monetary and financial conditions",
+    "money, credit and financial conditions",
+})
+
+_LEADING_NUM = re.compile(r"^\s*(?:[0-9]+(?:\.[0-9]+)*)\s*[-–—.:]?\s*")
+_FOOTNOTE_MARK = re.compile(r"\s*(?:\(\d+\)|\[\d+\]|\d+\)|[*†‡]+)\s*$")
+_LEADING_THE = re.compile(r"^the\s+")
+_TRAILING_PUNCT = re.compile(r"[\s.:;,\-–—]+$")
+
+
+def _clean_heading(heading: str) -> str:
     t = normalize_title(heading or "")
     if not t:
+        return ""
+    t = _LEADING_NUM.sub("", t).strip()
+    t = _FOOTNOTE_MARK.sub("", t).strip()
+    t = _LEADING_THE.sub("", t).strip()
+    return _TRAILING_PUNCT.sub("", t).strip()
+
+
+def _section_category(heading: str) -> str:
+    """Route a section by its normalized heading. Routing is exact identity on
+    the cleaned heading: a marker inside a near-miss heading ("Risk management"
+    contains "risk", "Non-economic developments" contains "economic") never
+    routes to a known economic section — it falls through to the narrow
+    content-first fallback (CAT_UNCLASSIFIED)."""
+    t = _clean_heading(heading)
+    if not t:
         return CAT_UNCLASSIFIED
-    if "monetary policy statement" in t or "monetary policy decisions" in t:
+    if t in _INTRO_HEADINGS:
         return CAT_INTRO
-    if "financial" in t and ("condition" in t or "market" in t or "financing" in t):
+    if t in _FINANCIAL_HEADINGS:
         return CAT_FINANCIAL
-    if "labour market" in t or "unemployment" in t or "employment" in t or "wage" in t:
+    if t in _LABOUR_HEADINGS:
         return CAT_LABOUR
-    if "risk" in t:
+    if t in _RISK_HEADINGS:
         return CAT_RISK
-    if "inflation" in t:
+    if t in _INFLATION_HEADINGS:
         return CAT_INFLATION
-    if "activity" in t or "growth" in t or "gdp" in t or "economic" in t or "economy" in t:
+    if t in _GROWTH_HEADINGS:
         return CAT_GROWTH
-    if "guidance" in t:
+    if t in _GUIDANCE_HEADINGS:
         return CAT_GUIDANCE
-    if "policy" in t:
-        return CAT_INTRO
     return CAT_UNCLASSIFIED
 
 
@@ -163,8 +218,9 @@ _GUIDANCE_ANCHORS: tuple[re.Pattern, ...] = (
 )
 
 _RISK_ANCHORS: tuple[re.Pattern, ...] = (
-    re.compile(r"\brisk", re.IGNORECASE),
-    re.compile(r"\buncertain", re.IGNORECASE),
+    re.compile(r"\brisks?\s+(?:to|for|around|surrounding|from|of|are|were|remain|remained|have|has)\b", re.IGNORECASE),
+    re.compile(r"\b(?:downside|upside|two-sided|symmetric|broadly\s+balanced)\s+risks?\b", re.IGNORECASE),
+    re.compile(r"\buncertain(?:ty|ties)?\b", re.IGNORECASE),
     re.compile(r"\btilted\b", re.IGNORECASE),
 )
 

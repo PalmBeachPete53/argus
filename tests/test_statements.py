@@ -395,6 +395,52 @@ def test_unknown_heading_content_first_fallback_is_narrow():
     assert not any(f.subject == SUBJECT_MONETARY_POLICY for f in result.facts)  # no rationale from the disclaimer
 
 
+def test_risk_near_misses_require_risk_context():
+    # X-2: "risky", "risk-free", "riskiness" carry the prefix "risk" but are
+    # never risk anchors — the narrow content-first fallback stays silent.
+    result = EcbMonetaryPolicyStatementExtractor().extract(
+        statement_publication(),
+        _inline_statement(
+            [
+                ("Additional information", "The approach was risky. The strategy is risk-free. There is riskiness in the plan."),
+            ]
+        ),
+    )
+    assert result.facts == []
+
+
+def test_near_miss_headings_never_route_to_a_category():
+    # X-3: a marker inside a near-miss heading is not enough. "Risk
+    # management", "Non-economic developments" and "Monetary policy report"
+    # share markers with known sections but must never route to them; pure
+    # category content under them yields nothing (narrow fallback only).
+    for heading, text in (
+        ("Risk management", "Inflation is projected to average 2.0% in 2027."),
+        ("Non-economic developments", "Real GDP is projected to grow by 1.2% in 2027."),
+        ("Monetary policy report", "Inflation is projected to average 2.0% in 2027."),
+    ):
+        result = EcbMonetaryPolicyStatementExtractor().extract(
+            statement_publication(),
+            _inline_statement([(heading, text)]),
+        )
+        assert result.facts == [], heading
+
+
+def test_heading_normalization_controls_case_numbering_punctuation_and_the():
+    for heading in (
+        "1. Risk assessment",
+        "Risk Assessment.",
+        "The Risk Assessment",
+        "2 Economic Activity (1)",
+        "Forward Guidance",
+    ):
+        result = EcbMonetaryPolicyStatementExtractor().extract(
+            statement_publication(),
+            _inline_statement([(heading, "Risks to the economic outlook are broadly balanced.")]),
+        )
+        assert len(result.facts) == 1, heading
+
+
 def test_content_first_priority_guidance_over_rationale():
     """A sentence matching both a guidance and a rationale anchor is classified
     as guidance (documented priority guidance > risk > rationale), deterministically."""

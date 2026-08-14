@@ -235,6 +235,34 @@ def test_some_members_attribution():
     assert not any(f.identity_qualifier.startswith("minutes:collective:") for f in some)
 
 
+def test_one_member_attribution():
+    # D8-3: "one member" / "a single member" is its own attribution bucket.
+    for sentence in (
+        "One member argued that inflation would remain elevated.",
+        "A single member saw the risks to inflation as tilted to the upside.",
+    ):
+        doc = _one_section_doc("Economic analysis", sentence, document_id=f"sha-{sentence[:12]}")
+        result = EcbMinutesExtractor().extract(minutes_publication(), doc)
+        assert len(result.facts) == 1, sentence
+        fact = result.facts[0]
+        assert fact.identity_qualifier.startswith("minutes:one_member:"), fact.identity_qualifier
+        assert fact.speaker is None  # the member is never named
+
+
+def test_voted_against_is_traced_as_dissent():
+    # D8-3: "voted against" is a dissent marker (precedence over one_member)
+    # and never becomes a vote count or a vote subject.
+    doc = _one_section_doc(
+        "Monetary policy stance and policy considerations",
+        "One member voted against the decision to raise rates.",
+    )
+    result = EcbMinutesExtractor().extract(minutes_publication(), doc)
+    assert len(result.facts) == 1
+    fact = result.facts[0]
+    assert fact.identity_qualifier.startswith("minutes:dissent:")
+    assert not any(f.subject == "vote" for f in result.facts)
+
+
 # ---------------------------------------------------------------------------
 # discussion wording: theme-only sentences suppressed, content mined
 # ---------------------------------------------------------------------------
@@ -307,6 +335,15 @@ def test_known_economic_heading_is_mined():
     assert result.facts[0].subject == SUBJECT_GROWTH_RISK
 
 
+def test_risk_near_misses_never_mined_even_in_risk_section():
+    # X-2: "risky", "risk-free", "riskiness" carry the prefix "risk" but are
+    # never risk anchors — precision first, even inside a risk section.
+    for sentence in ("The approach was risky.", "The strategy is risk-free.", "There is riskiness in the plan."):
+        doc = _one_section_doc("Risk assessment", sentence, document_id=f"sha-{sentence[:12]}")
+        result = EcbMinutesExtractor().extract(minutes_publication(), doc)
+        assert result.facts == [], sentence
+
+
 def test_recognized_heading_variants_are_mined():
     for heading in (
         "Monetary policy stance and policy considerations",
@@ -321,6 +358,42 @@ def test_recognized_heading_variants_are_mined():
         doc = _one_section_doc(heading, "Risks to economic growth were broadly balanced.", document_id=f"sha-{heading}")
         result = EcbMinutesExtractor().extract(minutes_publication(), doc)
         assert len(result.facts) == 1, heading
+
+
+def test_non_economic_near_miss_headings_are_never_mined():
+    # D8-1: the bare "economic" marker is gone from the general-heading set.
+    # "Non-economic developments" shares the word "economic" with the mined
+    # headings but must route to IGNORE — even when the content is economic.
+    for heading, text in (
+        ("Non-economic developments", "Inflation is projected to average 2.2% in 2027."),
+        ("Economic", "Risks to economic growth were broadly balanced."),
+        ("External economic environment", "Risks to economic growth were broadly balanced."),
+        ("Economic outlook beyond the euro area", "Inflation is projected to average 2.2% in 2027."),
+    ):
+        doc = _one_section_doc(heading, text, document_id=f"sha-{heading}")
+        result = EcbMinutesExtractor().extract(minutes_publication(), doc)
+        assert result.facts == [], heading
+
+
+def test_heading_normalization_controls_case_numbering_punctuation_and_the():
+    for heading in (
+        "1. Risk assessment",
+        "Risk Assessment.",
+        "The Risk Assessment",
+        "2 Economic Analysis (1)",
+        "Prices and Costs",
+    ):
+        doc = _one_section_doc(heading, "Risks to economic growth were broadly balanced.", document_id=f"sha-{heading}")
+        result = EcbMinutesExtractor().extract(minutes_publication(), doc)
+        assert len(result.facts) == 1, heading
+
+
+def test_heading_routing_is_exact_identity_not_substring():
+    # "Risk" alone is a known heading; "Risk management" is not. The substring
+    # coincidence must never route the near-miss heading to a mined category.
+    doc = _one_section_doc("Risk management", "Risks to economic growth were broadly balanced.")
+    result = EcbMinutesExtractor().extract(minutes_publication(), doc)
+    assert result.facts == []
 
 
 def test_unknown_heading_with_economic_content_is_ignored():
@@ -632,6 +705,18 @@ def test_gating_never_persists_facts_when_not_authorized(tmp_path):
     assert extract_minutes(store, minutes_publication()) == []
     assert extract_minutes_batch(store) == []
     assert store.get_facts(publication_id="pub-ecb-accounts") == []
+
+
+def test_gating_refusal_never_deletes_existing_facts(tmp_path):
+    """A classification that refuses extraction must NOT delete facts that an
+    earlier authorized extraction persisted (X-1)."""
+    store = _store_minutes(tmp_path)
+    classify_minutes(store)
+    assert len(extract_minutes(store, minutes_publication())) == 1
+    assert len(store.get_facts(publication_id="pub-ecb-accounts")) == 19
+    classify_minutes(store, publication_type="press_conference")
+    assert extract_minutes(store, minutes_publication()) == []
+    assert len(store.get_facts(publication_id="pub-ecb-accounts")) == 19
 
 
 def test_minutes_publication_types_are_recognized():

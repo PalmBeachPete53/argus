@@ -56,6 +56,8 @@ from argus.changes import (
 from argus.facts import (
     basis_points,
     categorical,
+    currency,
+    date_value,
     fact_id_of,
     number,
     percentage,
@@ -261,6 +263,52 @@ class TestQualitative:
         res = run([f1, f2], {"P1": P1, "P2": P2})
         assert len(res.changes) == 1
         assert res.changes[0].change_type is ChangeType.QUALITATIVE
+
+
+# ---------------------------------------------------------------------------
+# currency + date kinds (D12-1 API surface)
+# ---------------------------------------------------------------------------
+class TestCurrencyAndDateKinds:
+    def test_currency_numeric_delta_keeps_unit(self):
+        f1 = mk_fact("P1", "fx", currency(1.10, unit="usd"))
+        f2 = mk_fact("P2", "fx", currency(1.15, unit="usd"))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+        c = res.changes[0]
+        assert c.change_type is ChangeType.NUMERIC
+        assert c.value_kind == "currency"
+        assert c.delta.kind.value == "currency"
+        assert c.delta.value == pytest.approx(0.05)
+        assert c.delta.unit == "usd"
+
+    def test_currency_identical_value_no_change(self):
+        f1 = mk_fact("P1", "fx", currency(1.10, unit="usd"))
+        f2 = mk_fact("P2", "fx", currency(1.10, unit="usd"))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert res.changes == []
+
+    def test_currency_unit_mismatch_never_deltas(self):
+        f1 = mk_fact("P1", "fx", currency(1.10, unit="usd"))
+        f2 = mk_fact("P2", "fx", currency(1.15, unit="eur"))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert res.changes == []
+
+    def test_date_exact_comparison_is_qualitative(self):
+        f1 = mk_fact("P1", "effective_date", date_value("2026-01-15"))
+        f2 = mk_fact("P2", "effective_date", date_value("2026-03-15"))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert len(res.changes) == 1
+        c = res.changes[0]
+        assert c.change_type is ChangeType.QUALITATIVE
+        assert c.delta is None  # exact equality only, never a conversion
+        assert c.previous_value.value == "2026-01-15"
+        assert c.current_value.value == "2026-03-15"
+
+    def test_date_identical_value_no_change(self):
+        f1 = mk_fact("P1", "effective_date", date_value("2026-01-15"))
+        f2 = mk_fact("P2", "effective_date", date_value("2026-01-15"))
+        res = run([f1, f2], {"P1": P1, "P2": P2})
+        assert res.changes == []
 
 
 # ---------------------------------------------------------------------------
@@ -1242,6 +1290,71 @@ class TestStore:
         analyze_changes(store, bank=BANK)
         assert store.delete_changes(bank=BANK) == 2
         assert store.get_changes() == []
+
+    def test_analyze_changes_persist_false(self):
+        # analyze without persisting: the result is returned, the store stays empty.
+        store = self._store()
+        self._seed(store)
+        result = analyze_changes(store, bank=BANK, persist=False)
+        assert len(result.changes) == 2
+        assert store.get_changes() == []
+
+    def test_analyze_changes_empty_store(self):
+        # empty input → no changes, no warnings, no persisted rows.
+        store = self._store()
+        result = analyze_changes(store, bank=BANK)
+        assert result.changes == []
+        assert result.warnings == []
+        assert store.get_changes() == []
+
+    def test_get_changes_limit(self):
+        store = self._store()
+        self._seed(store)
+        analyze_changes(store, bank=BANK)
+        assert len(store.get_changes()) == 2
+        assert len(store.get_changes(limit=1)) == 1
+        assert len(store.get_changes(limit=0)) == 0
+
+    def test_delete_changes_for_document(self):
+        # document_id == publication_id for these facts; deleting the middle
+        # document removes both adjacent changes.
+        store = self._store()
+        self._seed(store)
+        analyze_changes(store, bank=BANK)
+        assert store.delete_changes_for_document("P2") == 2
+        assert store.get_changes() == []
+
+    def test_delete_changes_for_publication(self):
+        # P1 participates only as the previous side of P1→P2 → one row removed,
+        # the P2→P3 change survives.
+        store = self._store()
+        self._seed(store)
+        analyze_changes(store, bank=BANK)
+        assert store.delete_changes_for_publication("P1") == 1
+        remaining = store.get_changes()
+        assert len(remaining) == 1
+        assert remaining[0].previous_publication_id == "P2"
+        assert remaining[0].current_publication_id == "P3"
+
+    def test_save_change_preserves_created_at(self):
+        store = self._store()
+        self._seed(store)
+        result = analyze_changes(store, bank=BANK, persist=False)
+        change = result.changes[0]
+        change.analyzed_at = datetime(2026, 1, 1)
+        store.save_change(change)
+        change_id = change.change_id
+        row = store._conn.execute(
+            "SELECT created_at FROM fact_changes WHERE change_id = ?", (change_id,)
+        ).fetchone()
+        first_created = row["created_at"]
+        change.analyzed_at = datetime(2026, 2, 1)
+        store.save_change(change)
+        row = store._conn.execute(
+            "SELECT created_at, analyzed_at FROM fact_changes WHERE change_id = ?", (change_id,)
+        ).fetchone()
+        assert row["created_at"] == first_created  # upsert preserves created_at
+        assert row["analyzed_at"] is not None
 
     def test_store_stale_cache_ignored(self):
         # authoritative classification = decision; denormalized cache corrupted

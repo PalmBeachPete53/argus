@@ -307,11 +307,17 @@ Every Fact also carries:
 
 ### Routing
 
-Content is routed deterministically by **section heading** (risk → inflation →
-growth → labour market → financial conditions → forward guidance). A narrow
-content-first fallback (guidance > risk > rationale) applies only to sections
-whose heading carries no signal (intro, closing remarks, heading-less text), so
-cross-category phrasing inside a mapped section is never double-counted.
+Content is routed deterministically by **section heading**, and routing is
+**exact identity on the cleaned heading** (case / numbering / punctuation /
+leading "the" normalized away, then compared verbatim against controlled sets:
+"Monetary policy statement", "Risk assessment", "Forward guidance", "Economic
+activity", "Inflation", "Labour market", "Financial conditions", …). Substring
+coincidence is never enough: "Risk management" does not route to the risk
+section and "Non-economic developments" does not route to a growth section —
+both fall through to the narrow content-first fallback. The fallback
+(guidance > risk > rationale) applies only to sections whose heading carries no
+signal (intro, closing remarks, heading-less text), so cross-category phrasing
+inside a mapped section is never double-counted.
 
 ### Risk assessment
 
@@ -324,6 +330,13 @@ risk target is read from the wording (`inflation` → `inflation_risk`,
 `growth`/`activity`/`gdp` → `growth_risk`, otherwise `risk`). Orientations are
 **never inferred** from absence: a statement with no risk section emits a
 `no_risk_assessment` warning and no risk fact.
+
+The risk **anchor** is the same controlled set used by Phases 10/11
+(`risks? to/for/around/…`, `downside/upside/two-sided/… risks`,
+`uncertain/uncertainty/uncertainties`, `tilted`): a word merely carrying the
+"risk" prefix ("risky", "risk-free", "riskiness") is never a risk anchor, and a
+risk section is mined sentence-by-sentence through those anchors — precision
+over recall.
 
 ### Quantitative values
 
@@ -458,15 +471,20 @@ during the press conference?"*.
 
 ### Remarks vs. Q&A
 
-Content is routed deterministically by **section heading**: the section whose
-heading normalizes to `introductory statement` (or a known ECB synonym —
-`opening statement`, `introductory remarks`, `opening remarks`) is treated as
-**remarks** (collective Governing Council communication); the section whose
-heading normalizes to `questions and answers` (or a synonym — `questions`,
-`question`, `answers`, `answers to questions`, `q&a`) is treated as **Q&A**
-(individual speakers). A narrow content-first fallback (`_mode_from_text`
-scanning for `Question:` / `Answer:` markers) applies when the heading carries
-no signal.
+Content is routed deterministically by **section heading**, and routing is
+**exact identity on the cleaned heading** (case / numbering / punctuation /
+leading "the" normalized away, then compared verbatim against controlled sets):
+the heading `introductory statement` (or a known ECB synonym — `opening
+statement`, `introductory remarks`, `opening remarks`) is treated as **remarks**
+(collective Governing Council communication); the heading `questions and
+answers` (or a synonym — `questions`, `question`, `answers`, `answers to
+questions`, `q&a`) is treated as **Q&A** (individual speakers). Substring
+coincidence is never enough: `introductory note` is not an introductory
+statement and `questions and answers on monetary policy` is not the Q&A
+heading. A narrow content-first fallback (`_mode_from_text` scanning for the
+labelled `Question:` / `Answer:` markers) applies when the heading carries no
+signal. Only the colon-labelled lines are Q&A markers — a natural sentence
+beginning with "Question marks remain …" is never read as one.
 
 **Routing is conservative** (Phase 7 hardening): an unknown heading is mined
 only when the text carries a reliable Q&A signal, and is otherwise **ignored** —
@@ -668,6 +686,19 @@ include the "Account of the monetary policy meeting" title, `legal notice`,
 `external monetary policy` (other central banks' policy is never mined) and
 `minutes of …`. An unknown future section is never assumed to be economic.
 
+**Routing is exact identity on the cleaned heading** (case / numbering /
+punctuation / leading "the" normalized away, then compared verbatim against
+controlled sets: "Monetary policy stance and policy considerations",
+"Economic analysis", "External environment", "Real economy", "Prices and
+costs", "Money, credit and financial conditions", "Risk assessment", "Policy
+conclusions", …). Substring coincidence is never enough: "Non-economic
+developments" shares the word "economic" with "Economic analysis" but routes
+to **ignore**, never to a mined section. The known non-economic headings are
+matched by precise phrase (`account of the monetary policy meeting`,
+`legal notice`, `statistical annex`, `external monetary policy`, `minutes of`,
+…), so an economic heading that merely contains such a word is never
+mistaken for a non-economic one.
+
 ### Supported facts
 
 | subject | predicate | value | source |
@@ -729,7 +760,10 @@ target phrasing is never read as a value; a percentage with a following
 reference period keeps a `FactPeriod` (year, or month when a month is named).
 Risk facts are categorical (`upside` / `downside` / `balanced`, with
 `two-sided` / `symmetric` normalized to `balanced`) only when the source states
-an explicit orientation, otherwise a verbatim text assessment. Confidence:
+an explicit orientation, otherwise a verbatim text assessment. The risk anchor
+is the same controlled set as Phases 6/7/10/11 (`risks? to/for/around/…`,
+`downside/upside/two-sided/… risks`, `uncertain/uncertainty/uncertainties`,
+`tilted`) — "risky", "risk-free", "riskiness" are never anchors. Confidence:
 `HIGH` for percentages and categorical orientations, `MEDIUM` for verbatim
 text.
 
@@ -1120,6 +1154,11 @@ Content anchors are **context-specific markers, never bare generic tokens**
 - `output` only fires as `real output` / `industrial output` / `output growth`
   / `output gap(s)` / `potential output` ("output of financial institutions"
   is not a growth signal); `activity` fires as `(economic) activity`;
+- `gdp` never fires for a near-miss measure: "GDP deflator", "GDP per capita"
+  and "per capita GDP" are not GDP growth — they neither anchor a growth
+  sentence nor leak a GDP value, even when a sentence also mentions real growth
+  ("Real GDP growth held steady while the GDP deflator rose by 2.1%" yields no
+  GDP fact);
 - `lending` only as `bank lending` / `lending to …` / `lending rates|growth|
   conditions`; `spreads` only with an instrument (`yield|credit|sovereign|
   bond|rate spreads`); `transmission` only as `monetary policy transmission`;

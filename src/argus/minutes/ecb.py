@@ -142,37 +142,67 @@ _IGNORE_HEADING_MARKERS = (
     "external monetary policy",
     "minutes of",
 )
-_POLICY_HEADINGS = ("monetary policy stance", "policy considerations", "policy conclusions", "monetary policy")
-_RISK_HEADINGS = ("risk assessment", "risks")
-_INFLATION_HEADINGS = ("prices and costs", "price developments", "inflation")
-_GROWTH_HEADINGS = ("real economy", "economic activity", "growth")
-_LABOUR_HEADINGS = ("labour market", "employment")
-_FINANCIAL_HEADINGS = ("money, credit and financial conditions", "financial conditions", "monetary and financial")
-_GENERAL_HEADINGS = ("economic analysis", "external environment", "economic")
+# Exact identity sets: a heading is routed only when, after deterministic
+# normalization, it equals a known heading verbatim. Substring coincidence is
+# never enough — "Non-economic developments" shares "economic" with
+# "Economic analysis" but must route to IGNORE, never to GENERAL.
+_POLICY_HEADINGS = frozenset({
+    "monetary policy stance",
+    "policy considerations",
+    "policy conclusions",
+    "monetary policy",
+    "monetary policy stance and policy considerations",
+})
+_RISK_HEADINGS = frozenset({"risk assessment", "risks", "risk"})
+_INFLATION_HEADINGS = frozenset({"prices and costs", "price developments", "inflation"})
+_GROWTH_HEADINGS = frozenset({"real economy", "economic activity", "growth"})
+_LABOUR_HEADINGS = frozenset({"labour market", "employment"})
+_FINANCIAL_HEADINGS = frozenset({
+    "money, credit and financial conditions",
+    "financial conditions",
+    "monetary and financial",
+})
+_GENERAL_HEADINGS = frozenset({"economic analysis", "external environment"})
+
+_LEADING_NUM = re.compile(r"^\s*(?:[0-9]+(?:\.[0-9]+)*)\s*[-–—.:]?\s*")
+_FOOTNOTE_MARK = re.compile(r"\s*(?:\(\d+\)|\[\d+\]|\d+\)|[*†‡]+)\s*$")
+_LEADING_THE = re.compile(r"^the\s+")
+_TRAILING_PUNCT = re.compile(r"[\s.:;,\-–—]+$")
+
+
+def _clean_heading(heading: str) -> str:
+    t = normalize_title(heading or "")
+    if not t:
+        return ""
+    t = _LEADING_NUM.sub("", t).strip()
+    t = _FOOTNOTE_MARK.sub("", t).strip()
+    t = _LEADING_THE.sub("", t).strip()
+    return _TRAILING_PUNCT.sub("", t).strip()
 
 
 def _section_category(heading: str) -> str:
     """Route a section by its normalized heading: ``CAT_IGNORE`` or a mined
-    category label. The label does not constrain the per-sentence
-    classification (content-first), it only marks the section as mined."""
-    t = normalize_title(heading or "")
+    category label. Routing is exact identity on the cleaned heading; the label
+    does not constrain the per-sentence classification (content-first), it only
+    marks the section as mined."""
+    t = _clean_heading(heading)
     if not t:
         return CAT_IGNORE
     if any(marker in t for marker in _IGNORE_HEADING_MARKERS):
         return CAT_IGNORE
-    if any(marker in t for marker in _POLICY_HEADINGS):
+    if t in _POLICY_HEADINGS:
         return CAT_POLICY
-    if any(marker in t for marker in _RISK_HEADINGS):
+    if t in _RISK_HEADINGS:
         return CAT_RISK
-    if any(marker in t for marker in _INFLATION_HEADINGS):
+    if t in _INFLATION_HEADINGS:
         return CAT_INFLATION
-    if any(marker in t for marker in _GROWTH_HEADINGS):
+    if t in _GROWTH_HEADINGS:
         return CAT_GROWTH
-    if any(marker in t for marker in _LABOUR_HEADINGS):
+    if t in _LABOUR_HEADINGS:
         return CAT_LABOUR
-    if any(marker in t for marker in _FINANCIAL_HEADINGS):
+    if t in _FINANCIAL_HEADINGS:
         return CAT_FINANCIAL
-    if any(marker in t for marker in _GENERAL_HEADINGS):
+    if t in _GENERAL_HEADINGS:
         return CAT_GENERAL
     return CAT_IGNORE
 
@@ -293,8 +323,9 @@ def _is_policy_sentence(sentence: str) -> bool:
 
 
 _RISK_ANCHORS: tuple[re.Pattern, ...] = (
-    re.compile(r"\brisk", re.IGNORECASE),
-    re.compile(r"\buncertain", re.IGNORECASE),
+    re.compile(r"\brisks?\s+(?:to|for|around|surrounding|from|of|are|were|remain|remained|have|has)\b", re.IGNORECASE),
+    re.compile(r"\b(?:downside|upside|two-sided|symmetric|broadly\s+balanced)\s+risks?\b", re.IGNORECASE),
+    re.compile(r"\buncertain(?:ty|ties)?\b", re.IGNORECASE),
     re.compile(r"\btilted\b", re.IGNORECASE),
 )
 
