@@ -189,3 +189,158 @@ slice and asserts, per fixture:
 - deterministic extraction and idempotent Store persistence
   (`rebuild_facts_for_document` re-run is a no-op);
 - phase-6 boundary: guidance inside the statement section is not extracted.
+
+---
+
+# Type-Specific Extractors — Phase 6 (Monetary Policy Statement)
+
+This section is the reference for the **ECB Monetary Policy Statement
+extractor**, built on the same Phase 4 contract and following the Phase 5
+pattern (`src/argus/statements/`).
+
+## Pipeline
+
+```
+NormalizedDocument                       ← Phase 2
+    ↓  StatementExtractor.extract(publication, document)
+ExtractionResult(publication_id, document_id, facts, warnings)
+    ↓  Store.rebuild_facts_for_document (delete + insert, idempotent)
+facts table
+```
+
+- a classified **ECB monetary policy statement** publication
+- its normalized document(s)
+- the ECB statement extractor producing structured **Facts**
+- an `ExtractionResult` handed to the existing `Store`
+
+## Extractor contract
+
+`src/argus/statements/base.py`:
+
+```python
+class StatementExtractor(ABC):
+    bank: str
+    extraction_version: str
+    def extract(self, publication, document) -> ExtractionResult: ...
+```
+
+- One extractor per bank; the generic code only dispatches on `central_bank`.
+- Extractors are **pure**: they read the normalized document and return an
+  `ExtractionResult`; persistence is a caller concern.
+- `extract_statement(store, publication, *, document=None)` runs the right
+  extractor and persists facts through `Store.rebuild_facts_for_document`,
+  keeping re-runs idempotent.
+- Extraction is **gated on classification**: a publication classified as
+  anything other than `monetary_policy_statement` (authoritatively in the
+  `classifications` table) is never mined for statement facts.
+
+## ECB statement extractor
+
+`src/argus/statements/ecb.py` — `EcbMonetaryPolicyStatementExtractor`
+(`extraction_version 6.0.0`). It answers *"what does the Governing Council
+explicitly state about the economy and its policy stance in the statement?"*.
+
+### Supported facts
+
+| subject | predicate | value | source |
+|---|---|---|---|
+| `monetary_policy` | `rationale` | text (verbatim) | justification sentences ("are based on", "in order to", "to ensure that", "consistent with", …) |
+| `policy_guidance` | `statement` | text (verbatim) | forward guidance ("stands ready to adjust", "for as long as necessary", "will be guided by", …) |
+| `inflation` | `value` / `assessment` | percentage (+ period) / text | inflation section |
+| `core_inflation` | `value` / `assessment` | percentage (+ period) / text | same |
+| `inflation_expectations` | `assessment` | text (verbatim) | same |
+| `growth` | `assessment` | text (verbatim) | growth / activity section |
+| `gdp` | `value` | percentage (+ period) | quantitative growth claims ("projected to grow by 1.4% in 2027") |
+| `labour_market` | `assessment` | text (verbatim) | labour market section |
+| `unemployment` | `value` | percentage (+ period) | explicit unemployment claims |
+| `wages` | `value` | percentage (+ period) | explicit wage-growth claims |
+| `financial_conditions` | `assessment` | text (verbatim) | financial / financing conditions section |
+| `risk` | `assessment` | categorical or text | risk assessment section |
+| `inflation_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
+| `growth_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
+
+Every Fact also carries:
+
+- `source_location` — section index inside the normalized document;
+- `source_text` — the verbatim supporting passage / matched value wording;
+- value-level `source_text` — verbatim wording next to the normalized value;
+- `extraction_method = regex`, `extraction_version = 6.0.0`, `confidence`;
+- `effective_date = None` (statement facts carry no effective date);
+- `identity_qualifier` — per-subject ordinal (`inflation:0`, `guidance:0`, …)
+  that keeps `fact_id`s unique for multi-value / multi-sentence subjects.
+
+### Routing
+
+Content is routed deterministically by **section heading** (risk → inflation →
+growth → labour market → financial conditions → forward guidance). A narrow
+content-first fallback (guidance > risk > rationale) applies only to sections
+whose heading carries no signal (intro, closing remarks, heading-less text), so
+cross-category phrasing inside a mapped section is never double-counted.
+
+### Risk assessment
+
+A risk sentence yields a **categorical** orientation fact when an explicit
+orientation word is present — `upside`, `downside`, or `balanced`
+(`two-sided` / `symmetric` are normalized to `balanced`) — with the sentence
+kept verbatim as `source_text`. A risk sentence with no orientation ("… subject
+to heightened uncertainty") becomes a verbatim text assessment instead. The
+risk target is read from the wording (`inflation` → `inflation_risk`,
+`growth`/`activity`/`gdp` → `growth_risk`, otherwise `risk`). Orientations are
+**never inferred** from absence: a statement with no risk section emits a
+`no_risk_assessment` warning and no risk fact.
+
+### Quantitative values
+
+Values are extracted only from sentences with an explicit value claim
+("projected / expected … to average / stand at / be …", "stood at …", "declined
+to …"), so "the 2% target" or "converging towards 2%" is never read as a value.
+A percentage immediately followed by a reference period keeps it as
+`FactPeriod` (year, or month when a month is named, e.g. "6.4% in June 2026" →
+`month:2026-06`); a bare percentage is kept without a period.
+
+### Confidence
+
+- `HIGH` — quantitative percentages and categorical risk orientations (explicit
+  source wording);
+- `MEDIUM` — verbatim qualitative assessments (sentence-level category
+  identification).
+
+### Not covered — Phase 6 boundaries
+
+- **The decision itself** (wording, rates, changes, effective date) stays Phase
+  5, gated on decision publications; the decision sentences inside a statement
+  ("… decided to lower the three key ECB interest rates by 25 basis points") are
+  never mined.
+- **Formulation-change analysis** (old wording vs new wording) is Phase 12;
+  Phase 6 only preserves the current wording verbatim so Phase 12 can diff it.
+- **Votes, hawkish/dovish or stance interpretation, forex fundamentals** —
+  none of these is ever produced here.
+- An absent optional section (no risk assessment, no forward guidance) never
+  becomes an invented "balanced" / "no guidance" fact; it is surfaced as a
+  warning (`no_risk_assessment`, `no_forward_guidance`).
+
+### Phase 5 / Phase 6 boundary (statement side)
+
+Phase 6 reuses the `policy_guidance` subject introduced in Phase 5 for
+statement-level forward guidance: the content type is the same, only the
+publication type differs (gating keeps the two extractors disjoint). The
+decision extractor never mines the statement's own section (heading normalized
+to `monetary policy statement`), regression-tested.
+
+## Golden tests
+
+`tests/fixtures/documents/ecb_statement*.html` (modeled on the ECB statement
+layout: date paragraph, "Monetary policy statement" intro, economic activity,
+inflation, labour market, financial conditions, risk assessment, forward
+guidance). `tests/test_statements.py` runs the normalizer → extractor → store
+slice and asserts, per fixture:
+
+- the exact expected facts (rationale, guidance, assessments, quantitative
+  values with their reference periods, risk orientations) with warnings;
+- no invented facts — no Phase 5 decision subjects, no vote, no
+  hawkish/dovish label, nothing for absent optional categories;
+- verbatim provenance: each `fact.source_text` and `fact.value.source_text` is
+  a substring of the referenced section;
+- deterministic extraction and idempotent Store persistence;
+- classification gating (`extract_statement` skips non-statement
+  publications) and Phase 5/6 coexistence.

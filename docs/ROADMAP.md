@@ -250,9 +250,24 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4 (et Phase 5 pour la cohérence du wording).
 - **Critères de validation** : chaque extrait est relié à un passage précis du
   document normalisé.
-- **Statut** : `NOT STARTED` (prochaine phase autorisée ; la frontière Phase 5/6
-  est déjà implémentée et testée — contenu sous un titre `monetary policy
-  statement` non extrait par `EcbDecisionExtractor`).
+- **Statut** : `COMPLETE` — extracteur `EcbMonetaryPolicyStatementExtractor`
+  (v6.0.0, `src/argus/statements/`). Implémenté : justification de la décision
+  (`monetary_policy/rationale`, verbatim), orientation future
+  (`policy_guidance/statement`, verbatim, jamais interprétée), inflation /
+  core inflation / inflation expectations, croissance (`growth` qualitatif,
+  `gdp` quantitatif), marché du travail (`labour_market` / `unemployment` /
+  `wages`), conditions financières, évaluation des risques
+  (`risk` / `inflation_risk` / `growth_risk`, orientations catégoriques
+  upside/downside/balanced ou texte verbatim quand aucune orientation n'est
+  énoncée), valeurs quantitatives avec période de référence (`FactPeriod`).
+  Routage déterministe par titre de section avec repli content-first étroit
+  (guidance > risque > justification). 5 fixtures, golden tests (valeurs
+  exactes, périodes, provenance verbatim, aucun fait inventé), extraction
+  déterministe, persistance idempotente, gating par classification et
+  coexistence Phase 5/6 vérifiées ; `docs/EXTRACTORS.md` documente la
+  couverture réelle. La frontière avec la Phase 5 (décision, taux) et avec la
+  Phase 12 (analyse des changements de formulation, seulement préservés
+  verbatim) est mise en œuvre et testée.
 
 ## Phase 7 — Press Conferences
 
@@ -463,15 +478,14 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 ## Current Position
 
-- Argus se situe au début de la **Phase 6 (Monetary Policy Statement)**.
-- Les phases 0, 1, 2, 3, 4 et 5 sont marquées `COMPLETE` après vérification du
-  repository (adapters, discovery, collector/fetcher, normalization,
-  classification, modèle `Fact`, extracteur ECB `EcbDecisionExtractor` v5.2.0,
-  tables SQLite correspondantes, tests).
-- **Prochaine phase autorisée : Phase 6 — Monetary Policy Statement** (statut
-  `NOT STARTED`). Elle extrait justification macro-économique, inflation,
-  croissance, emploi, risques, conditions financières, orientation future et
-  changements de formulation hors du périmètre decision-level de la Phase 5.
+- Argus se situe au début de la **Phase 7 (Press Conferences)**.
+- Les phases 0, 1, 2, 3, 4, 5 et 6 sont marquées `COMPLETE` après vérification
+  du repository (adapters, discovery, collector/fetcher, normalization,
+  classification, modèle `Fact`, extracteurs ECB `EcbDecisionExtractor` v5.2.0
+  et `EcbMonetaryPolicyStatementExtractor` v6.0.0, tables SQLite
+  correspondantes, tests).
+- **Prochaine phase autorisée : Phase 7 — Press Conferences** (statut
+  `NOT STARTED`).
 
 ## Out of Scope
 
