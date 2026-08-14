@@ -239,7 +239,12 @@ L'architecture doit rester extensible à d'autres banques centrales.
   Frontière Phase 5/6 mise en œuvre et testée. 6 fixtures, golden tests
   (valeurs exactes, provenance verbatim, aucun fait inventé), extraction
   déterministe et persistance idempotente vérifiées ; `docs/EXTRACTORS.md`
-  documente la couverture réelle.
+  documente la couverture réelle. Durcissement : gating strict par
+  classification (la table `classifications` est la source de vérité unique ;
+  une classification absente, non-décision ou la seule cache dénormalisée
+  `publication_type` refusent l'extraction) et persistance idempotente
+  résultats vides compris (une ré-extraction vide efface les faits périmés du
+  document).
 
 ## Phase 6 — Monetary Policy Statement
 

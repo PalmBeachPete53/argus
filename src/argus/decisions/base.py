@@ -27,8 +27,9 @@ if TYPE_CHECKING:
     from ..documents.base import NormalizedDocument
 
 # Canonical type a decision extractor is allowed to process. Extraction below
-# this type is skipped by the store integration helper, so a press conference or
-# a minutes document is never mistakenly mined for decision facts.
+# this type is skipped by the store integration helper (the ``classifications``
+# table is the single source of truth), so a press conference or a minutes
+# document is never mistakenly mined for decision facts.
 DECISION_PUBLICATION_TYPE = "monetary_policy_decision"
 
 
@@ -69,6 +70,18 @@ def extract_decision(
     with ``Store.rebuild_facts_for_document`` (delete + insert), so re-running
     never leaves stale rows.
 
+    The ``classifications`` table is the **single source of truth**: extraction
+    is authorized only when an authoritative classification record exists and its
+    ``publication_type`` is ``expected_type``. The denormalized
+    ``publication.publication_type`` cache is never used to infer authorization,
+    and an absent classification refuses extraction (classification → extraction).
+
+    The current extraction result is the source of truth for the persisted
+    state: ``rebuild_facts_for_document`` (delete + insert) runs for every
+    valid normalized document, **including when the result is empty**, so a
+    re-extraction that now yields no facts clears the stale facts of that
+    document instead of leaving them behind.
+
     Offline by construction: nothing here touches the network.
 
     Returns the list of ``ExtractionResult`` (empty if no extractor applies or
@@ -85,8 +98,7 @@ def extract_decision(
         if not getattr(doc, "ok", False):
             continue
         result = extractor.extract(publication, doc)
-        if result.facts:
-            store.rebuild_facts_for_document(doc.document_id, result)
+        store.rebuild_facts_for_document(doc.document_id, result)
         results.append(result)
     return results
 
@@ -106,17 +118,19 @@ def extract_decision_batch(store, *, bank: str | None = None) -> list[Extraction
 def _is_decision_publication(store, publication, *, expected_type: str) -> bool:
     """Gate extraction to decision publications.
 
-    The authoritative record lives in ``classifications``; the denormalized
-    ``publication.publication_type`` cache is only a fallback. Publications with
-    *no* classification yet are allowed (classification may run afterwards).
-    """
-    record = store.get_classification(publication.id or "") if publication.id else None
-    if record is not None:
-        return record["publication_type"] == expected_type
-    cached = publication.publication_type
-    if cached and cached != expected_type:
+    The ``classifications`` table is the **single source of truth**: extraction
+    is authorized only when an authoritative classification record exists for
+    the publication and its ``publication_type`` is ``expected_type``. The
+    denormalized ``publication.publication_type`` cache is never used to infer
+    authorization — it cannot grant access. A publication with *no*
+    classification record is refused (classification must run first,
+    classification → extraction)."""
+    if not publication.id:
         return False
-    return True
+    record = store.get_classification(publication.id)
+    if record is None:
+        return False
+    return record["publication_type"] == expected_type
 
 
 from .ecb import EcbDecisionExtractor  # noqa: E402  (see below)

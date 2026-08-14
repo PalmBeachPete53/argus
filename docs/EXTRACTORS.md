@@ -39,11 +39,19 @@ class DecisionExtractor(ABC):
 - `extract_decision(store, publication, *, document=None)` runs the right
   extractor and persists facts through
   `Store.rebuild_facts_for_document` (delete + insert), keeping re-runs
-  idempotent and stale facts impossible.
-- Extraction is **gated on classification**: a publication classified as
-  anything other than `monetary_policy_decision` (authoritatively in the
-  `classifications` table; the denormalized cache is only a fallback) is never
-  mined for decision facts.
+  idempotent and stale facts impossible. Rebuild runs for **every** valid
+  normalized document — **including when the extraction yields zero facts** — so
+  the current extraction result is the source of truth for the persisted state
+  and a re-extraction that now produces nothing clears the stale facts of that
+  document instead of leaving them behind.
+- Extraction is **gated on classification**: the `classifications` table is the
+  **single source of truth**. A publication is mined for decision facts only
+  when an authoritative classification record exists and its `publication_type`
+  is `monetary_policy_decision`. A publication classified as anything else, a
+  publication with **no** classification record, and the denormalized
+  `publication.publication_type` cache (which **never** authorizes extraction on
+  its own) are all refused — classification runs first
+  (classification → extraction).
 
 ## ECB extractor
 
@@ -189,6 +197,22 @@ slice and asserts, per fixture:
 - deterministic extraction and idempotent Store persistence
   (`rebuild_facts_for_document` re-run is a no-op);
 - phase-6 boundary: guidance inside the statement section is not extracted.
+
+In addition, `tests/test_decisions.py` holds dedicated **hardening regression
+tests** (no new fixtures, documents built inline):
+
+- **Classification gating**: the `classifications` table is the single source
+  of truth — a `monetary_policy_decision` classification allows extraction;
+  any other classification (e.g. `minutes`, `monetary_policy_report`) refuses
+  it; an **absent** classification refuses it; and the denormalized
+  `publication.publication_type` cache **alone** (set to
+  `monetary_policy_decision`) never authorizes extraction. The batch entry
+  point (`extract_decision_batch`) respects the same gating and never persists
+  facts for an unauthorized publication.
+- **Empty-result persistence**: re-extracting a persisted document with an
+  extractor that now yields zero facts clears that document's stale facts
+  (idempotently on repeated runs), while facts of other documents under the
+  same publication are preserved.
 
 ---
 
