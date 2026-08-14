@@ -1289,3 +1289,259 @@ asserts, per fixture:
 - deterministic extraction and idempotent Store persistence (including
   empty-result persistence and the `monetary_policy_report` gating),
   classification gating and Phase 5/6/7/8/9 coexistence.
+# Type-Specific Extractors — Phase 11 (Speeches / Remarks / Address)
+
+## Pipeline
+
+```
+NormalizedDocument                          ← Phase 2
+    ↓  SpeechExtractor.extract(publication, document)
+ExtractionResult(publication_id, document_id, facts, warnings)
+    ↓  Store.rebuild_facts_for_document (delete + insert, idempotent)
+facts table
+```
+
+- a classified **speech** publication (`speech`)
+- its normalized document(s)
+- the ECB speech extractor producing structured **Facts**
+- an `ExtractionResult` handed to the existing `Store`
+
+A speech is the **individual** communication of one central bank official
+(remarks / address / keynote). Its cardinal rule, like Phase 10, is
+**precision over recall**: a Fact is only produced from an explicit economic
+assertion with sufficient identity (subject + predicate + value + unit + period
+when applicable) + provenance, and the speaker's own words are never confused
+with personal anecdote, biography, ceremonial thanks, historical narrative or
+quoted authors. Interviews (`interview`) are a separate publication type with
+their own treatment — out of Phase 11 scope (`SPEECH_PUBLICATION_TYPES =
+("speech",)`).
+
+## Extractor contract
+
+`src/argus/speeches/base.py`:
+
+```python
+class SpeechExtractor(ABC):
+    bank: str
+    extraction_version: str
+    def extract(self, publication, document) -> ExtractionResult: ...
+```
+
+- One extractor per bank; the generic code only dispatches on `central_bank`.
+- Extractors are **pure**: they read the normalized document and return an
+  `ExtractionResult`; persistence is a caller concern.
+- `extract_speech(store, publication, *, document=None)` runs the right
+  extractor and persists facts through `Store.rebuild_facts_for_document`,
+  keeping re-runs idempotent (delete + insert, **including empty results**).
+- Extraction is **gated on classification**: a publication classified as
+  `speech` (authoritatively in the `classifications` table) is mined; anything
+  else — and an absent classification — is refused. The denormalized
+  `publication.publication_type` cache never authorizes extraction.
+
+## ECB speech extractor
+
+`src/argus/speeches/ecb.py` — `EcbSpeechExtractor` (`extraction_version
+11.0.0`). It answers *"what does this official explicitly state about the
+economy, its risks and about monetary policy?"*.
+
+### Speaker attribution — explicit only
+
+A speech is an individual communication, so the speaker is preserved verbatim
+in `Fact.speaker` **only when the source states one**:
+
+- a `Speaker: <label>` line in the document body wins over an explicit author
+  field in the document metadata (`author` / `dc.creator`), which is the
+  fallback;
+- the speaker is **never inferred**: "the President", "the ECB", "the Governing
+  Council" are never turned into a person, and a name in the prose ("Christine
+  Lagarde was born in Paris", "Christine Lagarde said …") is never read as the
+  speaker;
+- a sentence framed as a **quotation of another person** ("As John Maynard
+  Keynes once put it, …", "according to X", "X said that …", "quoting X") is
+  never mined and never attributed to the speech's speaker — the document is
+  flagged `quoted_content_skipped`. The speaker quoting their own past words
+  ("As I said a year ago, …", "As Christine Lagarde has said, …") is never
+  treated as a quotation of another person;
+- **metadata isolation**: the title, subtitle, event, conference, location and
+  author metadata never create facts — they only ever feed the provenance
+  attribution above.
+
+### Conservative section routing — exact controlled headings
+
+Routing uses **exact / controlled normalized labels**, same normalization as
+Phase 10 (lowercase, collapsed whitespace, stripped numbering / footnote
+markers / leading "the" / trailing punctuation; matching is exact, never
+substring). A heading is one of three categories:
+
+- **`CAT_ECONOMIC`** — a known economic heading, mined in full (content-first
+  sentence classification): `monetary policy`, `monetary policy stance`,
+  `monetary policy transmission`, `policy considerations`, `policy stance`,
+  `risk assessment`, `risks`, `risk`, `inflation`, `prices and costs`, `price
+  developments`, `price stability`, `labour market`, `labor market`,
+  `employment`, `wages`, `wage developments`, `financial stability`,
+  `financial conditions`, `financial developments`, `financial markets`,
+  `money and credit`, `monetary and financial`, `financial system`,
+  `economic outlook`, `economic activity`, `real economy`, `growth`,
+  `economic growth`, `output`, `euro area economy`, `external environment`,
+  `international environment`, `economic and monetary developments`,
+  `economic analysis`, `overview`, `summary`, `executive summary`, `world
+  economy`, `global economy`, `economic`;
+- **`CAT_IGNORE`** — a known non-economic heading, skipped entirely: speech
+  mastheads (`speech`, `speech by`, `remarks`, `address`, `keynote speech`,
+  `keynote address`), `about the speaker`, `speaker biography`, `biography`,
+  `biographical note`, `acknowledgements`, `thanks`, `thank you`, `closing
+  remarks`, `concluding remarks`, `closing`, the **Q&A** of a speech document
+  (`questions and answers`, `questions`, `question`, `answers`, `q&a`,
+  `questions from`), `references`, `bibliography`, `further reading`, `notes`,
+  `endnotes`, `annex`, `appendix`, `legal notice`, `disclaimer`, `copyright`,
+  `imprint`, `glossary`, and every analytical **box** ("Box N — …");
+- **`CAT_UNKNOWN`** — any other heading, **strictly mined**: only explicit
+  assertions pass — a quantitative value claim, a categorical risk orientation,
+  a guidance or a policy sentence. A bare qualitative assessment, a personal
+  anecdote, biography, ceremonial thanks, history without explicit values and
+  quoted authors are never facts. `UNKNOWN` sections are therefore still a
+  source of explicit facts (unlike Phase 10), but strictness keeps precision:
+  an assertion is never *assumed*.
+
+Heading-less sections (title masthead, publication date) are `CAT_IGNORE`.
+
+### Content-first classification
+
+Sentence classification is content-first with a fixed deterministic precedence:
+**guidance > policy > risk > financial > inflation > labour > growth**. The
+heading only gates *whether* the section is mined in full; an unmatched
+sentence produces no fact.
+
+- **guidance** — forward-looking commitment anchors ("stands ready to", "would
+  be prepared to", "for as long as necessary", "will keep interest rates",
+  "data-dependent", "meeting by meeting", "future policy decisions", "policy
+  path", "will continue to monitor/assess", …) → `policy_guidance / statement`;
+- **policy** — a compound signal (a stance word **and** a policy term: "the
+  Governing Council decided to …", "the monetary policy stance remained
+  appropriately calibrated") or an unambiguous stance phrase → `monetary_policy
+  / statement`. A bare token ("policy", "rate") is never a policy signal, and a
+  neutral sentence ("The Governing Council will assess the outlook at its next
+  meeting.") produces no fact;
+- **risk** — `_RISK_ANCHORS` ("risks to/for/around", "downside/upside risks",
+  "tilted", "uncertainty") → categorical orientation (`upside` / `downside` /
+  `balanced`, `HIGH`) when an explicit orientation word is present, otherwise a
+  verbatim text assessment (`MEDIUM`) in known economic sections only; the
+  target (`inflation_risk` / `growth_risk` / `risk`) is read from the wording;
+- **financial / inflation / labour / growth** — context-specific anchors,
+  never bare tokens, resolving to the Phase 10 subject vocabulary: inflation
+  (`inflation` / `core_inflation` / `inflation_expectations`), growth
+  (qualitative `growth` / quantitative `gdp`), labour market
+  (`unemployment` / `wages` / `labour_market`), `financial_conditions`.
+
+### Value gate
+
+Same value gate as Phase 10: explicit value claim verbs only ("projected /
+expected / forecast to average / stand at / reach / …"), a percentage is only
+kept with an explicit reference period (year / month / quarter from the
+wording), a forecast without a period is under-determined and ignored, share
+units ("% of GDP", "% of total") are never percentages, and basis points are
+never extracted.
+
+### Deduplication
+
+The same assertion stated twice is emitted **once** within a run: a
+quantitative duplicate is subject + predicate + period + value; a qualitative
+one is subject + predicate + period + normalized verbatim wording.
+
+### Provenance — individual identity preserved
+
+Every Fact carries `source_location` (`LocationKind.SECTION` with the section
+index), `source_text` (the verbatim supporting sentence), `value.source_text`
+(the verbatim token), `extraction_method = regex`, `extraction_version =
+11.0.0`, `effective_date = None`, `confidence` and:
+
+- **`speaker`** — the verbatim speaker label, when the source states one, on
+  **every** Fact of the speech (a speech is never mistaken for a collective
+  decision);
+- **`identity_qualifier`** — `speech:{subject}:{ordinal}` (ordinal per subject
+  + predicate + period), keeping `fact_id`s unique across a document without
+  inventing identity.
+
+### Confidence
+
+- `HIGH` — quantitative percentages and categorical risk orientations;
+- `MEDIUM` — verbatim qualitative assessments and policy/guidance statements.
+
+### Warnings (fixed order)
+
+`no_sections` (early return), `no_risk_assessment`, `no_forward_guidance`,
+`quoted_content_skipped`.
+
+### Not covered — Phase 11 boundaries
+
+- **No interpretation**: hawkish/dovish, bullish/bearish, market sentiment,
+  forex or trading logic — never.
+- **Policy decisions** (wording, rates, changes, votes, effective date) stay
+  Phases 5/8, gated on their own publication types; a speech's *narrative* of
+  policy is kept verbatim (`monetary_policy / statement`), never priced.
+- **The Q&A of a speech document** (journalist content) is skipped; the
+  press-conference Q&A is Phase 7.
+- **Fiscal analysis** stays Phase 10, **structured projections tables** stay
+  Phases 9/10 — a speech is mined for prose assertions only, and no Phase 5–10
+  subject is ever emitted here.
+- **No LLM** (invariant 8); an absent optional section (no risk assessment, no
+  forward guidance) never becomes an invented fact, only a warning.
+
+### Phase 5 / 6 / 7 / 8 / 9 / 10 / 11 boundary
+
+The seven extractors are disjoint by **publication type** (classification
+gating): decisions, statements, press conferences, minutes, economic
+projections, monetary policy reports and speeches are never cross-mined.
+`get_extractor` dispatches on `central_bank`, and each extractor refuses
+publications whose authoritative classification is not its own type.
+
+## Golden tests
+
+`tests/fixtures/documents/ecb_speech*.html` (modeled on the ECB Speech layout:
+title masthead, `Speaker:` line, introduction, economic outlook, inflation,
+labour market, financial stability, monetary policy, risks, closing remarks):
+
+- `ecb_speech.html` — the full narrative fixture with a body `Speaker:
+  Christine Lagarde` line (meta author "Isabel Schnabel" is overridden by the
+  body label): growth assessment, GDP values, inflation / core inflation /
+  inflation_expectations, unemployment / wages, financial conditions
+  (assessment + value), a monetary policy statement, forward guidance and
+  balanced / upside risk orientations (16 facts, no warnings, every fact
+  carries `speaker = "Christine Lagarde"`);
+- `ecb_speech_unknown.html` — economic content under **unknown headings**:
+  explicit value + risk-orientation + GDP facts pass, a bare qualitative
+  assessment does not, the Keynes quotation is skipped (3 facts,
+  `no_forward_guidance` + `quoted_content_skipped`; speaker falls back to the
+  metadata author);
+- `ecb_speech_personal.html` — biography, personal anecdote, history without
+  explicit values, thanks and closing remarks → 0 facts (`no_risk_assessment` +
+  `no_forward_guidance`);
+- `ecb_speech_minimal.html` — a single inflation value, no speaker (1 fact,
+  `no_risk_assessment` + `no_forward_guidance`, `speaker = None`).
+
+`tests/test_speeches.py` runs the normalizer → extractor → store slice and
+asserts, per fixture:
+
+- the exact expected facts (per-subject value sets with periods, verbatim texts
+  and orientations) with warnings;
+- conservative routing (known economic headings mined, known non-economic
+  headings and Q&A ignored, unknown headings strictly mined, boxes and
+  heading-less sections never mined), exact-identity heading matching and
+  normalization (case / numbering / punctuation / leading "the");
+- speaker attribution: body `Speaker:` line wins over metadata author, metadata
+  author is the fallback, the speaker is never inferred (even when a name
+  appears in the prose), labels are preserved verbatim, quoted authors are
+  skipped and never attributed to the speaker, self-quotations are not flagged;
+- content-first precedence (guidance > policy > risk > financial > inflation >
+  labour > growth), the policy compound signal, and neutral sentences producing
+  no fact;
+- the value gate (explicit claim verbs, periods from wording, forecast without
+  a period ignored, share units and basis points never percentages), categorical
+  risk orientations only when explicit (verbatim otherwise, in known sections
+  only);
+- within-run deduplication, verbatim provenance (`speaker` preserved, `speech:`
+  identity qualifiers, `effective_date` always `None`), no Phase 5–10 subjects,
+  no hawkish/dovish interpretation;
+- deterministic extraction and idempotent Store persistence (including
+  empty-result persistence and the `speech` gating), classification gating and
+  Phase 5/6/7/8/9/10 coexistence.

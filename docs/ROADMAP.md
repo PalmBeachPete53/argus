@@ -447,7 +447,22 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4.
 - **Critères de validation** : la nature individuelle est toujours conservée
   dans la provenance.
-- **Statut** : `NOT STARTED`.
+- **Statut** : `IN PROGRESS` — **Speeches** implémentées et validées
+  (`EcbSpeechExtractor` v11.0.0, `src/argus/speeches/`, 506 tests verts) :
+  gate sur la classification `speech` (la cache `publication_type` ne suffit
+  jamais), speaker **explicite uniquement** (ligne `Speaker:` du corps > auteur
+  des métadonnées, jamais inféré, citations d'autrui jamais attribuées au
+  locuteur), routage exact par titre (titre économique connu → extrait en
+  plein ; titre non-économique connu — biographie, remerciements, remarques de
+  clôture, Q&A, annexes légales — et boîtes analytiques → ignorés ; titre
+  inconnu → extraction stricte, assertions explicites uniquement),
+  classification content-first (guidance > policy > risk > financial >
+  inflation > labour > growth), gate de valeur (pourcentages avec période
+  explicite uniquement, parts/ratios jamais convertis, forecasts sans période
+  ignorés), orientations de risque catégoriques uniquement quand explicites,
+  déduplication intra-exécution, provenance verbatim avec `speaker` et
+  qualificateurs `speech:{subject}:{ordinal}`, aucun sujet des phases 5–10.
+  **Interviews** (`interview`) : hors périmètre, publication type distincte.
 
 ## Phase 12 — Temporal / Cross-Publication Analysis
 
@@ -600,7 +615,8 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 ## Current Position
 
-- Argus se situe au début de la **Phase 11 (Speeches & Interviews)**.
+- Argus se situe au milieu de la **Phase 11 (Speeches & Interviews)** —
+  **Speeches** implémentées et validées ; **Interviews** hors périmètre.
 - Les phases 0 à 10 sont marquées `COMPLETE` après vérification du repository
   (adapters, discovery, collector/fetcher, normalization, classification,
   modèle `Fact`, extracteurs ECB `EcbDecisionExtractor` v5.2.0,
@@ -610,8 +626,12 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   hardening final validé : matching exact des titres économiques **et**
   ignorés, ancres de contenu contextuelles, 440 tests verts et
   déterministes —, tables SQLite correspondantes, tests).
-- **Prochaine phase autorisée : Phase 11 — Speeches & Interviews** (statut
-  `NOT STARTED`, `NEXT`).
+- **Phase 11 (Speeches)** : `EcbSpeechExtractor` v11.0.0 (`src/argus/speeches/`)
+  validé — gate `speech`, speaker explicite, routage exact conservateur
+  (titre économique / non-économique / inconnu strict), précision sur rappel,
+  506 tests verts et déterministes.
+- **Prochaine phase autorisée : Phase 12 — Temporal / Cross-Publication
+  Analysis** (statut `NOT STARTED`).
 
 ## Out of Scope
 
