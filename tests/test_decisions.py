@@ -575,6 +575,61 @@ def test_gating_never_persists_facts_when_not_authorized(tmp_path):
     assert store.get_facts(publication_id="pub-ecb-1") == []
 
 
+def test_gating_decision_classification_wins_over_contradictory_cache(tmp_path):
+    """Classification `monetary_policy_decision` always wins against a
+    contradictory `publication.publication_type` cache (`press_conference`)."""
+    store = _store_ecb(tmp_path)
+    classify_decision(store)  # authoritative classification → decision
+    results = extract_decision(store, ecb_publication(publication_type="press_conference"))
+    assert len(results) == 1
+    persisted = store.get_facts(publication_id="pub-ecb-1")
+    assert len(persisted) == 11
+    deposit = next(f for f in persisted if (f.subject, f.predicate) == (SUBJECT_DEPOSIT_FACILITY, "value"))
+    assert deposit.value.value == 1.75
+    assert (SUBJECT_DECISION, "date") in {(f.subject, f.predicate) for f in persisted}
+
+
+def test_gating_decision_cache_cannot_override_minutes_classification(tmp_path):
+    """The cache saying `monetary_policy_decision` can never bypass a `minutes`
+    classification — extraction is refused and no Phase 5 fact is produced."""
+    store = _store_ecb(tmp_path)
+    classify_decision(store, publication_type="minutes")
+    assert extract_decision(store, ecb_publication(publication_type="monetary_policy_decision")) == []
+    assert store.get_facts(publication_id="pub-ecb-1") == []
+
+
+def test_gating_unknown_classification_with_decision_cache_is_refused(tmp_path):
+    """An unsupported/unknown classification refuses extraction even when the
+    cache says `monetary_policy_decision` — gating is an exact match against
+    DECISION_PUBLICATION_TYPE, with no permissive fallback."""
+    store = _store_ecb(tmp_path)
+    classify_decision(store, publication_type="some_unsupported_type")
+    assert extract_decision(store, ecb_publication(publication_type="monetary_policy_decision")) == []
+    assert store.get_facts(publication_id="pub-ecb-1") == []
+
+
+def test_gating_refusal_never_deletes_existing_facts(tmp_path):
+    """A classification that refuses extraction must NOT delete facts that an
+    earlier authorized extraction persisted — pipeline-wide classification
+    changes are not Phase 5's concern."""
+    store = _store_ecb(tmp_path)
+    classify_decision(store)
+    assert len(extract_decision(store, ecb_publication())) == 1
+    assert len(store.get_facts(publication_id="pub-ecb-1")) == 11
+    # reclassify away from decision; extract_decision is refused and leaves the
+    # previously persisted facts untouched
+    store.set_classification(
+        "pub-ecb-1",
+        central_bank="ecb",
+        publication_type="minutes",
+        confidence=Confidence.HIGH.value,
+        method="url_pattern",
+        evidence=[],
+    )
+    assert extract_decision(store, ecb_publication()) == []
+    assert len(store.get_facts(publication_id="pub-ecb-1")) == 11
+
+
 # ---------------------------------------------------------------------------
 # empty-result persistence: the current extraction result is the source of truth
 # ---------------------------------------------------------------------------
