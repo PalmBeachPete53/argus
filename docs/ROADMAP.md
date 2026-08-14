@@ -529,14 +529,14 @@ L'architecture doit rester extensible à d'autres banques centrales.
   verrouillée (decision↔speech, minutes↔decision incomparables), `change_id`
   directionnel et déterministe, faits sources immuables (snapshot), persistance
   idempotente/reconstruible isolée par banque ; `analysis_version` v12.1.0.
-- **Tests** : `tests/test_changes.py` (83 tests) — les trois types de
+- **Tests** : `tests/test_changes.py` (89 tests) — les trois types de
   changement, deltas, no-change exacts, matching, classification source de
   vérité (normal / cache périmé / absente / inconnue), repli `central_bank`,
   provenance exhaustive par type, `source_text` verbatim, observation
   incomparable sans pont, unités, `effective_date`, frontière de type,
   qualificateur, période, chaînage F1→F4, identité directionnelle, immuabilité,
   avertissements, persistance et coexistence Phases 5–11. **Suite complète :
-  609 tests verts et déterministes.**
+  615 tests verts et déterministes.**
 
 ## Phase 13 — Policy Reaction Function
 
@@ -700,7 +700,7 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   ignoré), repli `central_bank`, chaînage consécutif F1→F2→F3 sans pont sur
   observation incomparable, provenance exhaustive aux deux faits sources,
   `fact_changes` persistée de façon idempotente, reconstruisible et isolée par
-  banque, aucun contenu économique ; 83 tests dédiés, **609 tests verts et
+  banque, aucun contenu économique ; 89 tests dédiés, **615 tests verts et
   déterministes** (documenté dans `docs/CHANGES.md`).
 - **Prochaine phase autorisée : Phase 13 — Policy Reaction Function** (statut
   `NEXT`).
