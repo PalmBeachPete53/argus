@@ -198,6 +198,29 @@ GOLDEN = {
         "values": {(SUBJECT_INFLATION, "year:2026"): 2.0},
         "risk_orientations": {},
     },
+    "ecb_speech_adversarial.html": {
+        "warnings": ["quoted_content_skipped"],
+        "count": 8,
+        "speaker": "Christine Lagarde",
+        "triples": [
+            (SUBJECT_GDP, "value", None),
+            (SUBJECT_GROWTH, "assessment", None),
+            (SUBJECT_GROWTH, "assessment", None),
+            (SUBJECT_INFLATION, "value", "year:2027"),
+            (SUBJECT_WAGES, "assessment", None),
+            (SUBJECT_FINANCIAL_CONDITIONS, "value", None),
+            (SUBJECT_POLICY_GUIDANCE, "statement", None),
+            (SUBJECT_RISK, "assessment", None),
+        ],
+        "values": {
+            (SUBJECT_GDP, None): 2.4,
+            (SUBJECT_INFLATION, "year:2027"): 2.1,
+            (SUBJECT_FINANCIAL_CONDITIONS, None): 3.0,
+        },
+        "risk_orientations": {
+            (SUBJECT_RISK, None): "downside",
+        },
+    },
 }
 
 
@@ -1020,3 +1043,120 @@ def test_speeches_extractor_refuses_other_publication_types(tmp_path):
     classify_speech(store, publication_type="meeting_account")
     assert extract_speech(store, speeches_publication()) == []
     assert store.get_facts(publication_id="pub-ecb-speech") == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 11 hardening — precision over recall: economic vocabulary alone is
+# never a fact; an explicit assertion is required for qualitative facts, and
+# generic content anchors were replaced or removed.
+# ---------------------------------------------------------------------------
+
+
+def test_hardening_qualitative_gate_rejects_platitudes_and_topic_mentions():
+    for sentence in (
+        "The economy is important for our society.",
+        "The economy remains a priority.",
+        "The economy matters.",
+        "Investment is essential for Europe's future.",
+        "Investment remains a key priority.",
+        "Consumption is central to our society.",
+        "Inflation is important.",
+        "Inflation expectations are important.",
+        "There are risks.",
+        "Credit is important.",
+        "We will continue our work.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert result.facts == [], sentence
+
+
+def test_hardening_generic_anchor_removal():
+    for sentence in (
+        "The recovery of trust is important.",
+        "Recession is important.",
+        "The expansion of the euro area is important.",
+        "The production of goods increased.",
+        "Demand is a challenge for policy.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert result.facts == [], sentence
+
+
+def test_hardening_preserved_assertions_still_extract():
+    for sentence in (
+        "Economic activity strengthened.",
+        "Output increased.",
+        "GDP growth accelerated.",
+        "Domestic demand weakened.",
+        "Aggregate demand declined.",
+        "Total demand fell.",
+        "Consumption increased.",
+        "Investment declined.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert [f.subject for f in result.facts] == [SUBJECT_GROWTH], sentence
+        assert result.facts[0].predicate == "assessment", sentence
+
+
+def test_hardening_guidance_and_policy_are_not_gated():
+    result = EcbSpeechExtractor().extract(
+        speeches_publication(),
+        _doc_with_sections(
+            [
+                _section("Monetary policy", "Future policy decisions will depend on incoming data."),
+                _section("Monetary policy", "Monetary policy remains restrictive."),
+            ]
+        ),
+    )
+    assert [f.subject for f in result.facts] == [SUBJECT_POLICY_GUIDANCE, SUBJECT_MONETARY_POLICY]
+
+
+def test_hardening_credit_requires_a_contextual_marker():
+    bare = EcbSpeechExtractor().extract(
+        speeches_publication(),
+        _doc_with_sections([_section("Financial stability", "Credit is important.")]),
+    )
+    assert bare.facts == []
+    contextual = EcbSpeechExtractor().extract(
+        speeches_publication(),
+        _doc_with_sections([_section("Financial stability", "Credit growth increased by 3 percent.")]),
+    )
+    assert len(contextual.facts) == 1
+    assert contextual.facts[0].subject == SUBJECT_FINANCIAL_CONDITIONS
+    assert contextual.facts[0].predicate == "value"
+    assert contextual.facts[0].value.value == 3.0
+
+
+def test_hardening_known_and_unknown_sections_are_both_precise():
+    known = EcbSpeechExtractor().extract(
+        speeches_publication(),
+        _doc_with_sections([_section("Economic outlook", "Investment is essential.")]),
+    )
+    assert known.facts == []
+    known_assertion = EcbSpeechExtractor().extract(
+        speeches_publication(),
+        _doc_with_sections([_section("Economic outlook", "Investment declined.")]),
+    )
+    assert len(known_assertion.facts) == 1
+    strict = EcbSpeechExtractor().extract(
+        speeches_publication(),
+        _doc_with_sections([_section("Some future section", "Investment declined.")]),
+    )
+    assert strict.facts == []
+
+
+def test_hardening_no_period_contamination_across_sentences():
+    sections = [
+        _section("Inflation", "Inflation is 2.5 percent. This year has been challenging."),
+    ]
+    result = EcbSpeechExtractor().extract(speeches_publication(), _doc_with_sections(sections))
+    assert result.facts == []

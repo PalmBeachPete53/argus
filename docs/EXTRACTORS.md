@@ -1432,6 +1432,29 @@ sentence produces no fact.
   (`inflation` / `core_inflation` / `inflation_expectations`), growth
   (qualitative `growth` / quantitative `gdp`), labour market
   (`unemployment` / `wages` / `labour_market`), `financial_conditions`.
+  Phase 11 hardening keeps the generic vocabulary out of the anchors: `credit`
+  fires only as a contextual credit-conditions marker ("credit growth", "credit
+  standards", …), `demand` only as a qualified demand (domestic / aggregate /
+  global / external / private / overall / total), `production` only as
+  sector-specific production (industrial / manufacturing / energy / oil /
+  steel / automotive), bare `output` is a growth marker, and `recovery`,
+  `recession`, `slowdown` and `expansion` were removed entirely.
+
+### Qualitative fact gate — Phase 11 hardening
+
+An anchor only *selects* a candidate sentence; a qualitative fact also requires
+an **explicit economic assertion** (`_is_economic_assertion`): an assertion
+signal must be present — a change verb ("increased", "weakened",
+"accelerated", "remained", "continues", …) or an expected / projected /
+estimated / forecast / likely-to construction — and platitude rhetoric is
+always rejected ("X is important / essential / central", "X matters", "X is a
+priority", "X remains a key priority"). Economic vocabulary alone ("the
+economy", "credit", "investment", "consumption", "growth") is never enough. The
+gate applies to the qualitative assessment paths (growth, inflation, labour,
+financial conditions) and to the verbatim risk fallback; guidance and policy
+statements — already precise compound signals — are not gated, and a value
+claim or a categorical risk orientation passes regardless. Unknown sections
+remain stricter still (no qualitative fact at all).
 
 ### Value gate
 
@@ -1440,7 +1463,7 @@ expected / forecast to average / stand at / reach / …"), a percentage is only
 kept with an explicit reference period (year / month / quarter from the
 wording), a forecast without a period is under-determined and ignored, share
 units ("% of GDP", "% of total") are never percentages, and basis points are
-never extracted.
+never extracted. Percentage tokens cover `%`, "per cent" and "percent".
 
 ### Deduplication
 
@@ -1517,7 +1540,16 @@ labour market, financial stability, monetary policy, risks, closing remarks):
   explicit values, thanks and closing remarks → 0 facts (`no_risk_assessment` +
   `no_forward_guidance`);
 - `ecb_speech_minimal.html` — a single inflation value, no speaker (1 fact,
-  `no_risk_assessment` + `no_forward_guidance`, `speaker = None`).
+  `no_risk_assessment` + `no_forward_guidance`, `speaker = None`);
+- `ecb_speech_adversarial.html` — Phase 11 hardening fixture: explicit
+  assertions and value claims pass (GDP 2.4 / 2027 inflation 2.1 / financial
+  conditions 3.0, growth assessments, wages assessment, a guidance statement
+  and a downside risk orientation — 8 facts) while platitudes ("The economy is
+  important …", "Investment is essential …", "The economy matters."), bare
+  topic mentions ("Credit is important.", "Inflation is important.", "There are
+  risks."), the removed generic anchors ("The recovery of trust is important.",
+  "Recession is important.", "The expansion …", "The production of goods …"),
+  anecdote and the Keynes quotation all yield nothing (`quoted_content_skipped`).
 
 `tests/test_speeches.py` runs the normalizer → extractor → store slice and
 asserts, per fixture:
@@ -1542,6 +1574,10 @@ asserts, per fixture:
 - within-run deduplication, verbatim provenance (`speaker` preserved, `speech:`
   identity qualifiers, `effective_date` always `None`), no Phase 5–10 subjects,
   no hawkish/dovish interpretation;
+- the Phase 11 hardening matrix: platitudes and topic mentions rejected, generic
+  anchors removed, preserved assertions still extracted, guidance/policy
+  ungated, contextual `credit`, known and unknown sections both precise, and no
+  period contamination across sentences;
 - deterministic extraction and idempotent Store persistence (including
   empty-result persistence and the `speech` gating), classification gating and
   Phase 5/6/7/8/9/10 coexistence.

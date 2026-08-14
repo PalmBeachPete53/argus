@@ -358,7 +358,9 @@ _RISK_ANCHORS: tuple[re.Pattern, ...] = (
 _FINANCIAL_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\bfinancial conditions\b", re.IGNORECASE),
     re.compile(r"\bfinancing conditions?\b", re.IGNORECASE),
-    re.compile(r"\bcredit\b", re.IGNORECASE),
+    # "credit" alone is too generic ("Credit is important.") — it fires only as
+    # a contextual credit-conditions marker. Phase 11 hardening.
+    re.compile(r"\bcredit\s+(?:growth|standards|supply|demand|conditions?|availability|creation|extension|provision|restrictions?|tightening|easing|expansion|flows?)\b", re.IGNORECASE),
     re.compile(r"\bbank lending\b", re.IGNORECASE),
     re.compile(r"\b(?:bank\s+lending|lending\s+(?:rates?|growth|to|conditions?))\b", re.IGNORECASE),
     re.compile(r"\b(?:yield|credit|sovereign|bond|rate)\s+spreads?\b", re.IGNORECASE),
@@ -394,16 +396,84 @@ _GROWTH_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\bgdp\b", re.IGNORECASE),
     re.compile(r"\b(?:economic\s+)?activity\b", re.IGNORECASE),
     re.compile(r"\beconom(?:y|ic)\b", re.IGNORECASE),
-    re.compile(r"\b(?:real\s+output|industrial\s+output|output\s+growth|output\s+gaps?|potential\s+output)\b", re.IGNORECASE),
-    re.compile(r"\bdemand\b", re.IGNORECASE),
+    # bare "output" is a growth marker ("output increased"); the gate still
+    # requires an explicit assertion for a qualitative fact. Phase 11 hardening.
+    re.compile(r"\boutput\b", re.IGNORECASE),
+    # "demand" alone is too generic — only a qualified demand is a growth signal
+    re.compile(r"\b(?:domestic|aggregate|global|external|private|overall|total)\s+demand\b", re.IGNORECASE),
     re.compile(r"\bconsumption\b", re.IGNORECASE),
     re.compile(r"\binvestment\b", re.IGNORECASE),
-    re.compile(r"\bproduction\b", re.IGNORECASE),
-    re.compile(r"\brecovery\b", re.IGNORECASE),
-    re.compile(r"\brecession\b", re.IGNORECASE),
-    re.compile(r"\bslowdown\b", re.IGNORECASE),
-    re.compile(r"\bexpansion\b", re.IGNORECASE),
+    # "production" alone is too generic — only sector-specific production is a
+    # growth signal
+    re.compile(r"\b(?:industrial|manufacturing|energy|oil|steel|automotive)\s+production\b", re.IGNORECASE),
 )
+
+# ---------------------------------------------------------------------------
+# Qualitative fact gate — Phase 11 hardening. A qualitative assessment is only
+# emitted when the sentence states an explicit economic assertion. Economic
+# vocabulary alone ("the economy", "credit", "investment", "growth") is never
+# enough: an assertion signal (a change/state verb, a "remains/continues" form,
+# or an expected/projected-to forecast) must be present, and platitude rhetoric
+# ("X is important", "X matters", "X is a priority") is always rejected.
+# ---------------------------------------------------------------------------
+_ASSERTION_SIGNAL = re.compile(
+    r"\b(?:"
+    r"increas(?:e|es|ed|ing)"
+    r"|decreas(?:e|es|ed|ing)"
+    r"|declin(?:e|es|ed|ing)"
+    r"|ris(?:e|es|ing)|rose|risen"
+    r"|fall(?:s|ing|en)?|fell|fallen"
+    r"|grow(?:s|ing)?|grew|grown"
+    r"|strengthen(?:s|ed|ing)?"
+    r"|weaken(?:s|ed|ing)?"
+    r"|accelerat(?:e|es|ed|ing)"
+    r"|decelerat(?:e|es|ed|ing)"
+    r"|moderat(?:e|es|ed|ing)"
+    r"|improv(?:e|es|ed|ing)"
+    r"|deteriorat(?:e|es|ed|ing)"
+    r"|expand(?:s|ed|ing)?"
+    r"|contract(?:s|ed|ing)?"
+    r"|recover(?:s|ed|ing)?"
+    r"|rebound(?:s|ed|ing)?"
+    r"|slow(?:s|ed|ing)?"
+    r"|ease(?:s|d|ing)?"
+    r"|tighten(?:s|ed|ing)?"
+    r"|loosen(?:s|ed|ing)?"
+    r"|narrow(?:s|ed|ing)?"
+    r"|widen(?:s|ed|ing)?"
+    r"|surge(?:s|d|ing)?"
+    r"|dropped|drop(?:s|ping)?"
+    r"|gain(?:s|ed|ing)?"
+    r"|lost|lose(?:s|ing)?"
+    r"|normalis(?:e|es|ed|ing)|normaliz(?:e|es|ed|ing)"
+    r"|broaden(?:s|ed|ing)?"
+    r"|pick(?:s|ed)?\s+up"
+    r"|remain(?:s|ed|ing)?|stay(?:s|ed|ing)?|continue(?:s|d|ing)?"
+    r"|(?:is|are|was|were|will|would|has|have)\s+(?:expected|projected|estimated|forecast|likely)\s+to"
+    r"|will\s+(?:remain|continue)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_PLATITUDE = re.compile(
+    r"\b(?:"
+    r"(?:is|are|was|were|be|been|being|remains?|remained|stays?|stayed)\s+"
+    r"(?:important|essential|central|critical|crucial|vital|fundamental|necessary|"
+    r"a\s+(?:(?:key|crucial|central|important|vital|essential|strategic)\s+)?(?:priority|challenge|matter|goal|mandate)|"
+    r"part\s+of\s+life|"
+    r"at\s+the\s+(?:heart|centre|center)\s+of)"
+    r"|matter(?:s|ed)?"
+    r"|(?:is|are|was|were)\s+(?:our|the)\s+(?:priority|goal|aim|mandate|responsibility|focus|task)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _is_economic_assertion(sentence: str) -> bool:
+    """True when the sentence makes an explicit economic assertion rather than
+    merely mentioning a topic. Phase 11 hardening: economic vocabulary alone is
+    insufficient."""
+    return bool(_ASSERTION_SIGNAL.search(sentence)) and not bool(_PLATITUDE.search(sentence))
 
 # ---------------------------------------------------------------------------
 # Quantitative values — explicit value claims only. A percentage is only mined
@@ -418,7 +488,7 @@ _MONTH_NUM = {
     "july": "07", "august": "08", "september": "09", "october": "10", "november": "11", "december": "12",
 }
 _QUARTER_NUM = {"first": "Q1", "second": "Q2", "third": "Q3", "fourth": "Q4"}
-_VALUE_TOKEN = rf"{_RATE_ITEM}\s*(?:%|per\s+cent)"
+_VALUE_TOKEN = rf"{_RATE_ITEM}\s*(?:%|per\s+cent|percent)"
 
 _VALUES: tuple[tuple[str, ...], ...] = (
     ("average", "stand at", "be", "reach", "amount to", "grow by", "grow from", "expand by", "expand from",
@@ -559,7 +629,7 @@ class EcbSpeechExtractor(SpeechExtractor):
             self._add_risk_facts(result, document, index, sentence, counters, seen, speaker, strict=strict)
         elif category == CAT_FINANCIAL:
             if not self._add_value_facts(result, document, index, sentence, SUBJECT_FINANCIAL_CONDITIONS, counters, seen, speaker):
-                if not strict:
+                if not strict and _is_economic_assertion(sentence):
                     self._emit_text(result, document, index, sentence, SUBJECT_FINANCIAL_CONDITIONS, PREDICATE_ASSESSMENT, counters, seen, speaker)
         elif category == CAT_INFLATION:
             self._add_inflation_facts(result, document, index, sentence, counters, seen, speaker, strict=strict)
@@ -695,7 +765,7 @@ class EcbSpeechExtractor(SpeechExtractor):
                 categorical(orientation, source_text=sentence),
                 Confidence.HIGH, counters, seen, speaker=speaker,
             )
-        elif not strict:
+        elif not strict and _is_economic_assertion(sentence):
             fact = cls._emit(
                 result, document, index, sentence, subject, PREDICATE_ASSESSMENT,
                 FactValue(ValueKind.TEXT, value=sentence, source_text=sentence),
@@ -826,14 +896,14 @@ class EcbSpeechExtractor(SpeechExtractor):
             subject = SUBJECT_INFLATION
         if cls._add_value_facts(result, document, index, sentence, subject, counters, seen, speaker):
             return
-        if not strict:
+        if not strict and _is_economic_assertion(sentence):
             cls._emit_text(result, document, index, sentence, subject, PREDICATE_ASSESSMENT, counters, seen, speaker)
 
     @classmethod
     def _add_growth_facts(cls, result: ExtractionResult, document: NormalizedDocument, index: int, sentence: str, counters: dict, seen: set, speaker: str | None, *, strict: bool) -> None:
         if cls._add_value_facts(result, document, index, sentence, SUBJECT_GDP, counters, seen, speaker):
             return
-        if not strict:
+        if not strict and _is_economic_assertion(sentence):
             cls._emit_text(result, document, index, sentence, SUBJECT_GROWTH, PREDICATE_ASSESSMENT, counters, seen, speaker)
 
     @classmethod
@@ -847,7 +917,7 @@ class EcbSpeechExtractor(SpeechExtractor):
             subject = SUBJECT_LABOUR_MARKET
         if cls._add_value_facts(result, document, index, sentence, subject, counters, seen, speaker):
             return
-        if not strict:
+        if not strict and _is_economic_assertion(sentence):
             cls._emit_text(result, document, index, sentence, subject, PREDICATE_ASSESSMENT, counters, seen, speaker)
 
 

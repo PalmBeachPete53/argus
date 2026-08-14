@@ -447,8 +447,8 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4.
 - **Critères de validation** : la nature individuelle est toujours conservée
   dans la provenance.
-- **Statut** : `IN PROGRESS` — **Speeches** implémentées et validées
-  (`EcbSpeechExtractor` v11.0.0, `src/argus/speeches/`, 506 tests verts) :
+- **Statut** : `COMPLETE` — **Speeches** implémentées et validées
+  (`EcbSpeechExtractor` v11.0.0, `src/argus/speeches/`) :
   gate sur la classification `speech` (la cache `publication_type` ne suffit
   jamais), speaker **explicite uniquement** (ligne `Speaker:` du corps > auteur
   des métadonnées, jamais inféré, citations d'autrui jamais attribuées au
@@ -462,6 +462,11 @@ L'architecture doit rester extensible à d'autres banques centrales.
   ignorés), orientations de risque catégoriques uniquement quand explicites,
   déduplication intra-exécution, provenance verbatim avec `speaker` et
   qualificateurs `speech:{subject}:{ordinal}`, aucun sujet des phases 5–10.
+  **Durcissement final validé** : gate qualitatif (assertion explicite requise,
+  platitudes rejetées), ancres génériques remplacées ou supprimées (credit
+  contextuel, demand qualifié, production sectorielle, output nu,
+  recovery/recession/slowdown/expansion retirés), fixture adversariale et
+  matrice de faux positifs, 513 tests verts et déterministes.
   **Interviews** (`interview`) : hors périmètre, publication type distincte.
 
 ## Phase 12 — Temporal / Cross-Publication Analysis
@@ -475,7 +480,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phases 4–11 (historique de faits disponible).
 - **Critères de validation** : chaque changement identifié est rattaché aux deux
   faits sources.
-- **Statut** : `NOT STARTED`.
+- **Statut** : `NEXT`.
 
 ## Phase 13 — Policy Reaction Function
 
@@ -615,8 +620,8 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 ## Current Position
 
-- Argus se situe au milieu de la **Phase 11 (Speeches & Interviews)** —
-  **Speeches** implémentées et validées ; **Interviews** hors périmètre.
+- Argus est à la fin de la **Phase 11 (Speeches)** — marquée `COMPLETE`
+  (durcissement final validé) ; **Interviews** hors périmètre.
 - Les phases 0 à 10 sont marquées `COMPLETE` après vérification du repository
   (adapters, discovery, collector/fetcher, normalization, classification,
   modèle `Fact`, extracteurs ECB `EcbDecisionExtractor` v5.2.0,
@@ -629,9 +634,11 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 - **Phase 11 (Speeches)** : `EcbSpeechExtractor` v11.0.0 (`src/argus/speeches/`)
   validé — gate `speech`, speaker explicite, routage exact conservateur
   (titre économique / non-économique / inconnu strict), précision sur rappel,
-  506 tests verts et déterministes.
+  **durcissement** (gate qualitatif : assertion explicite requise, platitudes
+  rejetées ; ancres génériques remplacées ou supprimées), 513 tests verts et
+  déterministes.
 - **Prochaine phase autorisée : Phase 12 — Temporal / Cross-Publication
-  Analysis** (statut `NOT STARTED`).
+  Analysis** (statut `NEXT`).
 
 ## Out of Scope
 
