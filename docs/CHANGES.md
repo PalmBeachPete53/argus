@@ -87,11 +87,16 @@ Identical values produce **no change** at all (see "no-change" rules below).
    (observability warning).
 5. **Consecutive chaining, never bridging.** Only **adjacent** observations in
    the ordered lineage are compared: F1→F2, F2→F3, … A fixed baseline (F1→F3)
-   is never used. A pair that cannot be compared (equal values, incompatible
-   units) **breaks the chain**: the analysis never jumps over the incomparable
-   observation to reach a later one. Observations of *different lineages* (e.g.
-   a different qualifier or period) never interact, so the consecutive pair of
-   a lineage is simply the next observation of *that* lineage.
+   is never used. Each adjacent pair is evaluated **independently**: a pair
+   that yields no change (identical values) or cannot be compared (incompatible
+   units) produces **no change for that pair** and is never jumped over to
+   reach a later observation — F1→F3 and F2→F4 are never produced. The pair
+   immediately *following* an incomparable pair is still evaluated: in
+   F1→F2, F2→F3 (no change), F3→F4, the produced changes are F1→F2 and F3→F4.
+   Observations of *different lineages* (e.g. a different qualifier, period or
+   value kind) never interact, so the consecutive pair of a lineage is simply
+   the next observation of *that* lineage — a `basis_points` observation
+   between two percentage observations does not block the percentage lineage.
 6. **No-change.** Equal values → no change. This keeps the table minimal and
    the signal exact.
 7. **Incomparable publications / facts.** Facts whose publication is missing,

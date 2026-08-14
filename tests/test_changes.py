@@ -835,6 +835,145 @@ class TestOrderingChaining:
 
 
 # ---------------------------------------------------------------------------
+# final chaining hardening (Phase 12): documented adjacency semantics
+# ---------------------------------------------------------------------------
+class TestChainingHardening:
+    """Formalizes the exact chaining semantics documented in docs/CHANGES.md.
+
+    Each adjacent pair of an ordered lineage is evaluated **independently**: a
+    pair that yields no change, or cannot be compared, produces no change for
+    that pair and is **never bridged over** to a later observation; the pair
+    immediately *following* an incomparable pair is still evaluated. Facts of
+    different lineages (e.g. a different value kind) never interact, so the
+    consecutive pair of a lineage is the next observation of *that* lineage.
+    """
+
+    @staticmethod
+    def _pairs(res):
+        return {(c.previous_publication_id, c.current_publication_id) for c in res.changes}
+
+    def test_scenario_a_all_adjacent_comparable(self):
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25))
+        f3 = mk_fact("P3", "policy_rate", percentage(4.50))
+        f4 = mk_fact("P4", "policy_rate", percentage(4.75))
+        res = run([f1, f2, f3, f4], {"P1": P1, "P2": P2, "P3": P3, "P4": P4})
+        assert self._pairs(res) == {("P1", "P2"), ("P2", "P3"), ("P3", "P4")}
+        by_prev = {c.previous_publication_id: c for c in res.changes}
+        assert by_prev["P1"].previous_fact_id == f1.fact_id
+        assert by_prev["P1"].current_fact_id == f2.fact_id
+        assert by_prev["P2"].previous_fact_id == f2.fact_id
+        assert by_prev["P2"].current_fact_id == f3.fact_id
+        assert by_prev["P3"].previous_fact_id == f3.fact_id
+        assert by_prev["P3"].current_fact_id == f4.fact_id
+
+    def test_scenario_b_incomparable_middle_is_not_bridged(self):
+        # F1→F2 comparable (4.00→4.25); F2→F3 no change (4.25→4.25);
+        # F3→F4 comparable (4.25→4.50).
+        # Expected: F1→F2 and F3→F4; NEVER F1→F3 or F2→F4.
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25))
+        f3 = mk_fact("P3", "policy_rate", percentage(4.25))
+        f4 = mk_fact("P4", "policy_rate", percentage(4.50))
+        res = run([f1, f2, f3, f4], {"P1": P1, "P2": P2, "P3": P3, "P4": P4})
+        assert self._pairs(res) == {("P1", "P2"), ("P3", "P4")}
+        assert not any((c.previous_publication_id, c.current_publication_id) == ("P1", "P3")
+                       for c in res.changes)
+        assert not any((c.previous_publication_id, c.current_publication_id) == ("P2", "P4")
+                       for c in res.changes)
+        first = next(c for c in res.changes if c.previous_publication_id == "P1")
+        second = next(c for c in res.changes if c.previous_publication_id == "P3")
+        assert first.previous_fact_id == f1.fact_id
+        assert first.current_fact_id == f2.fact_id
+        assert second.previous_fact_id == f3.fact_id
+        assert second.current_fact_id == f4.fact_id
+
+    def test_scenario_c_incomparable_first_pair(self):
+        # F1→F2 no change (4.00→4.00); F2→F3 comparable (4.00→4.50).
+        # Expected: no bridge; F2→F3 is produced.
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.00))
+        f3 = mk_fact("P3", "policy_rate", percentage(4.50))
+        res = run([f1, f2, f3], {"P1": P1, "P2": P2, "P3": P3})
+        assert self._pairs(res) == {("P2", "P3")}
+        c = res.changes[0]
+        assert c.previous_fact_id == f2.fact_id
+        assert c.current_fact_id == f3.fact_id
+
+    def test_scenario_c_incompatible_units_first_pair(self):
+        # F1→F2 same kind but unit-mismatched → no change; F2→F3 comparable.
+        # Expected: F2→F3 only, never F1→F3.
+        f1 = mk_fact("P1", "spread", number(4.00, unit="pp"))
+        f2 = mk_fact("P2", "spread", number(4.25, unit="%"))
+        f3 = mk_fact("P3", "spread", number(4.50, unit="%"))
+        res = run([f1, f2, f3], {"P1": P1, "P2": P2, "P3": P3})
+        assert self._pairs(res) == {("P2", "P3")}
+
+    def test_scenario_d_inter_unit_never_delta(self):
+        # F1=4.00%, F2=4.25%, F3=425 bps, F4=4.50%.
+        # bps is a *different lineage* (different value.kind): no inter-unit
+        # delta is ever produced; the percentage lineage still links its own
+        # consecutive observations F1→F2 and F2→F4; F1→F3 / F1→F4 are never
+        # invented.
+        f1 = mk_fact("P1", "policy_rate", percentage(4.00))
+        f2 = mk_fact("P2", "policy_rate", percentage(4.25))
+        f3 = mk_fact("P3", "policy_rate", basis_points(425))
+        f4 = mk_fact("P4", "policy_rate", percentage(4.50))
+        res = run([f1, f2, f3, f4], {"P1": P1, "P2": P2, "P3": P3, "P4": P4})
+        pairs = self._pairs(res)
+        assert ("P1", "P2") in pairs
+        assert ("P2", "P4") in pairs
+        # no inter-unit delta: the bps fact never meets a percentage fact
+        assert ("P2", "P3") not in pairs
+        assert ("P3", "P4") not in pairs
+        # F1→F3 and F1→F4 are never invented
+        assert ("P1", "P3") not in pairs
+        assert ("P1", "P4") not in pairs
+        # every produced change is strictly intra-lineage
+        for c in res.changes:
+            assert c.previous_value.kind is c.current_value.kind
+            assert c.delta is not None
+            assert c.delta.unit == c.previous_value.unit
+        c12 = next(c for c in res.changes if c.previous_publication_id == "P1")
+        c24 = next(c for c in res.changes if c.previous_publication_id == "P2")
+        assert c12.previous_fact_id == f1.fact_id
+        assert c12.current_fact_id == f2.fact_id
+        assert c24.previous_fact_id == f2.fact_id
+        assert c24.current_fact_id == f4.fact_id
+
+    def test_units_percentage_and_basis_points(self):
+        # 4.00 % → 4.25 % : numeric change
+        res = run(
+            [
+                mk_fact("P1", "policy_rate", percentage(4.00)),
+                mk_fact("P2", "policy_rate", percentage(4.25)),
+            ],
+            {"P1": P1, "P2": P2},
+        )
+        assert len(res.changes) == 1
+        assert res.changes[0].delta.value == pytest.approx(0.25)
+        # 4.25 % → 425 bps : no change (incompatible value kinds)
+        res = run(
+            [
+                mk_fact("P1", "policy_rate", percentage(4.25)),
+                mk_fact("P2", "policy_rate", basis_points(425)),
+            ],
+            {"P1": P1, "P2": P2},
+        )
+        assert res.changes == []
+        # 425 bps → 450 bps : numeric change
+        res = run(
+            [
+                mk_fact("P1", "policy_rate", basis_points(425)),
+                mk_fact("P2", "policy_rate", basis_points(450)),
+            ],
+            {"P1": P1, "P2": P2},
+        )
+        assert len(res.changes) == 1
+        assert res.changes[0].delta.value == pytest.approx(25.0)
+
+
+# ---------------------------------------------------------------------------
 # observability warnings
 # ---------------------------------------------------------------------------
 class TestWarnings:

@@ -17,8 +17,13 @@ Matching rules (documented in ``docs/CHANGES.md``):
 3. The comparison direction is decided by the publication temporal reference
    (``meeting_date`` when set, else ``publication_date``); ties are broken by
    publication id. Facts are then chained *consecutively* (F1→F2, F2→F3), never
-   against a fixed baseline, and a pair that cannot be compared (e.g.
-   incompatible units) is never jumped over to bridge to a later observation.
+   against a fixed baseline. Each adjacent pair is evaluated independently: a
+   pair that yields no change (identical values) or cannot be compared (e.g.
+   incompatible units) produces no change for that pair and is never jumped
+   over to bridge to a later observation; the pair immediately following an
+   incomparable pair is still evaluated. Observations of different lineages
+   never interact, so the consecutive pair of a lineage is the next observation
+   of that lineage.
 4. Identical values produce **no change**. A numeric difference produces
    ``numeric_changed`` with ``delta = current − previous`` (same kind/unit,
    rounded to 10 decimals); a categorical difference produces
