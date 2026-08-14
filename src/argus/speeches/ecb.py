@@ -362,7 +362,7 @@ _FINANCIAL_ANCHORS: tuple[re.Pattern, ...] = (
     # a contextual credit-conditions marker. Phase 11 hardening.
     re.compile(r"\bcredit\s+(?:growth|standards|supply|demand|conditions?|availability|creation|extension|provision|restrictions?|tightening|easing|expansion|flows?)\b", re.IGNORECASE),
     re.compile(r"\bbank lending\b", re.IGNORECASE),
-    re.compile(r"\b(?:bank\s+lending|lending\s+(?:rates?|growth|to|conditions?))\b", re.IGNORECASE),
+    re.compile(r"\b(?:bank\s+lending|lending\s+(?:rates?|growth|to|conditions?|standards?))\b", re.IGNORECASE),
     re.compile(r"\b(?:yield|credit|sovereign|bond|rate)\s+spreads?\b", re.IGNORECASE),
     re.compile(r"\bmonetary\s+policy\s+transmission\b", re.IGNORECASE),
     re.compile(r"\bmarket rates?\b", re.IGNORECASE),
@@ -413,8 +413,27 @@ _GROWTH_ANCHORS: tuple[re.Pattern, ...] = (
 # emitted when the sentence states an explicit economic assertion. Economic
 # vocabulary alone ("the economy", "credit", "investment", "growth") is never
 # enough: an assertion signal (a change/state verb, a "remains/continues" form,
-# or an expected/projected-to forecast) must be present, and platitude rhetoric
-# ("X is important", "X matters", "X is a priority") is always rejected.
+# or an expected/projected-to forecast) must be present. The gate is layered so
+# that the presence of an anchor + a generic assertion verb is never sufficient:
+#
+#   1. _ASSERTION_SIGNAL   — a change/state verb or forecast construction exists;
+#   2. _PLATITUDE          — copular rhetoric ("X is important", "X remains a
+#                            priority", "X continues to be central to our
+#                            mandate", "X is an important part of our mandate")
+#                            is always rejected;
+#   3. _TRANSITIVE_ABUSE   — a change verb applied to a possessive object
+#                            ("improved our understanding", "expanded our role")
+#                            describes an institutional action, not an economic
+#                            state;
+#   4. _POSSESSOR_ABUSE    — a change verb whose subject is an "of <anchor>"
+#                            possessor ("our understanding of the economy
+#                            improved") describes the possessor, not the economy.
+#
+# The assertion verbs themselves are not removed: remain/continue/ease/tighten/
+# narrow/widen/pick up stay valid signals when they qualify the economic subject
+# directly ("Inflation remains elevated", "Credit conditions remain tight",
+# "Growth picked up"). The gate only requires that the predicate actually
+# describes the economic subject, and rejects rhetorical-only constructions.
 # ---------------------------------------------------------------------------
 _ASSERTION_SIGNAL = re.compile(
     r"\b(?:"
@@ -457,13 +476,46 @@ _ASSERTION_SIGNAL = re.compile(
 
 _PLATITUDE = re.compile(
     r"\b(?:"
-    r"(?:is|are|was|were|be|been|being|remains?|remained|stays?|stayed)\s+"
-    r"(?:important|essential|central|critical|crucial|vital|fundamental|necessary|"
-    r"a\s+(?:(?:key|crucial|central|important|vital|essential|strategic)\s+)?(?:priority|challenge|matter|goal|mandate)|"
-    r"part\s+of\s+life|"
-    r"at\s+the\s+(?:heart|centre|center)\s+of)"
+    r"(?:(?:is|are|was|were|be|been|being|remains?|remained|stays?|stayed|"
+    r"continue(?:s|d)?\s+to\s+be|remain(?:s|ed)?\s+to\s+be|stay(?:s|ed)?\s+to\s+be)\s+)"
+    r"(?:"
+    r"(?:important|essential|central|critical|crucial|vital|fundamental|necessary|key|strategic|significant|relevant|primary)"
+    r"|(?:a|an|the|our)\s+(?:(?:key|crucial|central|important|vital|essential|strategic|fundamental|significant|integral|core|primary)\s+)?"
+    r"(?:priority|challenge|matter|goal|mandate|objective|concern|issue|aim|focus|task|responsibility|consideration|part)"
+    r"|part\s+of\b"
+    r"|at\s+the\s+(?:heart|centre|center|core)\s+of"
+    r"|(?:central|important|essential|crucial|vital|key|fundamental)\s+to"
+    r")"
     r"|matter(?:s|ed)?"
-    r"|(?:is|are|was|were)\s+(?:our|the)\s+(?:priority|goal|aim|mandate|responsibility|focus|task)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# A change/state verb followed by a possessive determiner + noun is transitive:
+# "improved our understanding", "expanded our role", "tightened our procedures".
+# The verb acts on an institutional object rather than describing the economic
+# subject, so it is never an economic assertion.
+_TRANSITIVE_ABUSE = re.compile(
+    r"\b(?:"
+    r"improv(?:ed|es|e|ing)|recover(?:ed|ing)?|expand(?:ed|ing)?|narrow(?:ed|ing)?|widen(?:ed|ing)?|"
+    r"ease(?:d|ing)?|tighten(?:ed|ing)?|loosen(?:ed|ing)?|strengthen(?:ed|ing)?|weaken(?:ed|ing)?|"
+    r"accelerat(?:ed|es|e|ing)|decelerat(?:ed|es|e|ing)|increas(?:ed|es|e|ing)|decreas(?:ed|es|e|ing)|"
+    r"declin(?:ed|es|e|ing)|deteriorat(?:ed|es|e|ing)|slow(?:ed|ing)?|rebound(?:ed|ing)?|surge(?:d|s|ing)?|"
+    r"normalis(?:ed|ing|es|e)?|normaliz(?:ed|ing|es|e)?|broaden(?:ed|ing)?|pick(?:s|ed)?\s+up"
+    r")\s+(?:our|their|its|his|her)\s+\w+",
+    re.IGNORECASE,
+)
+
+# A change/state verb whose subject is an "of <anchor>" possessor describes the
+# possessor, not the economy: "our understanding of the economy improved". The
+# verb must immediately follow the possessor noun.
+_POSSESSOR_ABUSE = re.compile(
+    r"\bof\s+(?:the|our|their|its|his|her|this|that|a|an)?\s*\w+\s+"
+    r"(?:improv(?:ed|es|e|ing)|recover(?:ed|ing)?|expand(?:ed|ing)?|narrow(?:ed|ing)?|widen(?:ed|ing)?|"
+    r"ease(?:d|ing)?|tighten(?:ed|ing)?|loosen(?:ed|ing)?|strengthen(?:ed|ing)?|weaken(?:ed|ing)?|"
+    r"accelerat(?:ed|es|e|ing)|decelerat(?:ed|es|e|ing)|increas(?:ed|es|e|ing)|decreas(?:ed|es|e|ing)|"
+    r"declin(?:ed|es|e|ing)|deteriorat(?:ed|es|e|ing)|slow(?:ed|ing)?|rebound(?:ed|ing)?|surge(?:d|s|ing)?|"
+    r"normalis(?:ed|ing|es|e)?|normaliz(?:ed|ing|es|e)?|broaden(?:ed|ing)?"
     r")\b",
     re.IGNORECASE,
 )
@@ -471,9 +523,19 @@ _PLATITUDE = re.compile(
 
 def _is_economic_assertion(sentence: str) -> bool:
     """True when the sentence makes an explicit economic assertion rather than
-    merely mentioning a topic. Phase 11 hardening: economic vocabulary alone is
-    insufficient."""
-    return bool(_ASSERTION_SIGNAL.search(sentence)) and not bool(_PLATITUDE.search(sentence))
+    merely mentioning a topic rhetorically. Phase 11 hardening: economic
+    vocabulary alone is insufficient, and the assertion predicate must actually
+    describe the economic subject — not a platitude, not a transitive action on
+    a non-economic object, not a possessor of the economic anchor."""
+    if not _ASSERTION_SIGNAL.search(sentence):
+        return False
+    if _PLATITUDE.search(sentence):
+        return False
+    if _TRANSITIVE_ABUSE.search(sentence):
+        return False
+    if _POSSESSOR_ABUSE.search(sentence):
+        return False
+    return True
 
 # ---------------------------------------------------------------------------
 # Quantitative values — explicit value claims only. A percentage is only mined

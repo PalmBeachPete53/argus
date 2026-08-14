@@ -1160,3 +1160,281 @@ def test_hardening_no_period_contamination_across_sentences():
     ]
     result = EcbSpeechExtractor().extract(speeches_publication(), _doc_with_sections(sections))
     assert result.facts == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 11 assertion-signal hardening (correctif) — an economic anchor plus a
+# generic assertion verb is never sufficient: the predicate must actually
+# describe the economic subject. Rhetorical / institutional / personal
+# constructions → 0 qualitative Facts. State/property assertions stay extracted.
+# ---------------------------------------------------------------------------
+
+def test_hardening2_anchor_plus_generic_verb_is_not_a_fact():
+    for sentence in (
+        "Our understanding of the economy improved.",
+        "The economy has improved our understanding of the issue.",
+        "The economy continues to be an important part of our mandate.",
+        "Inflation remains an important challenge.",
+        "Inflation remains a key challenge for monetary policy.",
+        "Investment remains at the heart of our strategy.",
+        "Credit continues to matter for households.",
+        "Production remains an important objective.",
+        "Demand continues to be a key priority.",
+        "The recovery remains central to our political discussion.",
+        "The economy is important for our society.",
+        "We recovered from the disruption.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert result.facts == [], sentence
+
+
+def test_hardening2_remain_and_continue_state_vs_rhetoric():
+    for sentence in (
+        "Inflation remains important.",
+        "Investment remains a priority.",
+        "Credit remains important.",
+        "The economy remains central to our mandate.",
+        "Economic activity continues to be important.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert result.facts == [], sentence
+    expected_subject = {
+        "Inflation remains elevated.": SUBJECT_INFLATION,
+        "Investment remains weak.": SUBJECT_GROWTH,
+        "Credit conditions remain tight.": SUBJECT_FINANCIAL_CONDITIONS,
+        "Economic activity remains subdued.": SUBJECT_GROWTH,
+        "Economic activity continues to weaken.": SUBJECT_GROWTH,
+        "Growth remains robust.": SUBJECT_GROWTH,
+        "Inflation expectations remain anchored.": SUBJECT_INFLATION_EXPECTATIONS,
+    }
+    for sentence, subject in expected_subject.items():
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert [f.subject for f in result.facts] == [subject], sentence
+        assert result.facts[0].predicate == "assessment", sentence
+
+
+def test_hardening2_improve_recover_expand_require_the_economic_subject():
+    for sentence in (
+        "Our understanding of the economy improved.",
+        "The economy has improved our understanding of the issue.",
+        "We recovered our previous position.",
+        "We expanded our mandate.",
+        "We recovered from the disruption.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert result.facts == [], sentence
+    for sentence in (
+        "Economic activity improved.",
+        "The economy recovered.",
+        "Output expanded.",
+        "The economy has improved.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert [f.subject for f in result.facts] == [SUBJECT_GROWTH], sentence
+        assert result.facts[0].predicate == "assessment", sentence
+
+
+def test_hardening2_ease_tighten_loosen_institutional_ambiguity():
+    for sentence in (
+        "We need to ease the burden.",
+        "We tightened our procedures.",
+        "We need to loosen restrictions.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert result.facts == [], sentence
+    for sentence in (
+        "Financial conditions eased.",
+        "Financial conditions tightened.",
+        "Credit conditions tightened.",
+        "Lending standards loosened.",
+        "Lending standards tightened.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Financial stability", sentence)]),
+        )
+        assert [f.subject for f in result.facts] == [SUBJECT_FINANCIAL_CONDITIONS], sentence
+        assert result.facts[0].predicate == "assessment", sentence
+
+
+def test_hardening2_narrow_widen_economic_vs_institutional():
+    for sentence in (
+        "We widened our mandate.",
+        "We narrowed the scope of the discussion.",
+        "We widened the scope of the programme.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert result.facts == [], sentence
+    for sentence in (
+        "The output gap narrowed.",
+        "The output gap widened.",
+        "Credit spreads widened.",
+        "Credit spreads narrowed.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert result.facts, sentence
+        assert result.facts[0].predicate == "assessment", sentence
+
+
+def test_hardening2_gain_lose_are_not_independent_triggers():
+    for sentence in (
+        "The argument gained support.",
+        "The proposal lost momentum.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert result.facts == [], sentence
+    for sentence in (
+        "Employment gained momentum.",
+        "The economy lost momentum.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert len(result.facts) == 1, sentence
+        assert result.facts[0].predicate == "assessment", sentence
+
+
+def test_hardening2_pick_up_requires_economic_activity():
+    for sentence in (
+        "The discussion picked up momentum.",
+        "The initiative picked up support.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert result.facts == [], sentence
+    for sentence in (
+        "Economic activity picked up.",
+        "Growth picked up.",
+        "Domestic demand picked up.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert [f.subject for f in result.facts] == [SUBJECT_GROWTH], sentence
+        assert result.facts[0].predicate == "assessment", sentence
+
+
+def test_hardening2_forecast_must_target_the_economic_subject():
+    for sentence in (
+        "The policy is expected to improve communication.",
+        "The institution is expected to expand its role.",
+        "We are expected to strengthen our outreach.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert result.facts == [], sentence
+    for sentence in (
+        "Inflation is expected to decline.",
+        "Growth is projected to remain weak.",
+        "Inflation is expected to remain elevated.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Economic outlook", sentence)]),
+        )
+        assert len(result.facts) == 1, sentence
+        assert result.facts[0].predicate == "assessment", sentence
+
+
+def test_hardening2_numeric_facts_are_not_gated():
+    result = EcbSpeechExtractor().extract(
+        speeches_publication(),
+        _doc_with_sections(
+            [
+                _section("Inflation", "Inflation increased to 2.1 percent in 2027."),
+                _section("Economic outlook", "GDP growth is expected to be 2.4 percent in 2027."),
+            ]
+        ),
+    )
+    assert [f.subject for f in result.facts] == [SUBJECT_INFLATION, SUBJECT_GDP]
+    assert facts_by(result, SUBJECT_INFLATION, "value")[0].value.value == 2.1
+    assert facts_by(result, SUBJECT_GDP, "value")[0].value.value == 2.4
+
+
+def test_hardening2_unknown_sections_keep_no_qualitative_facts():
+    for sentence in (
+        "Inflation remains elevated.",
+        "Economic activity continues to weaken.",
+        "Growth picked up.",
+    ):
+        result = EcbSpeechExtractor().extract(
+            speeches_publication(),
+            _doc_with_sections([_section("Some future section", sentence)]),
+        )
+        assert result.facts == [], sentence
+
+
+def test_hardening2_quoted_narrative_stays_ignored():
+    result = EcbSpeechExtractor().extract(
+        speeches_publication(),
+        _doc_with_sections(
+            [(_section("Economic outlook", "As John Maynard Keynes once said, inflation will rise."))]
+        ),
+    )
+    assert result.facts == []
+    assert "quoted_content_skipped" in result.warnings
+
+
+def test_hardening2_risk_policy_guidance_not_gated():
+    result = EcbSpeechExtractor().extract(
+        speeches_publication(),
+        _doc_with_sections(
+            [
+                _section("Risk assessment", "Upside risks to inflation remained."),
+                _section("Monetary policy", "Monetary policy remains restrictive."),
+                _section("Monetary policy", "Future policy decisions will depend on incoming data."),
+            ]
+        ),
+    )
+    subjects = [f.subject for f in result.facts]
+    assert SUBJECT_INFLATION_RISK in subjects
+    assert SUBJECT_MONETARY_POLICY in subjects
+    assert SUBJECT_POLICY_GUIDANCE in subjects
+
+
+def test_hardening2_provenance_is_preserved_on_new_facts():
+    result = EcbSpeechExtractor().extract(
+        speeches_publication(),
+        _doc_with_sections([_section("Economic outlook", "Economic activity remains subdued.")]),
+    )
+    assert len(result.facts) == 1
+    fact = result.facts[0]
+    assert fact.source_text == "Economic activity remains subdued."
+    assert fact.source_location.section == 0
+    assert fact.extraction_version == "11.0.0"
+    assert fact.speaker is None
+    assert fact.identity_qualifier == "speech:growth:0"
+    assert fact.confidence is Confidence.MEDIUM

@@ -1434,7 +1434,9 @@ sentence produces no fact.
   (`unemployment` / `wages` / `labour_market`), `financial_conditions`.
   Phase 11 hardening keeps the generic vocabulary out of the anchors: `credit`
   fires only as a contextual credit-conditions marker ("credit growth", "credit
-  standards", …), `demand` only as a qualified demand (domestic / aggregate /
+  standards", …), `lending` as `bank lending` / `lending to …` / `lending
+  rates|growth|conditions|standards`, `demand` only as a qualified demand
+  (domestic / aggregate /
   global / external / private / overall / total), `production` only as
   sector-specific production (industrial / manufacturing / energy / oil /
   steel / automotive), bare `output` is a growth marker, and `recovery`,
@@ -1443,13 +1445,31 @@ sentence produces no fact.
 ### Qualitative fact gate — Phase 11 hardening
 
 An anchor only *selects* a candidate sentence; a qualitative fact also requires
-an **explicit economic assertion** (`_is_economic_assertion`): an assertion
-signal must be present — a change verb ("increased", "weakened",
-"accelerated", "remained", "continues", …) or an expected / projected /
-estimated / forecast / likely-to construction — and platitude rhetoric is
-always rejected ("X is important / essential / central", "X matters", "X is a
-priority", "X remains a key priority"). Economic vocabulary alone ("the
-economy", "credit", "investment", "consumption", "growth") is never enough. The
+an **explicit economic assertion** (`_is_economic_assertion`). An anchor + a
+generic assertion verb is **never sufficient** — the predicate must actually
+describe the economic subject. The gate is layered and each layer is
+deterministic, lexical and explainable:
+
+1. **assertion signal** — a change/state verb ("increased", "weakened",
+   "accelerated", "remained", "continues", …) or an expected / projected /
+   estimated / forecast / likely-to construction must be present;
+2. **platitude rejection** — copular rhetoric is always rejected: "X is
+   important / essential / central", "X matters", "X is a priority", "X remains
+   a key priority", "X remains an important challenge", "X continues to be
+   central to our mandate", "X is an important part of our mandate";
+3. **transitive-object rejection** — a change verb acting on a possessive object
+   ("improved our understanding", "expanded our role", "tightened our
+   procedures") describes an institutional action, not an economic state;
+4. **possessor rejection** — a change verb whose subject is an "of <anchor>"
+   possessor ("our understanding of the economy improved") describes the
+   possessor, not the economy.
+
+Economic vocabulary alone ("the economy", "credit", "investment",
+"consumption", "growth") is never enough, and a state/property assertion that
+really qualifies the economic subject is preserved: "Inflation remains
+elevated", "Credit conditions remain tight", "Economic activity remains
+subdued", "Economic activity continues to weaken", "The output gap narrowed",
+"Credit spreads widened", "Growth picked up", "Employment gained momentum". The
 gate applies to the qualitative assessment paths (growth, inflation, labour,
 financial conditions) and to the verbatim risk fallback; guidance and policy
 statements — already precise compound signals — are not gated, and a value
