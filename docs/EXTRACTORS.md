@@ -399,12 +399,23 @@ during the press conference?"*.
 ### Remarks vs. Q&A
 
 Content is routed deterministically by **section heading**: the section whose
-heading normalizes to `introductory statement` is treated as **remarks**
-(collective Governing Council communication); the section whose heading
-normalizes to `questions and answers` is treated as **Q&A** (individual
-speakers). A narrow content-first fallback (`_mode_from_text` scanning for
-`Question:` / `Answer:` markers) applies when the heading carries no signal.
-One document contributes one remarks mode and one Q&A mode at most.
+heading normalizes to `introductory statement` (or a known ECB synonym —
+`opening statement`, `introductory remarks`, `opening remarks`) is treated as
+**remarks** (collective Governing Council communication); the section whose
+heading normalizes to `questions and answers` (or a synonym — `questions`,
+`question`, `answers`, `answers to questions`, `q&a`) is treated as **Q&A**
+(individual speakers). A narrow content-first fallback (`_mode_from_text`
+scanning for `Question:` / `Answer:` markers) applies when the heading carries
+no signal.
+
+**Routing is conservative** (Phase 7 hardening): an unknown heading is mined
+only when the text carries a reliable Q&A signal, and is otherwise **ignored** —
+`UNKNOWN ≠ REMARKS`. "Absence of proof → absence of extraction": a future
+section such as an appendix, biography, financial-stability annex, legal
+notice, closing remarks or additional information is simply not mined, even
+when its sentences would match the economic patterns. `closing remarks` is
+deliberately **not** a remarks heading. One document contributes one remarks
+mode and one Q&A mode at most.
 
 ### Supported facts
 
@@ -449,10 +460,17 @@ Every Fact carries the Phase 5/6 provenance fields (`source_location`,
 
 ### Non-economic questions
 
-A turn whose question is an explicit non-economic topic (memoir, personal /
-private life, family, hobbies, retirement, personally) is **skipped entirely**
-(question + answer), with a `non_economic_question_skipped` warning. The
-question phrasing is never reclassified by the model.
+A turn whose question is an explicit non-economic **personal** topic is
+**skipped entirely** (question + answer), with a `non_economic_question_skipped`
+warning. The markers are specific multi-word phrases — a memoir, personal /
+private life (or matters/affairs), family life, your family, your retirement,
+your spouse / children / partner, hobbies. Generic personal-language tokens
+(`personal`, `personally`, `private`) are **never** triggers on their own: they
+occur naturally in economic questions ("What is your personal assessment of the
+inflation outlook?", "Do you personally expect inflation to return to target?")
+and such answers **must** be extracted. The decision is conservative but
+contextual — an economic question containing personal vocabulary is never
+rejected, and the question phrasing is never reclassified by the model.
 
 ### Risk assessment
 
@@ -514,3 +532,18 @@ non-economic questions). `tests/test_press_conferences.py` runs the normalizer
 - deterministic extraction and idempotent Store persistence, `speaker`
   roundtrip through the store, classification gating and Phase 5/6
   coexistence.
+
+In addition, `tests/test_press_conferences.py` holds dedicated **hardening
+regression tests** (no new fixtures, documents built inline):
+
+- **Routing**: a known remarks heading → remarks; known Q&A headings → Q&A
+  (variants kept); an unknown heading with `Question:`/`Answer:` markers → Q&A;
+  an unknown heading without a reliable signal → 0 facts even when its sentences
+  match the economic patterns ("Additional Information / Inflation is expected
+  to remain elevated." → 0 facts); `closing remarks` is not a remarks heading.
+- **Question filter**: an explicitly personal question (personal life, family
+  life, your retirement, your children) skips the turn; economic questions
+  containing `personal`/`personally`/`private`-style vocabulary are still
+  extracted, with the answer content, subject, predicate, value, period,
+  `identity_qualifier`, `source_text`, `source_location` and `speaker` asserted —
+  not just the fact count.

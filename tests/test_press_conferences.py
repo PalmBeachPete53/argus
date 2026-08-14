@@ -371,6 +371,117 @@ def test_non_economic_question_turn_is_skipped():
     assert any(f.value.value == "The Governing Council will be guided by the incoming data." for f in result.facts)
 
 
+# ---------------------------------------------------------------------------
+# question-filter hardening: generic personal tokens must not suppress answers
+# ---------------------------------------------------------------------------
+
+
+def _qna_doc(question: str, answer: str, *, document_id: str = "sha-filter") -> NormalizedDocument:
+    return _one_section_doc(
+        "Questions and answers",
+        f"Question: {question}\nAnswer: {answer}",
+        document_id=document_id,
+    )
+
+
+def test_personal_life_question_skips_answer():
+    doc = _qna_doc(
+        "Could you tell us about your personal life?",
+        "Inflation is expected to average 2.0% in 2027.",
+    )
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert "non_economic_question_skipped" in result.warnings
+    assert result.facts == []
+    assert not any("2.0%" in f.source_text for f in result.facts)
+
+
+def test_economic_question_containing_personal_is_extracted():
+    doc = _qna_doc(
+        "What is your personal assessment of the inflation outlook?",
+        "Inflation is expected to average 2.1% in 2027.",
+    )
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert "non_economic_question_skipped" not in result.warnings
+    assert len(result.facts) == 1
+    fact = result.facts[0]
+    assert fact.subject == SUBJECT_INFLATION
+    assert fact.predicate == "value"
+    assert fact.value.value == 2.1
+    assert fact.value.source_text == "2.1%"
+    assert period_of(fact) == "year:2027"
+    assert fact.identity_qualifier == "answer:1:0"
+    assert fact.source_text == "Inflation is expected to average 2.1% in 2027."
+    assert fact.source_location.section == 0
+    assert fact.speaker is None
+
+
+def test_economic_question_containing_personally_is_extracted():
+    doc = _qna_doc(
+        "Do you personally expect inflation to return to target?",
+        "Inflation is expected to average 2.0% in 2027.",
+    )
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert "non_economic_question_skipped" not in result.warnings
+    assert len(result.facts) == 1
+    fact = result.facts[0]
+    assert fact.subject == SUBJECT_INFLATION
+    assert fact.value.value == 2.0
+    assert fact.source_text == "Inflation is expected to average 2.0% in 2027."
+
+
+def test_family_life_question_skips_answer():
+    doc = _qna_doc(
+        "How do you balance your family life with the presidency?",
+        "The euro area economy is growing at a moderate pace.",
+    )
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert "non_economic_question_skipped" in result.warnings
+    assert result.facts == []
+    assert not any("moderate pace" in f.source_text for f in result.facts)
+
+
+def test_ambiguous_personal_wording_in_economic_question_is_not_filtered():
+    doc = _qna_doc(
+        "From your personal vantage point, will the Council cut rates this year?",
+        "Future policy decisions will depend on the incoming data.",
+    )
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert "non_economic_question_skipped" not in result.warnings
+    assert len(result.facts) == 1
+    fact = result.facts[0]
+    assert fact.subject == SUBJECT_POLICY_GUIDANCE
+    assert fact.value.value == "Future policy decisions will depend on the incoming data."
+    assert fact.identity_qualifier == "answer:1:0"
+    # the journalist's question is never mined
+    assert fact.source_text != "From your personal vantage point, will the Council cut rates this year?"
+
+
+def test_retirement_and_children_only_trigger_with_possessive_marker():
+    # "retirement" or "children" used economically must NOT trigger the skip
+    doc = _qna_doc(
+        "Will the retirement of older workers hold back growth?",
+        "The economy is expected to grow by 1.4% in 2027.",
+    )
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert "non_economic_question_skipped" not in result.warnings
+    assert len(result.facts) == 1
+    assert result.facts[0].subject == SUBJECT_GDP
+    assert result.facts[0].value.value == 1.4
+    # "your retirement" / "your children" remain personal triggers
+    for question in (
+        "When do you plan to retire, and what will your retirement look like?",
+        "How are your children coping with the presidency?",
+    ):
+        doc2 = _qna_doc(
+            question,
+            "The economy is expected to grow by 1.4% in 2027.",
+            document_id=f"sha-{question[:12]}",
+        )
+        result2 = EcbPressConferenceExtractor().extract(press_conference_publication(), doc2)
+        assert "non_economic_question_skipped" in result2.warnings, question
+        assert result2.facts == [], question
+
+
 def test_risk_orientations_are_categorical_only_when_explicit():
     result = extract_fixture("ecb_press_conf.html")
     balanced = fact_by(result, SUBJECT_RISK, "assessment")
@@ -462,6 +573,118 @@ def test_qna_only_document_warns_no_remarks():
     assert len(result.facts) == 1
     assert result.facts[0].subject == SUBJECT_INFLATION
     assert result.facts[0].value.value == 2.0
+
+
+# ---------------------------------------------------------------------------
+# section routing hardening: UNKNOWN ≠ REMARKS
+# ---------------------------------------------------------------------------
+
+
+def _one_section_doc(heading: str, text: str, *, document_id: str = "sha-route") -> NormalizedDocument:
+    return NormalizedDocument(
+        publication_id="pub-ecb-pressconf",
+        document_id=document_id,
+        source_url=ECB_URL,
+        local_path=None,
+        document_kind="html",
+        sections=[DocumentSection(order=0, heading=heading, text=text)],
+    )
+
+
+def test_known_remarks_heading_is_remarks():
+    doc = _one_section_doc("Introductory statement", "Inflation is projected to average 2.2% in 2027.")
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert result.warnings == ["no_qna", "no_risk_assessment", "no_forward_guidance"]
+    assert len(result.facts) == 1
+    fact = result.facts[0]
+    assert fact.subject == SUBJECT_INFLATION
+    assert fact.identity_qualifier.startswith("remarks:")
+    assert fact.speaker is None  # remarks are collective, never attributed
+
+
+def test_known_remarks_heading_variants_are_kept():
+    for heading in ("Introductory statement", "Opening statement", "Introductory remarks", "Opening remarks"):
+        doc = _one_section_doc(heading, "Inflation is projected to average 2.2% in 2027.", document_id=f"sha-{heading}")
+        result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+        assert len(result.facts) == 1, heading
+        assert result.facts[0].identity_qualifier.startswith("remarks:"), heading
+
+
+def test_known_qna_heading_is_qna():
+    doc = _one_section_doc(
+        "Questions and answers",
+        "Question: How is inflation?\nAnswer: Inflation is expected to average 2.0% in 2027.",
+    )
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert result.warnings == ["no_remarks", "no_risk_assessment", "no_forward_guidance"]
+    assert len(result.facts) == 1
+    fact = result.facts[0]
+    assert fact.subject == SUBJECT_INFLATION
+    assert fact.identity_qualifier.startswith("answer:")
+    assert fact.value.value == 2.0
+    assert fact.source_text == "Inflation is expected to average 2.0% in 2027."
+
+
+def test_known_qna_heading_variants_are_kept():
+    for heading in ("Questions and answers", "Questions", "Q&A", "Answers"):
+        doc = _one_section_doc(
+            heading,
+            "Question: How is inflation?\nAnswer: Inflation is expected to average 2.0% in 2027.",
+            document_id=f"sha-{heading}",
+        )
+        result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+        assert len(result.facts) == 1, heading
+        assert result.facts[0].identity_qualifier.startswith("answer:"), heading
+
+
+def test_unknown_heading_with_qna_markers_is_qna():
+    doc = _one_section_doc(
+        "Additional Information",
+        "Question: What is the outlook for activity?\nAnswer: GDP is projected to grow by 1.4% in 2027.",
+    )
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert len(result.facts) == 1
+    fact = result.facts[0]
+    assert fact.subject == SUBJECT_GDP
+    assert fact.predicate == "value"
+    assert fact.value.value == 1.4
+    assert fact.identity_qualifier.startswith("answer:")
+    assert fact.source_location.section == 0
+    assert fact.speaker is None  # unlabelled answer: never invented
+
+
+def test_unknown_heading_without_signal_is_ignored():
+    doc = _one_section_doc("Additional Information", "The euro area economy is growing at a moderate pace.")
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert result.facts == []
+    assert "no_remarks" in result.warnings
+    assert "no_qna" in result.warnings
+
+
+def test_unknown_heading_with_economic_content_is_ignored():
+    doc = _one_section_doc(
+        "Appendix",
+        "Inflation is projected to average 2.2% in 2027. The unemployment rate stood at 6.3%. Risks are broadly balanced.",
+    )
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert result.facts == []
+
+
+def test_unknown_heading_economic_phrases_never_extracted():
+    # the audit's flagship case: an unknown section whose sentences WOULD match
+    # the economic patterns must still produce 0 facts — UNKNOWN ≠ REMARKS
+    doc = _one_section_doc("Additional Information", "Inflation is expected to remain elevated.")
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert result.facts == []
+    assert not any(f.subject == SUBJECT_INFLATION for f in result.facts)
+    assert "no_remarks" in result.warnings
+
+
+def test_closing_remarks_heading_is_not_remarks():
+    doc = _one_section_doc("Closing Remarks", "Inflation is expected to remain elevated.")
+    result = EcbPressConferenceExtractor().extract(press_conference_publication(), doc)
+    assert result.facts == []
+    assert "no_remarks" in result.warnings
 
 
 # ---------------------------------------------------------------------------

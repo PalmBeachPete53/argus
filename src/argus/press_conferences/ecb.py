@@ -12,6 +12,14 @@ press conference?":
   (``Fact.speaker``) and the Q&A position preserved in ``identity_qualifier``
   (``answer:<turn>:<n>`` vs ``remarks:<n>``).
 
+Sections are routed conservatively: a known remarks heading ("Introductory
+statement" and its ECB synonyms) is remarks, a known Q&A heading ("Questions and
+answers" and its synonyms) is Q&A, and an **unknown heading is mined only when
+the text carries a reliable Q&A signal** (``Question:`` / ``Answer:`` lines) —
+otherwise the section is **ignored** ("absence of proof → absence of
+extraction"). An unknown section is never assumed to be remarks, so a future
+appendix / biography / legal notice / closing-remarks section yields no fact.
+
 Content is classified sentence-by-sentence into the Phase 7 categories
 (A–G) with a deterministic precedence: forward guidance (G) > policy stance
 (D) > risks (E) > financial conditions (F) > inflation (A) > labour market (C)
@@ -31,8 +39,11 @@ Deliberately NOT extracted (Phase 7 boundary):
   verbatim guidance fact, never a "rate hike expected" fact) — none of these is
   ever invented here
 - non-economic questions (and their answers): a question flagged as
-  non-economic by an explicit marker skips the whole turn (warning
-  ``non_economic_question_skipped``)
+  non-economic by an explicit personal marker (memoir, personal/private life,
+  family life, your family/retirement/spouse/children/partner, hobbies) skips
+  the whole turn (warning ``non_economic_question_skipped``). Generic tokens
+  such as "personal" or "personally" never trigger the skip on their own — they
+  appear naturally in economic questions and must not suppress an answer.
 
 Design rules
 
@@ -111,16 +122,24 @@ PREDICATE_VALUE = "value"
 # ---------------------------------------------------------------------------
 # Remarks vs Q&A. A section is routed by its normalized heading; when the
 # heading carries no signal the mode is inferred from the text (Q&A markers).
+#
+# Routing is CONSERVATIVE (Phase 7 hardening): a section whose mode cannot be
+# determined with sufficient certainty is IGNORED rather than assumed to be
+# remarks. "Absence of proof → absence of extraction": an unknown heading
+# without a reliable Q&A signal never becomes remarks, so a future section
+# (appendix, biography, legal notice, closing remarks, …) is simply not mined.
+# "Closing Remarks" is deliberately NOT a remarks heading: only the known ECB
+# variants ("Introductory statement" and its synonyms) are.
 # ---------------------------------------------------------------------------
 MODE_REMARKS = "remarks"
 MODE_QNA = "qna"
+MODE_IGNORE = "ignore"
 
 _REMARKS_HEADINGS = (
     "introductory statement",
     "opening statement",
     "introductory remarks",
     "opening remarks",
-    "remarks",
 )
 _QNA_HEADINGS = (
     "questions and answers",
@@ -148,7 +167,7 @@ def _mode_from_text(text: str) -> str:
     for line in (text or "").split("\n"):
         if _QUESTION_PREFIX.match(line) or _ANSWER_PREFIX.match(line):
             return MODE_QNA
-    return MODE_REMARKS
+    return MODE_IGNORE
 
 
 # ---------------------------------------------------------------------------
@@ -192,12 +211,24 @@ def _match_speaker_label(line: str) -> tuple[str, str] | None:
     return None
 
 
-# Non-economic questions (explicit, conservative markers): the whole turn — the
-# question and the answer relating to it — is skipped. Prefer reliability over
-# coverage: an incidental economic word ("growth", "prices") in a non-economic
-# answer never produces a fact.
+# Non-economic questions (explicit, conservative multi-word markers): the whole
+# turn — the question and the answer relating to it — is skipped. Generic
+# personal-language tokens ("personal", "personally", "private") are deliberately
+# NOT used on their own: they occur naturally in economic questions ("What is
+# your personal assessment of the inflation outlook?") and must never suppress an
+# answer. Only clearly personal topics trigger the skip: a memoir, personal /
+# private life (or matters/affairs), family life, your family/retirement/
+# spouse/children/partner, or hobbies. Prefer reliability over coverage: an
+# incidental economic word ("growth", "prices") in a non-economic answer never
+# produces a fact.
 _NON_ECONOMIC_QUESTION = re.compile(
-    r"\b(?:memoir|memoirs|personal|private|private life|family|hobbies?|retirement|personally)\b",
+    r"\b(?:"
+    r"memoirs?|"
+    r"(?:personal|private)\s+(?:life|matters?|affairs?)|"
+    r"(?:your\s+)?family\s+life|"
+    r"your\s+(?:family|retirement|spouse|children|partner)|"
+    r"hobbies?"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -411,6 +442,8 @@ class EcbPressConferenceExtractor(PressConferenceExtractor):
         counters: dict[str, int],
         state: _RunState,
     ) -> None:
+        if mode == MODE_IGNORE:
+            return
         turn = 0
         current_speaker: str | None = None
         in_question = False
