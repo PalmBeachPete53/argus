@@ -684,7 +684,8 @@ ignored** ("absence of proof → absence of extraction"). Ignored headings
 include the "Account of the monetary policy meeting" title, `legal notice`,
 `statistical annex`, `copyright`, `imprint`, `disclaimer`,
 `external monetary policy` (other central banks' policy is never mined) and
-`minutes of …`. An unknown future section is never assumed to be economic.
+the "Minutes of …" title form. An unknown future section is never assumed to
+be economic.
 
 **Routing is exact identity on the cleaned heading** (case / numbering /
 punctuation / leading "the" normalized away, then compared verbatim against
@@ -693,11 +694,17 @@ controlled sets: "Monetary policy stance and policy considerations",
 costs", "Money, credit and financial conditions", "Risk assessment", "Policy
 conclusions", …). Substring coincidence is never enough: "Non-economic
 developments" shares the word "economic" with "Economic analysis" but routes
-to **ignore**, never to a mined section. The known non-economic headings are
-matched by precise phrase (`account of the monetary policy meeting`,
-`legal notice`, `statistical annex`, `external monetary policy`, `minutes of`,
-…), so an economic heading that merely contains such a word is never
-mistaken for a non-economic one.
+to **ignore**, never to a mined section.
+
+The known non-economic headings are matched the same way — **exact identity**
+for `legal notice`, `statistical annex`, `copyright`, `imprint`, `disclaimer`,
+`external monetary policy` — plus the two explicit **title-style prefix
+families** `Account of the monetary policy meeting …` (the dated meeting-account
+title) and `Minutes of …`. There is **no substring matching anywhere in heading
+routing**: a heading that merely *contains* a known phrase ("External monetary
+policy developments", "Statistical annexes", "Copyright notice", "Disclaimer
+and legal notice") is neither that controlled heading nor an economic one — it
+is an unknown heading and is ignored (0 facts, `UNKNOWN ≠ ECONOMIC`).
 
 ### Supported facts
 

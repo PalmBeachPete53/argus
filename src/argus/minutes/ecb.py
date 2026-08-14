@@ -13,9 +13,11 @@ say or discuss during the meeting?":
 Sections are routed conservatively by heading: a known economic heading is
 mined, and an **unknown heading — or a known non-economic one (legal notice,
 statistical annex, external monetary policy, the "Account of the monetary
-policy meeting" title) — is ignored** ("absence of proof → absence of
-extraction"). An unknown section is never assumed to be economic, so a future
-appendix / glossary / disclaimer section yields no fact.
+policy meeting" title, "Minutes of …") — is ignored** ("absence of proof →
+absence of extraction"). Known non-economic headings are matched by exact
+identity on the cleaned heading plus the explicit title-style prefix families;
+substring coincidence is never used. An unknown section is never assumed to be
+economic, so a future appendix / glossary / disclaimer section yields no fact.
 
 Content is classified sentence-by-sentence with the same deterministic
 precedence as Phase 7 (guidance > policy > risk > financial > inflation >
@@ -132,14 +134,27 @@ CAT_INFLATION = "inflation"
 CAT_LABOUR = "labour"
 CAT_GROWTH = "growth"
 
-_IGNORE_HEADING_MARKERS = (
-    "account of the monetary policy meeting",
+# Known non-economic headings — matched EXACTLY on the cleaned heading (no
+# substring routing), plus the explicit title-style prefix families below. A
+# heading that merely contains such a phrase ("External monetary policy
+# developments", "Statistical annexes", "Copyright notice") is not a known
+# non-economic heading: it falls to the unknown default and is still never
+# mined (UNKNOWN ≠ ECONOMIC).
+_IGNORE_HEADINGS = frozenset({
     "legal notice",
     "statistical annex",
     "copyright",
     "imprint",
     "disclaimer",
     "external monetary policy",
+})
+# Title-style families: the meeting-account title ("Account of the monetary
+# policy meeting of the Governing Council held on 23 July 2026") and the
+# "Minutes of …" document-title form ("Minutes of the Governing Council").
+# These are matched structurally (prefix on the cleaned heading), never by
+# arbitrary substring matching.
+_IGNORE_HEADING_PREFIXES = (
+    "account of the monetary policy meeting",
     "minutes of",
 )
 # Exact identity sets: a heading is routed only when, after deterministic
@@ -184,11 +199,17 @@ def _section_category(heading: str) -> str:
     """Route a section by its normalized heading: ``CAT_IGNORE`` or a mined
     category label. Routing is exact identity on the cleaned heading; the label
     does not constrain the per-sentence classification (content-first), it only
-    marks the section as mined."""
+    marks the section as mined.
+
+    Known non-economic headings are matched by exact identity
+    (``_IGNORE_HEADINGS``) plus the explicit title-style prefix families
+    (``_IGNORE_HEADING_PREFIXES``); any other heading — known economic (exact
+    identity) or unknown (the default below, ``UNKNOWN ≠ ECONOMIC``) — is
+    classified accordingly. There is no general substring matching."""
     t = _clean_heading(heading)
     if not t:
         return CAT_IGNORE
-    if any(marker in t for marker in _IGNORE_HEADING_MARKERS):
+    if t in _IGNORE_HEADINGS or t.startswith(_IGNORE_HEADING_PREFIXES):
         return CAT_IGNORE
     if t in _POLICY_HEADINGS:
         return CAT_POLICY

@@ -322,7 +322,13 @@ L'architecture doit rester extensible à d'autres banques centrales.
   `src/argus/minutes/`). Implémenté : routage conservateur par titre de section
   (titres économiques connus extraits ; titre du compte, notice légale, annexe
   statistique, « external monetary policy » et titres inconnus ignorés —
-  `UNKNOWN ≠ ECONOMIC`), classification content-first par phrase (guidance >
+  `UNKNOWN ≠ ECONOMIC`), **correction pré-Phase 13** : les headings non
+  économiques connus sont routés par **identité exacte** (`_IGNORE_HEADINGS`)
+  plus les familles de titre explicites (« Account of the monetary policy
+  meeting … », « Minutes of … ») — **plus aucun routage par sous-chaîne**
+  (« External monetary policy developments », « Statistical annexes »,
+  « Copyright notice » ne sont jamais lus comme les headings contrôlés, et
+  jamais comme ECONOMIC), classification content-first par phrase (guidance >
   policy > risk > financial > inflation > labour > growth, mêmes ancres que la
   Phase 7), discussion économique fidèle (phrases de thème sans contenu —
   « The discussion focused on … », « Members discussed the possibility … » —
@@ -335,7 +341,9 @@ L'architecture doit rester extensible à d'autres banques centrales.
   guidance en style indirect (« would be guided by », « stood ready to »),
   gating strict par classification (`minutes` / `meeting_account`),
   persistance idempotente. 4 fixtures, golden tests (valeurs exactes,
-  provenance verbatim, attribution, aucun fait inventé), extraction
+  provenance verbatim, attribution, aucun fait inventé), tests de frontière de
+  routage IGNORE (identité exacte, near-misses, familles de titre, déterminisme
+  catégoriel), extraction
   déterministe, persistance idempotente, gating par classification et
   coexistence Phases 5/6/7 vérifiées ; `docs/EXTRACTORS.md` documente la
   couverture réelle.
@@ -731,6 +739,18 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   DATE, entrée vide) ; attributions minutes `one_member` / `voted against`
   testées. **674 tests verts et déterministes** (documenté dans
   `docs/CHANGES.md`).
+- **PHASE 8 CORRECTIVE** (avant Phase 13) : routage IGNORE des Minutes rendu
+  explicite — les headings non économiques connus sont routés par **identité
+  exacte** sur le titre nettoyé (`_IGNORE_HEADINGS`) plus les **familles de
+  titre** « Account of the monetary policy meeting … » et « Minutes of … »
+  (préfixe explicite) ; **plus aucun routage par sous-chaîne**
+  (« External monetary policy developments », « Statistical annexes »,
+  « Copyright notice », « Disclaimer and legal notice » ne sont jamais lus
+  comme les headings contrôlés, et jamais comme ECONOMIC — ils restent
+  inconnus/ignorés, 0 fait) ; les familles de titre et tous les headings
+  économiques contrôlés restent intacts (testé : identité exacte IGNORE,
+  near-misses, familles, déterminisme catégoriel). **680 tests verts et
+  déterministes**.
 - **Prochaine phase autorisée : Phase 13 — Policy Reaction Function** (statut
   `NEXT`).
 

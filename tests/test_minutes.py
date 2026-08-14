@@ -41,6 +41,17 @@ from argus.minutes import (
     extract_minutes,
     extract_minutes_batch,
 )
+from argus.minutes.ecb import (
+    CAT_FINANCIAL,
+    CAT_GENERAL,
+    CAT_GROWTH,
+    CAT_IGNORE,
+    CAT_INFLATION,
+    CAT_LABOUR,
+    CAT_POLICY,
+    CAT_RISK,
+    _section_category,
+)
 from argus.press_conferences import extract_press_conference
 from argus.statements import extract_statement
 from argus.store import Store
@@ -394,6 +405,130 @@ def test_heading_routing_is_exact_identity_not_substring():
     doc = _one_section_doc("Risk management", "Risks to economic growth were broadly balanced.")
     result = EcbMinutesExtractor().extract(minutes_publication(), doc)
     assert result.facts == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 corrective — controlled IGNORE routing (no substring matching)
+# ---------------------------------------------------------------------------
+
+
+def test_ignore_heading_exact_identity_is_ignored():
+    # A. Every contractual exact IGNORE heading stays ignored, even when the
+    # content under it is economic.
+    for heading in (
+        "Legal notice",
+        "Statistical annex",
+        "Copyright",
+        "Imprint",
+        "Disclaimer",
+        "External monetary policy",
+    ):
+        assert _section_category(heading) == CAT_IGNORE, heading
+        doc = _one_section_doc(heading, "Inflation is projected to average 2.2% in 2027.")
+        result = EcbMinutesExtractor().extract(minutes_publication(), doc)
+        assert result.facts == [], heading
+
+
+def test_ignore_heading_near_misses_never_mined_and_never_economic():
+    # B. A heading that merely CONTAINS a known non-economic phrase is not that
+    # heading — there is no substring routing. It is an unknown heading: never
+    # mined, never silently read as ECONOMIC.
+    for heading in (
+        "External monetary policy developments",
+        "Statistical annexes",
+        "Copyright notice",
+        "Disclaimer and legal notice",
+        "Minutes of something",
+    ):
+        doc = _one_section_doc(heading, "Risks to economic growth were broadly balanced.")
+        result = EcbMinutesExtractor().extract(minutes_publication(), doc)
+        assert result.facts == [], heading
+
+
+def test_ignore_heading_title_families_are_still_ignored():
+    # E. The explicit title-style families stay supported: the dated
+    # meeting-account title and the "Minutes of …" forms (numbering, "the",
+    # meeting name, date) are all ignored, never mined.
+    for heading in (
+        "Account of the monetary policy meeting",
+        "Account of the monetary policy meeting of the Governing Council held on 23 July 2026",
+        "Minutes of the Governing Council",
+        "Minutes of the Governing Council meeting held on 23 July 2026",
+        "The Minutes of the Governing Council",
+        "1. Minutes of the Governing Council",
+    ):
+        doc = _one_section_doc(heading, "Inflation is projected to average 2.2% in 2027.")
+        result = EcbMinutesExtractor().extract(minutes_publication(), doc)
+        assert result.facts == [], heading
+
+
+def test_near_miss_headings_route_to_ignore_not_economic():
+    # C/D. Headings that share a word with a mined category or a known
+    # non-economic phrase ("economic", "monetary policy", "risk", "statistical
+    # annex", "copyright") but are not an exact controlled heading route to
+    # IGNORE — never to a mined category (UNKNOWN ≠ ECONOMIC). "Non-economic
+    # developments" triggers no economic extraction.
+    for heading in (
+        "Non-economic developments",
+        "External economic environment",
+        "Economic outlook beyond the euro area",
+        "Economic",
+        "External monetary policy developments",
+        "Risk management",
+        "Statistical annexes",
+        "Copyright notice",
+        "Minutes of the Governing Council",  # explicit "minutes of …" family
+        "Account of the monetary policy meeting of the Governing Council held on 23 July 2026",  # title family
+    ):
+        assert _section_category(heading) == CAT_IGNORE, heading
+
+
+def test_economic_heading_never_collides_with_an_ignore_heading():
+    # Precision guarantee: no controlled economic heading may ever route to
+    # IGNORE — the exact IGNORE set and the title-family prefixes are disjoint
+    # from every mined category set.
+    mined = {
+        "monetary policy stance",
+        "policy considerations",
+        "policy conclusions",
+        "monetary policy",
+        "monetary policy stance and policy considerations",
+        "risk assessment",
+        "risks",
+        "risk",
+        "prices and costs",
+        "price developments",
+        "inflation",
+        "real economy",
+        "economic activity",
+        "growth",
+        "labour market",
+        "employment",
+        "money, credit and financial conditions",
+        "financial conditions",
+        "monetary and financial",
+        "economic analysis",
+        "external environment",
+    }
+    for heading in mined:
+        assert _section_category(heading) != CAT_IGNORE, heading
+
+
+def test_section_routing_contract_is_deterministic():
+    # F. Same heading -> same category on every call: the routing table is a
+    # pure function of the cleaned heading.
+    probes = (
+        "Risk assessment",
+        "Non-economic developments",
+        "External monetary policy",
+        "External monetary policy developments",
+        "Minutes of the Governing Council",
+        "Monetary policy stance and policy considerations",
+        "Additional Information",
+    )
+    for heading in probes:
+        first = _section_category(heading)
+        assert all(_section_category(heading) == first for _ in range(10)), heading
 
 
 def test_unknown_heading_with_economic_content_is_ignored():
