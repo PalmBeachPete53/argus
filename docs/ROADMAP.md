@@ -307,7 +307,27 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4.
 - **Critères de validation** : les positions individuelles et les dissents sont
   distingués et tracés.
-- **Statut** : `NOT STARTED`.
+- **Statut** : `COMPLETE` — extracteur `EcbMinutesExtractor` (v8.0.0,
+  `src/argus/minutes/`). Implémenté : routage conservateur par titre de section
+  (titres économiques connus extraits ; titre du compte, notice légale, annexe
+  statistique, « external monetary policy » et titres inconnus ignorés —
+  `UNKNOWN ≠ ECONOMIC`), classification content-first par phrase (guidance >
+  policy > risk > financial > inflation > labour > growth, mêmes ancres que la
+  Phase 7), discussion économique fidèle (phrases de thème sans contenu —
+  « The discussion focused on … », « Members discussed the possibility … » —
+  supprimées ; le contenu explicite « Members noted that … » est extrait),
+  **attribution tracée sans identité inventée** (`identity_qualifier`
+  `minutes:{dissent|one_member|some_members|members|council|collective}:{n}`,
+  `Fact.speaker` toujours `None`, un dissent n'est jamais transformé en vote),
+  évaluation des risques (orientations catégoriques upside/downside/balanced ou
+  texte verbatim), valeurs quantitatives avec période de référence, forward
+  guidance en style indirect (« would be guided by », « stood ready to »),
+  gating strict par classification (`minutes` / `meeting_account`),
+  persistance idempotente. 4 fixtures, golden tests (valeurs exactes,
+  provenance verbatim, attribution, aucun fait inventé), extraction
+  déterministe, persistance idempotente, gating par classification et
+  coexistence Phases 5/6/7 vérifiées ; `docs/EXTRACTORS.md` documente la
+  couverture réelle.
 
 ## Phase 9 — Economic Projections
 
@@ -495,13 +515,14 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 ## Current Position
 
-- Argus se situe au début de la **Phase 8 (Minutes / Meeting Accounts)**.
-- Les phases 0 à 7 sont marquées `COMPLETE` après vérification du repository
+- Argus se situe au début de la **Phase 9 (Economic Projections)**.
+- Les phases 0 à 8 sont marquées `COMPLETE` après vérification du repository
   (adapters, discovery, collector/fetcher, normalization, classification,
   modèle `Fact`, extracteurs ECB `EcbDecisionExtractor` v5.2.0,
-  `EcbMonetaryPolicyStatementExtractor` v6.0.0 et
-  `EcbPressConferenceExtractor` v7.0.0, tables SQLite correspondantes, tests).
-- **Prochaine phase autorisée : Phase 8 — Minutes / Meeting Accounts** (statut
+  `EcbMonetaryPolicyStatementExtractor` v6.0.0,
+  `EcbPressConferenceExtractor` v7.0.0 et `EcbMinutesExtractor` v8.0.0,
+  tables SQLite correspondantes, tests).
+- **Prochaine phase autorisée : Phase 9 — Economic Projections** (statut
   `NOT STARTED`).
 
 ## Out of Scope

@@ -547,3 +547,177 @@ regression tests** (no new fixtures, documents built inline):
   extracted, with the answer content, subject, predicate, value, period,
   `identity_qualifier`, `source_text`, `source_location` and `speaker` asserted —
   not just the fact count.
+---
+
+# Type-Specific Extractors — Phase 8 (Minutes / Meeting Accounts)
+
+This section is the reference for the **ECB Minutes / Meeting Account
+extractor**, built on the same Phase 4 contract and following the Phase 5–7
+patterns (`src/argus/minutes/`).
+
+## Pipeline
+
+```
+NormalizedDocument                          ← Phase 2
+    ↓  MinutesExtractor.extract(publication, document)
+ExtractionResult(publication_id, document_id, facts, warnings)
+    ↓  Store.rebuild_facts_for_document (delete + insert, idempotent)
+facts table
+```
+
+- a classified **ECB minutes / meeting account** publication
+- its normalized document(s)
+- the ECB minutes extractor producing structured **Facts**
+- an `ExtractionResult` handed to the existing `Store`
+
+## Extractor contract
+
+`src/argus/minutes/base.py`:
+
+```python
+class MinutesExtractor(ABC):
+    bank: str
+    extraction_version: str
+    def extract(self, publication, document) -> ExtractionResult: ...
+```
+
+- One extractor per bank; the generic code only dispatches on `central_bank`.
+- Extractors are **pure**: they read the normalized document and return an
+  `ExtractionResult`; persistence is a caller concern.
+- `extract_minutes(store, publication, *, document=None)` runs the right
+  extractor and persists facts through `Store.rebuild_facts_for_document`,
+  keeping re-runs idempotent (delete + insert, **including empty results**).
+- Extraction is **gated on classification**: a publication classified as
+  `minutes` or `meeting_account` (authoritatively in the `classifications`
+  table) is mined; anything else — and an absent classification — is refused
+  (`MINUTES_PUBLICATION_TYPES = ("minutes", "meeting_account")`).
+
+## ECB minutes extractor
+
+`src/argus/minutes/ecb.py` — `EcbMinutesExtractor` (`extraction_version
+8.0.0`). It answers *"what did the Governing Council explicitly say or discuss
+during the meeting?"*.
+
+### Section routing — conservative
+
+A section is mined only when its normalized heading is a **known economic
+section**; an **unknown heading — and the known non-economic ones — is
+ignored** ("absence of proof → absence of extraction"). Ignored headings
+include the "Account of the monetary policy meeting" title, `legal notice`,
+`statistical annex`, `copyright`, `imprint`, `disclaimer`,
+`external monetary policy` (other central banks' policy is never mined) and
+`minutes of …`. An unknown future section is never assumed to be economic.
+
+### Supported facts
+
+| subject | predicate | value | source |
+|---|---|---|---|
+| `monetary_policy` | `statement` | text (verbatim) | policy stance / preferences / arguments ("Members agreed …", "The Governing Council decided to …", "Some members would have preferred …") |
+| `policy_guidance` | `statement` | text (verbatim) | forward guidance in direct or indirect style ("stood ready to …", "would be guided by …", "future policy decisions would depend on …") |
+| `inflation` / `core_inflation` | `value` / `assessment` | percentage (+ period) / text | prices and costs discussion |
+| `inflation_expectations` | `assessment` | text (verbatim) | same |
+| `growth` | `assessment` | text (verbatim) | real economy / external environment discussion |
+| `gdp` | `value` | percentage (+ period) | quantitative growth claims |
+| `labour_market` / `unemployment` / `wages` | `value` / `assessment` | percentage (+ period) / text | labour market discussion |
+| `financial_conditions` | `assessment` | text (verbatim) | money, credit and financial conditions discussion |
+| `risk` | `assessment` | categorical or text | risk assessment |
+| `inflation_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
+| `growth_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
+
+Sentence classification is **content-first for every mined section** with the
+same deterministic precedence as Phase 7 (guidance > policy > risk > financial
+> inflation > labour > growth); the section heading only gates *whether* the
+section is mined, never *how* a sentence is classified. An unmatched sentence
+produces no fact (reliability over coverage).
+
+### Discussion wording — handled faithfully
+
+A sentence that only names the **theme of the discussion** without stating a
+position is **suppressed** — no fact is invented from "they discussed X":
+
+- "The discussion focused on inflation."
+- "The topic / subject of the discussion was monetary policy."
+- "Members discussed the possibility / implications / prospects of …"
+
+A sentence that states **explicit content** is mined as usual, with its
+attribution: "Members noted that inflation was expected to average 2.0% in
+2027." → `inflation / value` 2.0 (`year:2027`).
+
+### Provenance — attribution without invented identities
+
+Every Fact carries the Phase 5–7 provenance fields (`source_location`,
+`source_text`, value-level `source_text`, `extraction_method = regex`,
+`extraction_version = 8.0.0`, `confidence`). Phase 8 specifics:
+
+- **`Fact.speaker` is always `None`** — the accounts do not reliably label
+  individual governors and a name is never guessed.
+- **`identity_qualifier`** — `minutes:{attribution}:{n}`, where `attribution`
+  is the subject label the source itself states, with precedence
+  `dissent` > `one_member` > `some_members` > `members` > `council` >
+  `collective` (unmarked sentences). Individual positions and dissents are
+  therefore **distinguished and traced** without fabricating identities
+  (roadmap Phase 8 criterion).
+- A dissent is kept as the verbatim policy statement it is part of, tagged
+  `minutes:dissent:` — it is **never** turned into an invented vote count or a
+  `vote` subject.
+
+### Quantitative values & risk
+
+Identical gate to Phases 6/7: values are extracted only from explicit value
+claims ("projected / expected … to average / stand at …", "stood at …"), so
+target phrasing is never read as a value; a percentage with a following
+reference period keeps a `FactPeriod` (year, or month when a month is named).
+Risk facts are categorical (`upside` / `downside` / `balanced`, with
+`two-sided` / `symmetric` normalized to `balanced`) only when the source states
+an explicit orientation, otherwise a verbatim text assessment. Confidence:
+`HIGH` for percentages and categorical orientations, `MEDIUM` for verbatim
+text.
+
+### Warnings (fixed order)
+
+`no_sections` (early return), `no_risk_assessment`, `no_forward_guidance`.
+
+### Not covered — Phase 8 boundaries
+
+- **The decision itself** (wording, rates, changes, effective date) stays
+  Phase 5, gated on decision publications; the verbatim policy statement of the
+  account is kept as `monetary_policy/statement`, never as a rate value.
+- **Rationale** (Phase 6), **votes** (never fabricated — a dissent is traced,
+  not counted), hawkish/dovish / stance / forex / trading interpretation (later
+  phases), **Phases 9–11** (projections, reports, speeches — the qualitative
+  economic discussion of the account is mined, never a separate projection
+  table).
+- No LLM (invariant 8).
+
+### Phase 5 / 6 / 7 / 8 boundary
+
+The four extractors are disjoint by **publication type** (classification
+gating): decisions, statements, press conferences and minutes are never
+cross-mined. `get_extractor` dispatches on `central_bank`, and each extractor
+refuses publications whose authoritative classification is not its own type.
+
+## Golden tests
+
+`tests/fixtures/documents/ecb_minutes*.html` (modeled on the ECB "Account of
+the monetary policy meeting": title, monetary policy stance and policy
+considerations, economic analysis / external environment / real economy /
+prices and costs / money credit and financial conditions, risk assessment,
+external monetary policy, policy conclusions, legal notice).
+`tests/test_minutes.py` runs the normalizer → extractor → store slice and
+asserts, per fixture:
+
+- the exact expected facts (per-subject value sets with periods, and verbatim
+  texts) with warnings;
+- section routing (known economic headings mined, unknown and known
+  non-economic headings ignored — including economic content under an unknown
+  heading → 0 facts);
+- discussion wording (theme-only sentences suppressed, explicit content mined
+  with attribution) and attribution (dissent / some_members / members / council
+  / collective qualifiers, `speaker` never set, no invented vote);
+- no invented facts — no Phase 5/6 subjects, no interpretation, nothing for
+  absent optional categories;
+- verbatim provenance: each `fact.source_text` and `fact.value.source_text` is
+  a substring of the referenced section;
+- deterministic extraction and idempotent Store persistence (including
+  empty-result persistence and the `minutes` / `meeting_account` gating),
+  classification gating and Phase 5/6/7 coexistence.
