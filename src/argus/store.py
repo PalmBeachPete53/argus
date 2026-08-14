@@ -166,6 +166,7 @@ CREATE TABLE IF NOT EXISTS facts (
     extraction_method TEXT,
     extraction_version TEXT,
     confidence TEXT,
+    speaker TEXT,
     identity_qualifier TEXT,
     extracted_at TEXT,
     created_at TEXT,
@@ -194,6 +195,10 @@ class Store:
         self._conn.executescript(_SCHEMA)
         try:
             self._conn.execute("ALTER TABLE facts ADD COLUMN identity_qualifier TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute("ALTER TABLE facts ADD COLUMN speaker TEXT")
         except sqlite3.OperationalError:
             pass
         try:
@@ -911,9 +916,9 @@ class Store:
                  value_type, value_json, previous_value_json, change_json,
                  period_kind, period_value, period_label, effective_date,
                  source_location_json, source_text, extraction_method,
-                 extraction_version, confidence, identity_qualifier, extracted_at,
+                 extraction_version, confidence, speaker, identity_qualifier, extracted_at,
                  created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(fact_id) DO UPDATE SET
                 publication_id=excluded.publication_id,
                 document_id=excluded.document_id,
@@ -933,6 +938,7 @@ class Store:
                 extraction_method=excluded.extraction_method,
                 extraction_version=excluded.extraction_version,
                 confidence=excluded.confidence,
+                speaker=excluded.speaker,
                 identity_qualifier=excluded.identity_qualifier,
                 extracted_at=excluded.extracted_at,
                 updated_at=excluded.updated_at
@@ -957,6 +963,7 @@ class Store:
                 fact.extraction_method,
                 fact.extraction_version,
                 fact.confidence.value if fact.confidence else None,
+                fact.speaker,
                 fact.identity_qualifier,
                 iso(fact.extracted_at),
                 created_at,
@@ -1066,9 +1073,9 @@ class Store:
                          value_type, value_json, previous_value_json, change_json,
                          period_kind, period_value, period_label, effective_date,
                          source_location_json, source_text, extraction_method,
-                         extraction_version, confidence, identity_qualifier, extracted_at,
+                         extraction_version, confidence, speaker, identity_qualifier, extracted_at,
                          created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         fact_id,
@@ -1090,6 +1097,7 @@ class Store:
                         fact.extraction_method,
                         fact.extraction_version,
                         fact.confidence.value if fact.confidence else None,
+                        fact.speaker,
                         fact.identity_qualifier,
                         iso(fact.extracted_at),
                         now_iso,
@@ -1142,6 +1150,7 @@ class Store:
             extraction_method=row["extraction_method"] or "",
             extraction_version=row["extraction_version"],
             confidence=Confidence(row["confidence"]) if row["confidence"] else None,
+            speaker=row["speaker"],
             identity_qualifier=row["identity_qualifier"] or "",
             extracted_at=from_iso(row["extracted_at"]),
         )

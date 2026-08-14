@@ -10,7 +10,7 @@ It defines what a Fact is, what it is not, and every design decision behind
 ```
 Normalized Document                      ← Phase 2
     ↓
-Type-Specific Extractor                  ← Phases 5+ (NOT implemented yet)
+Type-Specific Extractor                  ← Phases 5+ (decisions, statements, press conferences)
     ↓
 Fact                                     ← Phase 4 (this layer)
     ↓
@@ -94,6 +94,7 @@ Fact
 ├── extraction_version   extractor version (auditability of corrections)
 ├── confidence           Confidence (HIGH/MEDIUM/LOW) — extraction confidence
 ├── identity_qualifier   optional discriminator for the identity (rare)
+├── speaker              str | None — verbatim official attribution (rare)
 ├── extracted_at         when the Fact was produced
 ```
 
@@ -112,6 +113,15 @@ Fact
 - `source_text` preserves the exact wording of the supporting passage. For
   categorical/numeric values the verbatim wording is also kept inside the
   `FactValue.source_text`, so the evidence is never reduced to a code.
+- `speaker` preserves the verbatim official attribution of an individual
+  statement when the source itself labels it (e.g. a press-conference answer by
+  "President Christine Lagarde"). It is **never inferred**: an unlabelled
+  statement keeps `speaker = None`, and collective communications (e.g.
+  Governing Council remarks) are always `None` — an individual is never
+  credited for a collective stance. `speaker` is deliberately **not** part of
+  `fact_id` (it is provenance, not identity): correcting or adding an
+  attribution updates the row in place; two facts that differ only in who said
+  the same thing remain one fact.
 
 ## Value types (`ValueKind`)
 

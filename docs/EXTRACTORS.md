@@ -344,3 +344,173 @@ slice and asserts, per fixture:
 - deterministic extraction and idempotent Store persistence;
 - classification gating (`extract_statement` skips non-statement
   publications) and Phase 5/6 coexistence.
+
+---
+
+# Type-Specific Extractors — Phase 7 (Press Conferences)
+
+This section is the reference for the **ECB Press Conference extractor**, built
+on the same Phase 4 contract and following the Phase 5/6 patterns
+(`src/argus/press_conferences/`).
+
+## Pipeline
+
+```
+NormalizedDocument                          ← Phase 2
+    ↓  PressConferenceExtractor.extract(publication, document)
+ExtractionResult(publication_id, document_id, facts, warnings)
+    ↓  Store.rebuild_facts_for_document (delete + insert, idempotent)
+facts table
+```
+
+- a classified **ECB press conference** publication
+- its normalized document(s)
+- the ECB press conference extractor producing structured **Facts**
+- an `ExtractionResult` handed to the existing `Store`
+
+## Extractor contract
+
+`src/argus/press_conferences/base.py`:
+
+```python
+class PressConferenceExtractor(ABC):
+    bank: str
+    extraction_version: str
+    def extract(self, publication, document) -> ExtractionResult: ...
+```
+
+- One extractor per bank; the generic code only dispatches on `central_bank`.
+- Extractors are **pure**: they read the normalized document and return an
+  `ExtractionResult`; persistence is a caller concern.
+- `extract_press_conference(store, publication, *, document=None)` runs the
+  right extractor and persists facts through
+  `Store.rebuild_facts_for_document`, keeping re-runs idempotent.
+- Extraction is **gated on classification**: a publication classified as
+  anything other than `press_conference` (authoritatively in the
+  `classifications` table) is never mined for press-conference facts.
+
+## ECB press conference extractor
+
+`src/argus/press_conferences/ecb.py` — `EcbPressConferenceExtractor`
+(`extraction_version 7.0.0`). It answers *"what does the President and the
+Vice-President explicitly state about the economy and their policy stance
+during the press conference?"*.
+
+### Remarks vs. Q&A
+
+Content is routed deterministically by **section heading**: the section whose
+heading normalizes to `introductory statement` is treated as **remarks**
+(collective Governing Council communication); the section whose heading
+normalizes to `questions and answers` is treated as **Q&A** (individual
+speakers). A narrow content-first fallback (`_mode_from_text` scanning for
+`Question:` / `Answer:` markers) applies when the heading carries no signal.
+One document contributes one remarks mode and one Q&A mode at most.
+
+### Supported facts
+
+| subject | predicate | value | source |
+|---|---|---|---|
+| `monetary_policy` | `statement` | text (verbatim) | remarks — policy sentences ("We will decide meeting by meeting …", "We do not pre-commit …") |
+| `policy_guidance` | `statement` | text (verbatim) | explicit prospective policy statements |
+| `inflation` / `core_inflation` | `value` / `assessment` | percentage (+ period) / text | inflation statements |
+| `inflation_driver` | `assessment` | text (verbatim) | explicit driver statements ("driven by energy prices …") |
+| `growth` | `assessment` | text (verbatim) | growth / activity statements |
+| `gdp` | `value` | percentage (+ period) | quantitative growth claims ("projected to grow by 1.6% in 2028") |
+| `labour_market` | `assessment` | text (verbatim) | labour market statements |
+| `unemployment` | `value` | percentage (+ period) | explicit unemployment claims |
+| `wages` | `value` | percentage (+ period) | explicit wage-growth claims |
+| `financial_conditions` | `assessment` | text (verbatim) | financial / financing conditions statements |
+| `risk` | `assessment` | categorical or text | risk statements |
+| `inflation_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
+| `growth_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
+
+Category precedence is deterministic: guidance > policy > risk > financial >
+inflation > labour > growth. An unmatched sentence produces no fact
+(reliability over coverage). No `rationale`, no `change`, no decision facts.
+
+### Provenance — speaker attribution
+
+Every Fact carries the Phase 5/6 provenance fields (`source_location`,
+`source_text`, value-level `source_text`, `extraction_method = regex`,
+`extraction_version = 7.0.0`, `confidence`). In addition:
+
+- **`speaker`** — verbatim official role + name label when the source itself
+  labels the answer (e.g. `"President Christine Lagarde"`,
+  `"Vice-President Luis de Guindos"`). Never inferred: an unlabelled answer
+  keeps `speaker = None`, and remarks facts are **always** `None` (collective
+  Governing Council communication — never attributed to an individual).
+- **`identity_qualifier`** — `remarks:{n}` for remarks facts,
+  `answer:{turn}:{n}` for Q&A answer facts (`turn` = 1-based Q&A turn, `n` =
+  per-turn ordinal). This is what distinguishes *"what the Governing Council
+  decided"* (decision facts, Phase 5) from *"what an individual governor said"*
+  (individual attribution) — the Phase 7 validation criterion.
+- The journalist's **questions are never mined**: `Question:` lines start a
+  turn and are skipped.
+
+### Non-economic questions
+
+A turn whose question is an explicit non-economic topic (memoir, personal /
+private life, family, hobbies, retirement, personally) is **skipped entirely**
+(question + answer), with a `non_economic_question_skipped` warning. The
+question phrasing is never reclassified by the model.
+
+### Risk assessment
+
+Identical to Phase 6: a categorical orientation fact (`upside` / `downside` /
+`balanced`, with `two-sided` / `symmetric` normalized to `balanced`) when an
+explicit orientation word is present; otherwise a verbatim text assessment.
+Absence never becomes an invented orientation — it is surfaced as a
+`no_risk_assessment` warning.
+
+### Quantitative values & confidence
+
+Identical gate to Phase 6: values are extracted only from explicit value
+claims, so "the 2% target" / "close to 2%" / "converging towards 2%" is never
+read as a value; a percentage with a following reference period keeps a
+`FactPeriod` (year, or month when a month is named). Confidence: `HIGH` for
+percentages and categorical orientations, `MEDIUM` for verbatim text.
+
+### Warnings (fixed order)
+
+`no_sections` (early return), `no_remarks`, `no_qna`,
+`no_risk_assessment`, `no_forward_guidance`, `non_economic_question_skipped`.
+
+### Not covered — Phase 7 boundaries
+
+- **No collective decision from an individual statement**: a governor's remark
+  is a personal statement (`speaker` set), never a `monetary_policy_decision`
+  fact — that subject belongs to Phase 5 and is gated on decision
+  publications.
+- **No Phase 5/6 subjects**: decision wording, rates, changes, effective date,
+  rationale, and decision-type forward guidance are never mined from a press
+  conference (regression-tested via gating + phase-separation tests).
+- No hawkish/dovish / stance / forex / trading interpretation — later phases;
+  no LLM (invariant 8); multi-thematic section routing limitations inherited
+  from Phase 6, documented, not fixed in this phase.
+
+### Phase 5 / 6 / 7 boundary
+
+The three extractors are disjoint by **publication type** (classification
+gating): decisions, statements and press conferences are never cross-mined.
+`get_extractor` dispatches on `central_bank`, and each extractor refuses
+publications whose authoritative classification is not its own type.
+
+## Golden tests
+
+`tests/fixtures/documents/ecb_press_conf*.html` (modeled on the ECB press
+conference layout: introductory statement, questions & answers, labelled
+speakers, quantitative claims, risk language, forward guidance, decoy and
+non-economic questions). `tests/test_press_conferences.py` runs the normalizer
+→ extractor → store slice and asserts, per fixture:
+
+- the exact expected facts (per-subject value sets with periods, and verbatim
+  texts) with warnings;
+- remarks vs. Q&A routing, speaker attribution (exact, verbatim, never
+  invented), journalist content never mined, non-economic turns skipped;
+- no invented facts — no Phase 5/6 subjects, no interpretation, nothing for
+  absent optional categories;
+- verbatim provenance: each `fact.source_text` and `fact.value.source_text` is
+  a substring of the referenced section;
+- deterministic extraction and idempotent Store persistence, `speaker`
+  roundtrip through the store, classification gating and Phase 5/6
+  coexistence.

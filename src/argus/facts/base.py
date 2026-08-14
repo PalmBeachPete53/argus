@@ -271,6 +271,13 @@ class Fact:
     would otherwise share the same key. ``effective_date`` is part of the
     identity because two facts differing only by their effective date are
     distinct facts (see ``facts/identity.py``).
+
+    ``speaker`` (Phase 7, optional) preserves the verbatim official speaker of a
+    statement when the source structure exposes one (e.g. a Q&A answer labelled
+    "President Christine Lagarde"). It is a provenance attribute, never
+    inferred: an unlabelled/collective statement carries ``speaker=None``. It is
+    deliberately excluded from ``fact_id`` (the identity discriminator is
+    ``identity_qualifier``).
     """
 
     publication_id: str
@@ -288,6 +295,7 @@ class Fact:
     extraction_version: str | None = None
     confidence: Confidence = Confidence.MEDIUM
     central_bank: str | None = None
+    speaker: str | None = None
     identity_qualifier: str = ""
     fact_id: str | None = None
     extracted_at: datetime | None = None
@@ -335,6 +343,7 @@ class Fact:
             "extraction_method": self.extraction_method,
             "extraction_version": self.extraction_version,
             "confidence": self.confidence.value if self.confidence else None,
+            "speaker": self.speaker,
             "identity_qualifier": self.identity_qualifier,
             "extracted_at": iso(self.extracted_at),
         }
@@ -358,6 +367,7 @@ class Fact:
             extraction_method=data.get("extraction_method") or METHOD_UNKNOWN,
             extraction_version=data.get("extraction_version"),
             confidence=Confidence(data["confidence"]) if data.get("confidence") else None,
+            speaker=data.get("speaker"),
             identity_qualifier=data.get("identity_qualifier") or "",
             extracted_at=from_iso(data.get("extracted_at")),
         )

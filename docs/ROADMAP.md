@@ -279,7 +279,24 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4.
 - **Critères de validation** : un propos individuel n'est jamais assimilé à une
   décision collective.
-- **Statut** : `NOT STARTED`.
+- **Statut** : `COMPLETE` — extracteur `EcbPressConferenceExtractor` (v7.0.0,
+  `src/argus/press_conferences/`). Implémenté : routage opening statement
+  (remarks, communication collective) vs questions/réponses (déclarations
+  individuelles), attribution **verbatim** du locuteur (`Fact.speaker`,
+  `President Christine Lagarde`, `Vice-President Luis de Guindos` ; jamais
+  inférée — une réponse non étiquetée et les remarks restent `None`), les
+  questions des journalistes ne sont jamais exploitées, identité de provenance
+  `identity_qualifier` `remarks:{n}` / `answer:{turn}:{n}` (un propos individuel
+  n'est jamais assimilé à une décision collective), catégories A–G
+  (guidance > policy > risk > financial > inflation > labour > growth),
+  évaluation des risques (orientations catégoriques upside/downside/balanced ou
+  texte verbatim), valeurs quantitatives avec période de référence, questions
+  non économiques ignorées (`non_economic_question_skipped`), gating strict par
+  classification (`press_conference`), persistance idempotente. 7 fixtures,
+  golden tests (valeurs exactes, provenance verbatim, attribution locuteur,
+  aucun fait inventé), extraction déterministe, persistance idempotente, gating
+  par classification et coexistence Phases 5/6/7 vérifiées ;
+  `docs/EXTRACTORS.md` documente la couverture réelle.
 
 ## Phase 8 — Minutes / Meeting Accounts
 
@@ -478,13 +495,13 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 ## Current Position
 
-- Argus se situe au début de la **Phase 7 (Press Conferences)**.
-- Les phases 0, 1, 2, 3, 4, 5 et 6 sont marquées `COMPLETE` après vérification
-  du repository (adapters, discovery, collector/fetcher, normalization,
-  classification, modèle `Fact`, extracteurs ECB `EcbDecisionExtractor` v5.2.0
-  et `EcbMonetaryPolicyStatementExtractor` v6.0.0, tables SQLite
-  correspondantes, tests).
-- **Prochaine phase autorisée : Phase 7 — Press Conferences** (statut
+- Argus se situe au début de la **Phase 8 (Minutes / Meeting Accounts)**.
+- Les phases 0 à 7 sont marquées `COMPLETE` après vérification du repository
+  (adapters, discovery, collector/fetcher, normalization, classification,
+  modèle `Fact`, extracteurs ECB `EcbDecisionExtractor` v5.2.0,
+  `EcbMonetaryPolicyStatementExtractor` v6.0.0 et
+  `EcbPressConferenceExtractor` v7.0.0, tables SQLite correspondantes, tests).
+- **Prochaine phase autorisée : Phase 8 — Minutes / Meeting Accounts** (statut
   `NOT STARTED`).
 
 ## Out of Scope
