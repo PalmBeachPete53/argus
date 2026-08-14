@@ -339,7 +339,36 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4.
 - **Critères de validation** : les révisions sont calculées entre publications
   comparables et proviennent de la provenance.
-- **Statut** : `NOT STARTED`.
+- **Statut** : `COMPLETE` — extracteur `EcbProjectionsExtractor` (v9.0.0,
+  `src/argus/projections/`). Implémenté : extraction **pilotée par les
+  tableaux** (`NormalizedDocument.tables`, `DocumentTable` : colonnes = années,
+  lignes = variables, cellules = valeurs) qui préserve l'intégrité
+  variable × année × valeur × unité du document réel (« ECB / Eurosystem staff
+  macroeconomic projections for the euro area »), variables cœur extraites
+  (`HICP` → `inflation`, `HICP excluding energy and food` → `core_inflation`,
+  `Real GDP` → `gdp`, prédicat `projection`, période `year:` depuis les
+  en-têtes de tableau, `source_location` `table`/`row`/`column`,
+  `extraction_method = table_extraction`, `confidence = HIGH`), unités
+  conservées explicitement (pourcentages annuels ; les **révisions** — bloc
+  « Revisions vs {Mois Année} » explicitement publié, en points de pourcentage —
+  en prédicat `revision` avec `unit = "pp"`, **jamais converties** en points de
+  base), **révisions jamais calculées** (aucune soustraction
+  `projections courantes − précédentes` : seules les révisions explicitement
+  publiées sont extraites, et les projections courantes/précédentes sont
+  distinguées par `identity_qualifier` `projections:{current|yyyy-mm}` /
+  `projections:revision_vs:{yyyy-mm}`), **garde de valeur** (une cellule nue
+  sans variable + année + unité n'est jamais un fait — `UNKNOWN ≠ PROJECTION` :
+  colonnes de scénarios sans années, lignes sans libellé, table « Technical
+  assumptions » et sections méthodologie/disclaimer/notice légale ignorées),
+  `Fact.speaker` toujours `None`, gating strict par classification
+  (`economic_projections`), persistance idempotente. 4 fixtures (`ecb_projections.html`,
+  `ecb_projections_revisions.html`, `ecb_projections_ambiguous.html`,
+  `ecb_projections_minimal.html`), golden tests (valeurs exactes par
+  variable/année, provenance verbatim table/ligne/colonne, unités, révisions
+  explicites vs non calculées, aucun fait inventé), extraction déterministe,
+  persistance idempotente (résultats vides compris), gating par classification
+  et coexistence Phases 5/6/7/8 vérifiées ; `docs/EXTRACTORS.md` documente la
+  couverture réelle.
 
 ## Phase 10 — Monetary Policy Reports
 
@@ -515,14 +544,14 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 ## Current Position
 
-- Argus se situe au début de la **Phase 9 (Economic Projections)**.
-- Les phases 0 à 8 sont marquées `COMPLETE` après vérification du repository
+- Argus se situe au début de la **Phase 10 (Monetary Policy Reports)**.
+- Les phases 0 à 9 sont marquées `COMPLETE` après vérification du repository
   (adapters, discovery, collector/fetcher, normalization, classification,
   modèle `Fact`, extracteurs ECB `EcbDecisionExtractor` v5.2.0,
   `EcbMonetaryPolicyStatementExtractor` v6.0.0,
-  `EcbPressConferenceExtractor` v7.0.0 et `EcbMinutesExtractor` v8.0.0,
-  tables SQLite correspondantes, tests).
-- **Prochaine phase autorisée : Phase 9 — Economic Projections** (statut
+  `EcbPressConferenceExtractor` v7.0.0, `EcbMinutesExtractor` v8.0.0 et
+  `EcbProjectionsExtractor` v9.0.0, tables SQLite correspondantes, tests).
+- **Prochaine phase autorisée : Phase 10 — Monetary Policy Reports** (statut
   `NOT STARTED`).
 
 ## Out of Scope

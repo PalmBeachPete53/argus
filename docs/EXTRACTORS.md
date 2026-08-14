@@ -721,3 +721,177 @@ asserts, per fixture:
 - deterministic extraction and idempotent Store persistence (including
   empty-result persistence and the `minutes` / `meeting_account` gating),
   classification gating and Phase 5/6/7 coexistence.
+
+# Type-Specific Extractors — Phase 9 (Economic Projections)
+
+## Pipeline
+
+```
+NormalizedDocument                          ← Phase 2
+    ↓  ProjectionsExtractor.extract(publication, document)
+ExtractionResult(publication_id, document_id, facts, warnings)
+    ↓  Store.rebuild_facts_for_document (delete + insert, idempotent)
+facts table
+```
+
+- a classified **ECB / Eurosystem staff macroeconomic projections** publication
+  (`economic_projections`)
+- its normalized document(s)
+- the ECB projections extractor producing structured **Facts**
+- an `ExtractionResult` handed to the existing `Store`
+
+## Extractor contract
+
+`src/argus/projections/base.py`:
+
+```python
+class ProjectionsExtractor(ABC):
+    bank: str
+    extraction_version: str
+    def extract(self, publication, document) -> ExtractionResult: ...
+```
+
+- One extractor per bank; the generic code only dispatches on `central_bank`.
+- Extractors are **pure**: they read the normalized document and return an
+  `ExtractionResult`; persistence is a caller concern.
+- `extract_projections(store, publication, *, document=None)` runs the right
+  extractor and persists facts through `Store.rebuild_facts_for_document`,
+  keeping re-runs idempotent (delete + insert, **including empty results**).
+- Extraction is **gated on classification**: a publication classified as
+  `economic_projections` (authoritatively in the `classifications` table) is
+  mined; anything else — and an absent classification — is refused
+  (`PROJECTIONS_PUBLICATION_TYPES = ("economic_projections",)`).
+
+## ECB projections extractor
+
+`src/argus/projections/ecb.py` — `EcbProjectionsExtractor` (`extraction_version
+9.0.0`). It answers *"what does the ECB staff project for each variable and
+each year?"* — deterministically, from the projection **tables**.
+
+### Table-driven extraction
+
+Projections are table documents. The extractor works on
+`NormalizedDocument.tables` (`DocumentTable`: `headers` / `rows`) and never
+re-parses a flattened text blob, preserving the **variable × year × value ×
+unit** integrity of the source table:
+
+- **columns** are years (`20xx` header cells);
+- **rows** are variables (the leading cell of each row);
+- a cell becomes a Fact **only** when it is identified by a recognised variable
+  (row label) + a year (column header) + an explicit unit.
+
+A bare number without that identity is never a Fact (`UNKNOWN ≠ PROJECTION`):
+header-less tables, unlabelled rows, scenario columns without years
+("Baseline / Adverse / Severe"), the **Technical assumptions** table (oil
+price, exchange rates, interest rates — assumptions, not projections) and the
+methodology / disclaimer / legal-notice sections all yield nothing.
+
+### Supported facts
+
+| subject | predicate | value | source |
+|---|---|---|---|
+| `inflation` (HICP) | `projection` | percentage (+ `period` `year:`) | projection table cell |
+| `core_inflation` (HICP excluding energy and food) | `projection` | percentage (+ `period` `year:`) | projection table cell |
+| `gdp` (Real GDP) | `projection` | percentage (+ `period` `year:`) | projection table cell |
+| `inflation` / `core_inflation` / `gdp` | `revision` | number, `unit = "pp"` (+ `period` `year:`) | explicit `Revisions vs {Month Year}` column block |
+
+Only the three core variables are mined; any other row (private consumption,
+unemployment, employment, compensation per employee, oil price, …) is ignored —
+reliability over coverage. The `revision` predicate is a Phase 9 extension of
+the controlled predicate vocabulary (documented here, per
+`docs/DATA_MODEL.md`).
+
+### Periods, units, revisions
+
+- **Periods come from the table headers** (`FactPeriod` `year:2026`, label =
+  the verbatim header cell) — never guessed from text position.
+- **Units are kept explicitly**: projection values are `percentage` (annual
+  percentage changes — a `2.1` cell stays `2.1%`, never a plain number);
+  revision deltas are `number` with `unit = "pp"` (percentage points — a `-0.2`
+  percentage-point revision is never turned into basis points or into `-0.2%`).
+- **Revisions are only ever the explicitly stated ones.** The ECB publishes
+  revisions *relative to the previous projections* as an explicit
+  `Revisions vs {Month Year}` column block; those stated deltas are kept as
+  `revision` facts. A revision is **never computed**: the
+  `current − previous` difference between two projection tables is never
+  calculated or invented.
+- **Current vs previous projections** are distinguished by `identity_qualifier`:
+  `projections:current` (table without an explicit as-of month),
+  `projections:{yyyy-mm}` (table whose caption names its month, e.g.
+  `projections:2026-03`), and `projections:revision_vs:{yyyy-mm}` for the
+  explicit revision blocks.
+
+### Provenance
+
+Every Fact carries `source_location` (`LocationKind.TABLE`, with `table` /
+`row` / `column` indexes), `source_text` = the exact verbatim row of the source
+table, `value.source_text` = the exact verbatim cell, `extraction_method =
+table_extraction`, `extraction_version = 9.0.0`, `confidence = HIGH`,
+`effective_date = None` and `speaker = None` (projections are collective staff
+output, never attributed to an individual).
+
+### Warnings (fixed order)
+
+`no_tables` (early return), `no_projection_table` (tables exist but none
+produced a Fact — e.g. only assumptions / scenario / unlabelled tables).
+
+### Not covered — Phase 9 boundaries
+
+- **No interpretation**: no hawkish/dovish, stance, market impact, forex or
+  trading logic — never.
+- **No computed analysis**: revision magnitude, acceleration, surprise,
+  deviation or `current − previous` deltas are never derived.
+- **No policy facts**: decisions, rates, guidance stay Phases 5–8, gated on
+  their own publication types.
+- **No LLM** (invariant 8).
+
+### Phase 5 / 6 / 7 / 8 / 9 boundary
+
+The five extractors are disjoint by **publication type** (classification
+gating): decisions, statements, press conferences, minutes and economic
+projections are never cross-mined. `get_extractor` dispatches on
+`central_bank`, and each extractor refuses publications whose authoritative
+classification is not its own type.
+
+## Golden tests
+
+`tests/fixtures/documents/ecb_projections*.html` (modeled on the real ECB /
+Eurosystem staff macroeconomic projections documents: title, overview, the
+"Growth and inflation projections" summary table with year columns and
+`Revisions vs {Month Year}` column blocks, the "Technical assumptions" box,
+notes and legal notice):
+
+- `ecb_projections.html` — current projections for HICP / core HICP / Real GDP
+  over 2025–2028 (12 facts, `projections:current`);
+- `ecb_projections_revisions.html` — a "March 2026 projections" table with an
+  explicit `Revisions vs December 2025` block plus a reproduced "December 2025
+  projections" table (18 projection + 9 explicit revision facts; current vs
+  previous distinguished by qualifier, revisions proven never computed);
+- `ecb_projections_ambiguous.html` — scenario columns without years, unlabelled
+  rows, a technical-assumptions table and non-projection sections → 0 facts +
+  `no_projection_table`;
+- `ecb_projections_minimal.html` — a single clean HICP table (2 facts).
+
+`tests/test_projections.py` runs the normalizer → extractor → store slice and
+asserts, per fixture:
+
+- the exact expected facts (per-variable value sets with year periods, and the
+  explicit revision deltas) with warnings;
+- table structure (row × column × year × value × unit integrity, `table` /
+  `row` / `column` provenance);
+- variable identity (`inflation` / `core_inflation` / `gdp`), periods from
+  headers, units preserved explicitly (percentage vs `pp`), footnote markers
+  stripped without inventing values;
+- the value gate: a bare cell without variable + year + unit identity is never
+  a Fact — scenario columns, unlabelled rows and technical assumptions produce
+  nothing;
+- revisions only from explicit column blocks, never computed as
+  `current − previous`, current vs previous distinguished by
+  `identity_qualifier`;
+- no invented facts — no Phase 5/6/7/8 subjects, no interpretation, `speaker`
+  always `None`;
+- verbatim provenance: each `fact.source_text` is a row of the referenced
+  table, `fact.value.source_text` is the exact cell;
+- deterministic extraction and idempotent Store persistence (including
+  empty-result persistence and the `economic_projections` gating),
+  classification gating and Phase 5/6/7/8 coexistence.
