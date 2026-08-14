@@ -128,6 +128,7 @@ PREDICATE_VALUE = "value"
 # fact (``UNKNOWN ≠ ECONOMIC``).
 # ---------------------------------------------------------------------------
 CAT_IGNORE = "ignore"
+CAT_UNKNOWN = "unknown"
 CAT_GENERAL = "general"
 CAT_POLICY = "policy"
 CAT_RISK = "risk"
@@ -137,28 +138,39 @@ CAT_LABOUR = "labour"
 CAT_GROWTH = "growth"
 CAT_FISCAL = "fiscal"
 
-_IGNORE_HEADING_MARKERS = (
+# Non-economic headings are matched EXACTLY on the normalized heading, exactly
+# like the economic headings: a heading is ignored only when it IS one of these
+# controlled headings. Substring coincidence never determines identity —
+# "annexation of …" is never "annex", "legal framework …" is never "legal
+# notice", "statistical outlook" is never "statistical annex". Every supported
+# variant must be listed explicitly.
+_IGNORE_HEADINGS = frozenset({
+    # report masthead / title
+    "economic bulletin",
+    "monetary policy report",
+    # front matter
     "foreword",
     "editorial",
+    "contents",
+    "acknowledgements",
+    "abbreviations",
+    # legal & disclaimers
     "legal notice",
     "disclaimer",
     "copyright",
     "imprint",
-    "statistical annex",
-    "statistics",
-    "annex",
-    "appendix",
+    # back matter
     "glossary",
     "references",
     "bibliography",
-    "abbreviations",
-    "acknowledgements",
-    "contents",
+    "appendix",
+    "technical appendix",
+    "statistics",
+    "statistical annex",
+    "annex",
     "methodology",
-    "economic bulletin",
-    "monetary policy report",
     "note",
-)
+})
 # Headings are matched EXACTLY on the normalized heading (lowercased,
 # de-numbered, de-footnoted, leading "the" and trailing punctuation removed).
 # Substring routing is intentionally gone: "Non-economic developments" must
@@ -199,10 +211,17 @@ _TRAILING_PUNCT = re.compile(r"[\s.:;,\-–—]+$")
 
 
 def _section_category(heading: str) -> str:
-    """Route a section by its normalized heading: ``CAT_IGNORE`` or a mined
-    category label. Only the controlled exact headings in the sets above are
-    mined; the label does not constrain the per-sentence classification
-    (content-first), it only marks the section as mined."""
+    """Route a section by its normalized heading.
+
+    Returns ``CAT_IGNORE`` (a known non-economic controlled heading or a
+    heading-less section / analytical box), ``CAT_UNKNOWN`` (a heading that is
+    neither a controlled non-economic heading nor a controlled economic
+    heading — ``UNKNOWN ≠ ECONOMIC``), or a mined economic category label.
+    Only the controlled exact headings in the sets above are ever categorized;
+    substring coincidence never determines identity. The label does not
+    constrain the per-sentence classification (content-first), it only marks
+    the section as mined.
+    """
     t = normalize_title(heading or "")
     if not t:
         return CAT_IGNORE
@@ -212,7 +231,7 @@ def _section_category(heading: str) -> str:
     t = _FOOTNOTE_MARK.sub("", t).strip()
     t = _LEADING_THE.sub("", t).strip()
     t = _TRAILING_PUNCT.sub("", t).strip()
-    if any(marker in t for marker in _IGNORE_HEADING_MARKERS):
+    if t in _IGNORE_HEADINGS:
         return CAT_IGNORE
     if t in _POLICY_HEADINGS:
         return CAT_POLICY
@@ -230,7 +249,7 @@ def _section_category(heading: str) -> str:
         return CAT_FISCAL
     if t in _GENERAL_HEADINGS:
         return CAT_GENERAL
-    return CAT_IGNORE
+    return CAT_UNKNOWN
 
 
 # ---------------------------------------------------------------------------
@@ -561,7 +580,7 @@ class EcbReportsExtractor(ReportsExtractor):
         state = _RunState()
 
         for index, section in enumerate(document.sections):
-            if _section_category(section.heading or "") == CAT_IGNORE:
+            if _section_category(section.heading or "") in (CAT_IGNORE, CAT_UNKNOWN):
                 continue
             state.economic_processed = True
             self._process_section(result, document, index, section.text or "", counters, seen, state)

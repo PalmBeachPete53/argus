@@ -997,27 +997,33 @@ is never mined (`UNKNOWN ≠ ECONOMIC`).
 
 ### Conservative section routing — exact controlled headings
 
-A section is mined only when its normalized heading is one of the **controlled
-exact headings** below; a **known non-economic heading and an unknown heading
-are both ignored** ("absence of proof → absence of extraction"). Known
-non-economic / non-mined headings include the report title (`economic
-bulletin`, `monetary policy report`), `foreword`, `editorial`, `legal notice`,
-`disclaimer`, `copyright`, `imprint`, `statistical annex`, `statistics`,
-`annex`, `appendix`, `glossary`, `references`, `bibliography`,
-`abbreviations`, `acknowledgements`, `contents`, `methodology` and `note`.
-Analytical **boxes** ("Box 1 — …") are deliberately never mined: they are
-interpretive essays.
+Section routing uses **exact / controlled normalized labels for both economic
+and ignored sections** — there is no substring matching anywhere in the
+routing. A section is mined only when its normalized heading is one of the
+**controlled exact economic headings** below; every other heading is either a
+**known non-economic heading** (exact membership in the controlled ignore
+vocabulary → IGNORE) or an **unknown heading** (UNKNOWN), and neither is mined
+("absence of proof → absence of extraction"; `UNKNOWN ≠ ECONOMIC`).
+
+Ignored headings (exact normalized strings; every supported variant is listed
+explicitly): the report title (`economic bulletin`, `monetary policy report`),
+`foreword`, `editorial`, `contents`, `acknowledgements`, `abbreviations`,
+`legal notice`, `disclaimer`, `copyright`, `imprint`, `glossary`,
+`references`, `bibliography`, `appendix`, `technical appendix`, `statistics`,
+`statistical annex`, `annex`, `methodology` and `note`. Analytical **boxes**
+("Box 1 — …") are deliberately never mined: they are interpretive essays.
 
 Heading normalization is **controlled**: lowercase, collapsed whitespace,
 leading numbering ("2 Economic activity 1)"), footnote markers, a leading "the"
 and trailing punctuation are stripped — nothing else. Matching is then
-**exact**: a marker inside a heading is never a match. "Risk management" is
-never read as `risk`, "Non-economic developments" never as `economic`,
-"Fiscal institutions" never as `fiscal`, "Employment policy" never as
-`employment`, "Output developments" never as `output`, "Financial
-institutions" never as `financial`, "Core developments" never as `core`, and
-"Economic history" never as `economic` (all regression-tested near-misses,
-each yielding 0 facts).
+**exact**: a word or marker inside a heading is never a match. "Risk
+management" is never read as `risk`, "Non-economic developments" never as
+`economic`, "Fiscal institutions" never as `fiscal`, "Employment policy" never
+as `employment`, "Output developments" never as `output`, "Financial
+institutions" never as `financial`, "Core developments" never as `core`,
+"Economic history" never as `economic`, and "annexation of …" / "legal
+framework for monetary policy" are never `annex` / `legal notice` (all
+regression-tested near-misses, each yielding 0 facts).
 
 Mined economic headings (exact normalized strings):
 
@@ -1259,6 +1265,15 @@ asserts, per fixture:
   leading "the") and context-specific content anchors (per-category near-miss
   sentences yield 0 facts while the contextual positives are mined with the
   correct subject, predicate, value and source_text);
+- Phase 10 final hardening: the **IGNORE routing is exact too** — every
+  controlled non-economic heading (including normalized variants such as
+  "3. LEGAL NOTICE.") yields 0 facts, headings that merely share a word with
+  an ignore heading ("Legal framework for monetary policy", "Annexation of
+  financial conditions", "Statistical outlook") are never classified by
+  substring — they fall to UNKNOWN (0 facts, `UNKNOWN ≠ ECONOMIC`), and
+  economic headings that share words with an ignore heading ("Monetary policy
+  developments" vs `monetary policy report`, "Economic activity" vs `economic
+  bulletin`) are still mined;
 - the value gate: explicit claim verbs only, share units ("% of GDP") never
   percentages, basis points never percentages, forecasts without a period
   ignored, periods from wording (year / month / quarter);

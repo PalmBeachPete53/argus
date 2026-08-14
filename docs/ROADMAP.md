@@ -379,9 +379,9 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4.
 - **Critères de validation** : les affirmations contextuelles sont reliées à
   leur source.
-- **Statut** : `IN PROGRESS` — **durcissement Phase 10** (validation finale en
-  cours) de l'extracteur `EcbReportsExtractor` (v10.0.0,
-  `src/argus/reports/`). Implémenté : routage **conservateur** par titre de
+- **Statut** : `COMPLETE` — extracteur `EcbReportsExtractor` (v10.0.0,
+  `src/argus/reports/`), validé (hardening final inclus). Implémenté :
+  routage **conservateur** par titre de
   section (titres économiques connus extraits — activité économique, prix et
   coûts, développements financiers, développements budgétaires, développements
   de politique monétaire, évaluation des risques, overview — ; titre du
@@ -410,11 +410,15 @@ L'architecture doit rester extensible à d'autres banques centrales.
   institutionnelle collective), `identity_qualifier`
   `report:{subject}:{ordinal}`, gating strict par classification
   (`monetary_policy_report`), persistance idempotente (résultats vides
-  compris). **Durcissement en cours** : routage des titres par correspondance
-  **exacte** sur les titres contrôlés (plus aucun routage par sous-chaîne —
-  « Risk management », « Non-economic developments », « Fiscal institutions »,
+  compris). **Hardening** : routage des titres par correspondance
+  **exacte** sur les titres contrôlés, pour les sections **économiques et
+  ignorées** (plus aucun routage par sous-chaîne — « Risk management »,
+  « Non-economic developments », « Fiscal institutions »,
   « Employment policy », « Output developments », « Financial institutions »,
-  « Core developments », « Economic history » → 0 fait, testé) et ancres de
+  « Core developments », « Economic history », « Legal framework for monetary
+  policy », « Annexation of financial conditions » → 0 fait, testé ; les
+  titres non-économiques connus forment un vocabulaire contrôlé exact
+  `_IGNORE_HEADINGS`, les titres hors vocabulaire sont `UNKNOWN`) et ancres de
   contenu **contextuelles** (multi-mots requis : `core inflation`/`core hicp`,
   `real output`/`output growth`/`output gap(s)`/`potential output`,
   `(economic) activity`, `bank lending`/`lending to …`, `yield|credit|
@@ -427,7 +431,8 @@ L'architecture doit rester extensible à d'autres banques centrales.
   `ecb_report_risks.html`, `ecb_report_unknown.html`,
   `ecb_report_minimal.html`), golden tests (valeurs exactes, provenance
   verbatim section/tableau, routage, garde de valeur, déduplication, aucun
-  fait inventé), tests near-miss (titres et contenu), extraction déterministe,
+  fait inventé), tests near-miss (titres et contenu, matching IGNORE exact),
+  extraction déterministe,
   persistance idempotente, gating par
   classification et coexistence Phases 5/6/7/8/9 vérifiées ;
   `docs/EXTRACTORS.md` documente la couverture réelle.
@@ -595,19 +600,18 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 ## Current Position
 
-- Argus est au **durcissement de la Phase 10 (Monetary Policy Reports)** —
-  validation finale (routage exact des titres + ancres de contenu
-  contextuelles) en cours ; la Phase 10 n'est pas marquée `COMPLETE` avant
-  cette validation.
-- Les phases 0 à 9 sont marquées `COMPLETE` après vérification du repository
+- Argus se situe au début de la **Phase 11 (Speeches & Interviews)**.
+- Les phases 0 à 10 sont marquées `COMPLETE` après vérification du repository
   (adapters, discovery, collector/fetcher, normalization, classification,
   modèle `Fact`, extracteurs ECB `EcbDecisionExtractor` v5.2.0,
   `EcbMonetaryPolicyStatementExtractor` v6.0.0,
-  `EcbPressConferenceExtractor` v7.0.0, `EcbMinutesExtractor` v8.0.0 et
-  `EcbProjectionsExtractor` v9.0.0, tables
-  SQLite correspondantes, tests).
+  `EcbPressConferenceExtractor` v7.0.0, `EcbMinutesExtractor` v8.0.0,
+  `EcbProjectionsExtractor` v9.0.0 et `EcbReportsExtractor` v10.0.0 —
+  hardening final validé : matching exact des titres économiques **et**
+  ignorés, ancres de contenu contextuelles, 440 tests verts et
+  déterministes —, tables SQLite correspondantes, tests).
 - **Prochaine phase autorisée : Phase 11 — Speeches & Interviews** (statut
-  `NOT STARTED`), seulement après validation finale de la Phase 10.
+  `NOT STARTED`, `NEXT`).
 
 ## Out of Scope
 

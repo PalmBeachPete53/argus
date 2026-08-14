@@ -50,6 +50,7 @@ from argus.reports import (
     extract_report,
     extract_report_batch,
 )
+from argus.reports.ecb import CAT_IGNORE, CAT_GROWTH, CAT_POLICY, CAT_UNKNOWN, _section_category
 from argus.statements import extract_statement
 from argus.store import Store
 
@@ -439,6 +440,95 @@ def test_heading_routing_is_exact_identity_not_substring():
     )
     assert ignored.facts == []
     assert ignored.warnings == ["no_economic_sections", "no_risk_assessment", "no_forward_guidance"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 10 final hardening — exact IGNORE heading matching (controlled
+# vocabulary, never substring coincidence)
+# ---------------------------------------------------------------------------
+
+
+def test_known_ignored_headings_yield_zero_facts():
+    # every controlled non-economic heading is a known IGNORE section: 0 facts
+    # and the no_economic_sections warning, even under economic-looking content
+    for heading in (
+        "Legal notice", "Foreword", "Editorial", "Disclaimer", "Copyright",
+        "Imprint", "Statistical annex", "Statistics", "Annex", "Appendix",
+        "Technical appendix", "Glossary", "References", "Bibliography",
+        "Abbreviations", "Acknowledgements", "Contents", "Methodology",
+        "Economic bulletin", "Monetary policy report", "Note",
+    ):
+        result = EcbReportsExtractor().extract(
+            reports_publication(),
+            _doc_with_sections([_section(heading, "Inflation is projected to average 2.4% in 2026.")]),
+        )
+        assert result.facts == [], heading
+        assert "no_economic_sections" in result.warnings, heading
+
+
+def test_normalized_ignored_headings_yield_zero_facts():
+    # the existing normalization (case, numbering, leading "the", trailing
+    # punctuation) is preserved before the exact membership check
+    for heading in ("3. LEGAL NOTICE.", "Foreword.", "The Disclaimer", "Statistical Annex"):
+        result = EcbReportsExtractor().extract(
+            reports_publication(),
+            _doc_with_sections([_section(heading, "Inflation is projected to average 2.4% in 2026.")]),
+        )
+        assert result.facts == [], heading
+        assert "no_economic_sections" in result.warnings, heading
+
+
+def test_legitimate_ignored_headings_remain_ignored():
+    for heading in ("Legal notice", "Statistical annex", "Copyright", "Imprint", "Disclaimer"):
+        result = EcbReportsExtractor().extract(
+            reports_publication(),
+            _doc_with_sections([_section(heading, "Inflation is projected to average 2.4% in 2026.")]),
+        )
+        assert result.facts == [], heading
+
+
+def test_ignore_identity_is_exact_never_substring():
+    # "Legal framework for monetary policy" merely shares words with the
+    # controlled ignore heading "legal notice"; substring coincidence must
+    # never determine identity — it routes through the normal exact rules
+    # (UNKNOWN), never as a known non-economic heading.
+    assert _section_category("Legal framework for monetary policy") == CAT_UNKNOWN
+    assert _section_category("Legal framework for monetary policy") != CAT_IGNORE
+    # "monetary policy developments" shares "monetary policy" with the ignore
+    # heading "monetary policy report"; exact identity keeps it a policy
+    # section, never an ignored one.
+    assert _section_category("Monetary policy developments") == CAT_POLICY
+    # "economic activity" shares "economic" with the ignore heading "economic
+    # bulletin"; exact identity keeps it a growth section.
+    assert _section_category("Economic activity") == CAT_GROWTH
+
+
+def test_ignore_routing_never_uses_substring_for_annex_variants():
+    # the exact heading "Statistical annex" (and "Annex" itself) are ignored …
+    assert _section_category("Statistical annex") == CAT_IGNORE
+    assert _section_category("Annex") == CAT_IGNORE
+    # … but headings that merely contain "statistical" or "annex" are never
+    # those headings — they fall through to the normal exact rules (UNKNOWN).
+    assert _section_category("Statistical outlook") == CAT_UNKNOWN
+    assert _section_category("Annexation of financial conditions") == CAT_UNKNOWN
+    result = EcbReportsExtractor().extract(
+        reports_publication(),
+        _doc_with_sections(
+            [_section("Annexation of financial conditions", "Inflation is projected to average 2.4% in 2026.")]
+        ),
+    )
+    assert result.facts == []
+    assert "no_economic_sections" in result.warnings
+
+
+def test_unknown_heading_with_economic_content_yields_zero_facts():
+    for heading in ("Some future section", "Additional information", "Legal framework for monetary policy"):
+        for text in ("Inflation is expected to remain elevated.", "GDP growth increased."):
+            result = EcbReportsExtractor().extract(
+                reports_publication(), _doc_with_sections([_section(heading, text)])
+            )
+            assert result.facts == [], (heading, text)
+            assert "no_economic_sections" in result.warnings, (heading, text)
 
 
 # ---------------------------------------------------------------------------
