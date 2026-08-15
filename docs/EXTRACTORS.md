@@ -1621,6 +1621,20 @@ class SpeechExtractor(ABC):
 11.0.0`). It answers *"what does this official explicitly state about the
 economy, its risks and about monetary policy?"*.
 
+### Multi-bank Speech family
+
+ECB is the **reference implementation**. Fed, BoE, BoJ, SNB, BoC, RBA, RBNZ,
+Norges and Riksbank each have their own speech extractor
+(`src/argus/speeches/{fed,boe,boj,snb,boc,rba,rbnz,norges,riksbank}.py`)
+subclassing the shared structural pipeline `SpeechExtractorBase`
+(`_pipeline.py`) with bank-specific headings, guidance/policy vocabulary and
+speaker conventions; all share the structural helpers in `_shared.py` and the
+canonical Fact contract. Each bank is verified against its own official speech
+source (`COVERAGE_SOURCE`); classification that cannot be done reliably by the
+generic rule (e.g. singular `/speech/`, `koen`, `tal`) relies on the explicit
+title signal and is documented, not forced. See `docs/SPEECHES.md` and
+`tests/test_speeches_multibank.py`.
+
 ### Speaker attribution — explicit only
 
 A speech is an individual communication, so the speaker is preserved verbatim

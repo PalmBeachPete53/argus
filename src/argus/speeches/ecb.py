@@ -76,50 +76,36 @@ from __future__ import annotations
 
 import re
 
-from ..classification.base import Confidence
 from ..documents.base import NormalizedDocument
-from ..facts import (
-    METHOD_REGEX,
-    ExtractionResult,
-    Fact,
-    FactLocation,
-    FactPeriod,
-    FactValue,
-    LocationKind,
-    PeriodKind,
-    ValueKind,
-    categorical,
-    percentage,
+from ..facts import ExtractionResult
+from ._shared import (
+    PREDICATE_ASSESSMENT,
+    PREDICATE_STATEMENT,
+    SUBJECT_CORE_INFLATION,
+    SUBJECT_FINANCIAL_CONDITIONS,
+    SUBJECT_GDP,
+    SUBJECT_GROWTH,
+    SUBJECT_GROWTH_RISK,
+    SUBJECT_INFLATION,
+    SUBJECT_INFLATION_EXPECTATIONS,
+    SUBJECT_INFLATION_RISK,
+    SUBJECT_LABOUR_MARKET,
+    SUBJECT_MONETARY_POLICY,
+    SUBJECT_POLICY_GUIDANCE,
+    SUBJECT_RISK,
+    SUBJECT_UNEMPLOYMENT,
+    SUBJECT_WAGES,
+    Reporter,
+    clean_heading,
+    is_box,
+    is_economic_assertion,
+    is_quoted_other,
+    speaker_from_document,
+    split_sentences,
 )
-from ..normalize import normalize_title
 from .base import SpeechExtractor
 
 EXTRACTION_VERSION = "11.0.0"
-
-# ---------------------------------------------------------------------------
-# Canonical Phase 11 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
-# Reuses the Phase 6/7/8/10 subjects verbatim; no subject is added in Phase 11
-# (speeches reuse the shared economic vocabulary, and fiscal analysis — Phase
-# 10 — is deliberately out of scope).
-# ---------------------------------------------------------------------------
-SUBJECT_INFLATION = "inflation"
-SUBJECT_CORE_INFLATION = "core_inflation"
-SUBJECT_INFLATION_EXPECTATIONS = "inflation_expectations"
-SUBJECT_GROWTH = "growth"
-SUBJECT_GDP = "gdp"
-SUBJECT_LABOUR_MARKET = "labour_market"
-SUBJECT_UNEMPLOYMENT = "unemployment"
-SUBJECT_WAGES = "wages"
-SUBJECT_FINANCIAL_CONDITIONS = "financial_conditions"
-SUBJECT_RISK = "risk"
-SUBJECT_INFLATION_RISK = "inflation_risk"
-SUBJECT_GROWTH_RISK = "growth_risk"
-SUBJECT_MONETARY_POLICY = "monetary_policy"
-SUBJECT_POLICY_GUIDANCE = "policy_guidance"
-
-PREDICATE_ASSESSMENT = "assessment"
-PREDICATE_STATEMENT = "statement"
-PREDICATE_VALUE = "value"
 
 # ---------------------------------------------------------------------------
 # Section routing — CONSERVATIVE (Phase 11). A heading is mined in full only
@@ -177,13 +163,6 @@ _ECONOMIC_HEADINGS = frozenset({
     "summary", "executive summary", "world economy", "global economy", "economic",
 })
 
-_FOOTNOTE_MARK = re.compile(r"\s*(?:\(\d+\)|\[\d+\]|\d+\)|[*†‡]+)\s*$")
-_BOX_PREFIX = re.compile(r"^\s*box\b", re.IGNORECASE)
-_LEADING_NUM = re.compile(r"^\s*(?:[0-9]+(?:\.[0-9]+)*)\s*[-–—.:]?\s*")
-_LEADING_THE = re.compile(r"^the\s+")
-_TRAILING_PUNCT = re.compile(r"[\s.:;,\-–—]+$")
-
-
 def _section_category(heading: str) -> str:
     """Route a section by its normalized heading.
 
@@ -191,17 +170,12 @@ def _section_category(heading: str) -> str:
     heading-less section / analytical box), ``CAT_ECONOMIC`` (a known economic
     heading, mined in full), or ``CAT_UNKNOWN`` (a heading that is neither —
     strictly mined, explicit assertions only). Exact membership only; substring
-    coincidence never determines identity.
+    coincidence never determines identity. Heading normalization is the shared
+    structural `clean_heading`; the heading *vocabulary* is ECB-specific.
     """
-    t = normalize_title(heading or "")
-    if not t:
-        return CAT_IGNORE
-    if _BOX_PREFIX.match(t):
-        return CAT_IGNORE  # analytical boxes are never mined
-    t = _LEADING_NUM.sub("", t).strip()
-    t = _FOOTNOTE_MARK.sub("", t).strip()
-    t = _LEADING_THE.sub("", t).strip()
-    t = _TRAILING_PUNCT.sub("", t).strip()
+    t = clean_heading(heading or "")
+    if not t or is_box(t):
+        return CAT_IGNORE  # heading-less sections and analytical boxes are never mined
     if t in _IGNORE_HEADINGS:
         return CAT_IGNORE
     if t in _ECONOMIC_HEADINGS:
@@ -210,64 +184,7 @@ def _section_category(heading: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Speaker attribution — explicit only. A ``Speaker: <label>`` line in the body
-# wins over an explicit author field in the document metadata; when neither is
-# present the speaker is ``None`` (never inferred). The label is preserved
-# verbatim in ``Fact.speaker``.
-# ---------------------------------------------------------------------------
-_SPEAKER_LINE = re.compile(r"^\s*speaker\s*[:\-–]\s*(?P<speaker>.+?)\s*$", re.IGNORECASE)
-
-_META_AUTHOR_KEYS = ("author", "dc.creator")
-
-
-def _speaker_from_document(document: NormalizedDocument) -> str | None:
-    for section in document.sections:
-        for line in (section.text or "").split("\n"):
-            match = _SPEAKER_LINE.match(line)
-            if match is not None:
-                label = match.group("speaker").strip().rstrip(".:")
-                if label:
-                    return label
-    meta = (document.metadata or {}).get("html_meta", {})
-    for key in _META_AUTHOR_KEYS:
-        value = meta.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Quoted content — a sentence framed as a quotation of a person other than the
-# speech's own speaker is never mined (never attributed to the speaker).
-# ---------------------------------------------------------------------------
-_NAME = r"[A-ZÀ-Þ][A-Za-zÀ-ÿ]+(?:\s+[A-ZÀ-Þ][A-Za-zÀ-ÿ]+)*"
-_QUOTE_VERBS = r"said|wrote|noted|observed|argued|stated|quoted|put\s+it|pointed\s+out"
-
-# A person's name is matched case-sensitively (a name never swallows lowercase
-# auxiliary or verb words, even under case-insensitive verb matching).
-_QUOTE_AS = re.compile(rf"\b(?i:as)\s+(?P<name>{_NAME})\s+(?i:(?:has\s+)?(?:once\s+)?(?:{_QUOTE_VERBS}))\b")
-_QUOTE_ACCORDING = re.compile(rf"\b(?i:according)\s+to\s+(?P<name>{_NAME})\b")
-_QUOTE_VERB_THAT = re.compile(rf"\b(?P<name>{_NAME})\s+(?i:(?:once\s+)?(?:{_QUOTE_VERBS}))\s+that\b")
-_QUOTE_QUOTING = re.compile(rf"\b(?i:(?:quoting|quoted))\s+(?P<name>{_NAME})\b")
-_QUOTE_PATTERNS = (_QUOTE_AS, _QUOTE_ACCORDING, _QUOTE_VERB_THAT, _QUOTE_QUOTING)
-
-_SELF_REFERENCE = {"i", "we"}
-
-
-def _is_quoted_other(sentence: str, speaker_label: str | None) -> bool:
-    """True when ``sentence`` is framed as a quotation of a person other than
-    the speech's speaker. The speaker quoting their own past words ("As I
-    said …", "As Christine Lagarde said …") is never treated as a quotation of
-    another person."""
-    for pattern in _QUOTE_PATTERNS:
-        for match in pattern.finditer(sentence):
-            name = match.group("name").strip().lower()
-            if name in _SELF_REFERENCE:
-                continue
-            if speaker_label and name in speaker_label.lower():
-                continue
-            return True
-    return False
+# Category anchors, content-first. Fixed precedence: guidance (G) > policy
 
 
 # ---------------------------------------------------------------------------
@@ -421,193 +338,6 @@ _GROWTH_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\b(?:industrial|manufacturing|energy|oil|steel|automotive)\s+production\b", re.IGNORECASE),
 )
 
-# ---------------------------------------------------------------------------
-# Qualitative fact gate — Phase 11 hardening. A qualitative assessment is only
-# emitted when the sentence states an explicit economic assertion. Economic
-# vocabulary alone ("the economy", "credit", "investment", "growth") is never
-# enough: an assertion signal (a change/state verb, a "remains/continues" form,
-# or an expected/projected-to forecast) must be present. The gate is layered so
-# that the presence of an anchor + a generic assertion verb is never sufficient:
-#
-#   1. _ASSERTION_SIGNAL   — a change/state verb or forecast construction exists;
-#   2. _PLATITUDE          — copular rhetoric ("X is important", "X remains a
-#                            priority", "X continues to be central to our
-#                            mandate", "X is an important part of our mandate")
-#                            is always rejected;
-#   3. _TRANSITIVE_ABUSE   — a change verb applied to a possessive object
-#                            ("improved our understanding", "expanded our role")
-#                            describes an institutional action, not an economic
-#                            state;
-#   4. _POSSESSOR_ABUSE    — a change verb whose subject is an "of <anchor>"
-#                            possessor ("our understanding of the economy
-#                            improved") describes the possessor, not the economy.
-#
-# The assertion verbs themselves are not removed: remain/continue/ease/tighten/
-# narrow/widen/pick up stay valid signals when they qualify the economic subject
-# directly ("Inflation remains elevated", "Credit conditions remain tight",
-# "Growth picked up"). The gate only requires that the predicate actually
-# describes the economic subject, and rejects rhetorical-only constructions.
-# ---------------------------------------------------------------------------
-_ASSERTION_SIGNAL = re.compile(
-    r"\b(?:"
-    r"increas(?:e|es|ed|ing)"
-    r"|decreas(?:e|es|ed|ing)"
-    r"|declin(?:e|es|ed|ing)"
-    r"|ris(?:e|es|ing)|rose|risen"
-    r"|fall(?:s|ing|en)?|fell|fallen"
-    r"|grow(?:s|ing)?|grew|grown"
-    r"|strengthen(?:s|ed|ing)?"
-    r"|weaken(?:s|ed|ing)?"
-    r"|accelerat(?:e|es|ed|ing)"
-    r"|decelerat(?:e|es|ed|ing)"
-    r"|moderat(?:e|es|ed|ing)"
-    r"|improv(?:e|es|ed|ing)"
-    r"|deteriorat(?:e|es|ed|ing)"
-    r"|expand(?:s|ed|ing)?"
-    r"|contract(?:s|ed|ing)?"
-    r"|recover(?:s|ed|ing)?"
-    r"|rebound(?:s|ed|ing)?"
-    r"|slow(?:s|ed|ing)?"
-    r"|ease(?:s|d|ing)?"
-    r"|tighten(?:s|ed|ing)?"
-    r"|loosen(?:s|ed|ing)?"
-    r"|narrow(?:s|ed|ing)?"
-    r"|widen(?:s|ed|ing)?"
-    r"|surge(?:s|d|ing)?"
-    r"|dropped|drop(?:s|ping)?"
-    r"|gain(?:s|ed|ing)?"
-    r"|lost|lose(?:s|ing)?"
-    r"|normalis(?:e|es|ed|ing)|normaliz(?:e|es|ed|ing)"
-    r"|broaden(?:s|ed|ing)?"
-    r"|pick(?:s|ed)?\s+up"
-    r"|remain(?:s|ed|ing)?|stay(?:s|ed|ing)?|continue(?:s|d|ing)?"
-    r"|(?:is|are|was|were|will|would|has|have)\s+(?:expected|projected|estimated|forecast|likely)\s+to"
-    r"|will\s+(?:remain|continue)"
-    r")\b",
-    re.IGNORECASE,
-)
-
-_PLATITUDE = re.compile(
-    r"\b(?:"
-    r"(?:(?:is|are|was|were|be|been|being|remains?|remained|stays?|stayed|"
-    r"continue(?:s|d)?\s+to\s+be|remain(?:s|ed)?\s+to\s+be|stay(?:s|ed)?\s+to\s+be)\s+)"
-    r"(?:"
-    r"(?:important|essential|central|critical|crucial|vital|fundamental|necessary|key|strategic|significant|relevant|primary)"
-    r"|(?:a|an|the|our)\s+(?:(?:key|crucial|central|important|vital|essential|strategic|fundamental|significant|integral|core|primary)\s+)?"
-    r"(?:priority|challenge|matter|goal|mandate|objective|concern|issue|aim|focus|task|responsibility|consideration|part)"
-    r"|part\s+of\b"
-    r"|at\s+the\s+(?:heart|centre|center|core)\s+of"
-    r"|(?:central|important|essential|crucial|vital|key|fundamental)\s+to"
-    r")"
-    r"|matter(?:s|ed)?"
-    r")\b",
-    re.IGNORECASE,
-)
-
-# A change/state verb followed by a possessive determiner + noun is transitive:
-# "improved our understanding", "expanded our role", "tightened our procedures".
-# The verb acts on an institutional object rather than describing the economic
-# subject, so it is never an economic assertion.
-_TRANSITIVE_ABUSE = re.compile(
-    r"\b(?:"
-    r"improv(?:ed|es|e|ing)|recover(?:ed|ing)?|expand(?:ed|ing)?|narrow(?:ed|ing)?|widen(?:ed|ing)?|"
-    r"ease(?:d|ing)?|tighten(?:ed|ing)?|loosen(?:ed|ing)?|strengthen(?:ed|ing)?|weaken(?:ed|ing)?|"
-    r"accelerat(?:ed|es|e|ing)|decelerat(?:ed|es|e|ing)|increas(?:ed|es|e|ing)|decreas(?:ed|es|e|ing)|"
-    r"declin(?:ed|es|e|ing)|deteriorat(?:ed|es|e|ing)|slow(?:ed|ing)?|rebound(?:ed|ing)?|surge(?:d|s|ing)?|"
-    r"normalis(?:ed|ing|es|e)?|normaliz(?:ed|ing|es|e)?|broaden(?:ed|ing)?|pick(?:s|ed)?\s+up"
-    r")\s+(?:our|their|its|his|her)\s+\w+",
-    re.IGNORECASE,
-)
-
-# A change/state verb whose subject is an "of <anchor>" possessor describes the
-# possessor, not the economy: "our understanding of the economy improved". The
-# verb must immediately follow the possessor noun.
-_POSSESSOR_ABUSE = re.compile(
-    r"\bof\s+(?:the|our|their|its|his|her|this|that|a|an)?\s*\w+\s+"
-    r"(?:improv(?:ed|es|e|ing)|recover(?:ed|ing)?|expand(?:ed|ing)?|narrow(?:ed|ing)?|widen(?:ed|ing)?|"
-    r"ease(?:d|ing)?|tighten(?:ed|ing)?|loosen(?:ed|ing)?|strengthen(?:ed|ing)?|weaken(?:ed|ing)?|"
-    r"accelerat(?:ed|es|e|ing)|decelerat(?:ed|es|e|ing)|increas(?:ed|es|e|ing)|decreas(?:ed|es|e|ing)|"
-    r"declin(?:ed|es|e|ing)|deteriorat(?:ed|es|e|ing)|slow(?:ed|ing)?|rebound(?:ed|ing)?|surge(?:d|s|ing)?|"
-    r"normalis(?:ed|ing|es|e)?|normaliz(?:ed|ing|es|e)?|broaden(?:ed|ing)?"
-    r")\b",
-    re.IGNORECASE,
-)
-
-
-def _is_economic_assertion(sentence: str) -> bool:
-    """True when the sentence makes an explicit economic assertion rather than
-    merely mentioning a topic rhetorically. Phase 11 hardening: economic
-    vocabulary alone is insufficient, and the assertion predicate must actually
-    describe the economic subject — not a platitude, not a transitive action on
-    a non-economic object, not a possessor of the economic anchor."""
-    if not _ASSERTION_SIGNAL.search(sentence):
-        return False
-    if _PLATITUDE.search(sentence):
-        return False
-    if _TRANSITIVE_ABUSE.search(sentence):
-        return False
-    if _POSSESSOR_ABUSE.search(sentence):
-        return False
-    return True
-
-# ---------------------------------------------------------------------------
-# Quantitative values — explicit value claims only. A percentage is only mined
-# when the sentence states a value claim; share/ratio units are never converted
-# into percentage facts, and a forecast value without an explicit reference
-# period is ignored.
-# ---------------------------------------------------------------------------
-_RATE_ITEM = r"[0-9]+(?:\.[0-9]+)?"
-_MONTH_WORDS = "January|February|March|April|May|June|July|August|September|October|November|December"
-_MONTH_NUM = {
-    "january": "01", "february": "02", "march": "03", "april": "04", "may": "05", "june": "06",
-    "july": "07", "august": "08", "september": "09", "october": "10", "november": "11", "december": "12",
-}
-_QUARTER_NUM = {"first": "Q1", "second": "Q2", "third": "Q3", "fourth": "Q4"}
-_VALUE_TOKEN = rf"{_RATE_ITEM}\s*(?:%|per\s+cent|percent)"
-
-_VALUES: tuple[tuple[str, ...], ...] = (
-    ("average", "stand at", "be", "reach", "amount to", "grow by", "grow from", "expand by", "expand from",
-     "increase by", "increase from", "increase to", "rise by", "rise from", "rise to",
-     "decline to", "decline from", "fall to", "fall from", "remain at"),
-    ("stood at", "standing at", "averaged", "was at", "were at", "is at", "are at", "stands at", "running at",
-     "remain(s|ed|ing)? at", "declined to", "declined by", "declined from", "fell to", "fell by", "fell from",
-     "dropped to", "dropped by", "dropped from", "rose to", "rose by", "rose from",
-     "increased to", "increased by", "increased from", "expanded by", "grew by", "contracted by",
-     "narrowed to", "widened to", "reached"),
-)
-_VALUE_GATE = re.compile(
-    r"(?:projected|expected|forecast)\s+(?:to\s+)?(?:"
-    + "|".join(_VALUES[0])
-    + r")\s+"
-    r"|(?:"
-    + "|".join(_VALUES[1])
-    + r")\s+",
-    re.IGNORECASE,
-)
-_FORECAST_VERB = re.compile(r"\b(?:projected|expected|forecast)\b", re.IGNORECASE)
-_PERCENT_WITH_QUARTER = re.compile(
-    rf"(?P<token>{_VALUE_TOKEN})\s+(?P<period>in|during)\s+(?:the\s+)?(?P<quarter>first|second|third|fourth)\s+quarter\s+of\s+(?P<year>20[0-9]{{2}})\b",
-    re.IGNORECASE,
-)
-_PERCENT_WITH_MONTH = re.compile(
-    rf"(?P<token>{_VALUE_TOKEN})\s+(?P<period>in|during)\s+(?P<month>{_MONTH_WORDS})\s+(?P<year>20[0-9]{{2}})\b",
-    re.IGNORECASE,
-)
-_PERCENT_WITH_YEAR = re.compile(
-    rf"(?P<token>{_VALUE_TOKEN})\s+(?P<period>in|during|by|for)\s+(?:the\s+)?(?P<year>20[0-9]{{2}})\b",
-    re.IGNORECASE,
-)
-_VALUE_TOKEN_ONLY = re.compile(rf"(?P<token>{_VALUE_TOKEN})", re.IGNORECASE)
-_SHARE_UNIT = re.compile(
-    r"\bof\s+(?:gdp|gross\s+domestic\s+product|total|disposable\s+income)\b", re.IGNORECASE
-)
-
-
-def _split_sentences(text: str) -> list[str]:
-    """Split paragraph text into non-empty sentences, each verbatim (trailing
-    period preserved). Both ``". "`` and ``".\\n"`` are boundaries."""
-    return [part.strip() for part in re.split(r"(?<=\.)\s+", text or "") if part.strip()]
-
 
 class _RunState:
     """Mutable run state threaded through the sentence miners."""
@@ -633,9 +363,8 @@ class EcbSpeechExtractor(SpeechExtractor):
             result.warnings.append("no_sections")
             return result
 
-        speaker = _speaker_from_document(document)
-        counters: dict[tuple, int] = {}
-        seen: set[tuple] = set()
+        speaker = speaker_from_document(document)
+        reporter = Reporter(extraction_version=EXTRACTION_VERSION)
         state = _RunState()
 
         for index, section in enumerate(document.sections):
@@ -643,7 +372,7 @@ class EcbSpeechExtractor(SpeechExtractor):
             if category == CAT_IGNORE:
                 continue
             strict = category == CAT_UNKNOWN
-            self._process_section(result, document, index, section.text or "", counters, seen, state, speaker=speaker, strict=strict)
+            self._process_section(result, document, index, section.text or "", reporter, state, speaker=speaker, strict=strict)
 
         if not state.risk_found:
             result.warnings.append("no_risk_assessment")
@@ -663,15 +392,14 @@ class EcbSpeechExtractor(SpeechExtractor):
         document: NormalizedDocument,
         index: int,
         text: str,
-        counters: dict,
-        seen: set,
+        reporter: Reporter,
         state: _RunState,
         *,
         speaker: str | None,
         strict: bool,
     ) -> None:
-        for sentence in _split_sentences(text):
-            self._mine_sentence(result, document, index, sentence, counters, seen, state, speaker=speaker, strict=strict)
+        for sentence in split_sentences(text):
+            self._mine_sentence(result, document, index, sentence, reporter, state, speaker=speaker, strict=strict)
 
     # ------------------------------------------------------------------
     # sentence classification (guidance > policy > risk > financial >
@@ -683,35 +411,34 @@ class EcbSpeechExtractor(SpeechExtractor):
         document: NormalizedDocument,
         index: int,
         sentence: str,
-        counters: dict,
-        seen: set,
+        reporter: Reporter,
         state: _RunState,
         *,
         speaker: str | None,
         strict: bool,
     ) -> None:
-        if _is_quoted_other(sentence, speaker):
+        if is_quoted_other(sentence, speaker):
             state.quoted_skipped = True
             return
         category = self._categorize(sentence)
         if category == CAT_GUIDANCE:
             state.guidance_found = True
-            self._emit_text(result, document, index, sentence, SUBJECT_POLICY_GUIDANCE, PREDICATE_STATEMENT, counters, seen, speaker)
+            reporter.emit_text(result, document, index, sentence, SUBJECT_POLICY_GUIDANCE, PREDICATE_STATEMENT, speaker)
         elif category == CAT_POLICY:
-            self._emit_text(result, document, index, sentence, SUBJECT_MONETARY_POLICY, PREDICATE_STATEMENT, counters, seen, speaker)
+            reporter.emit_text(result, document, index, sentence, SUBJECT_MONETARY_POLICY, PREDICATE_STATEMENT, speaker)
         elif category == CAT_RISK:
             state.risk_found = True
-            self._add_risk_facts(result, document, index, sentence, counters, seen, speaker, strict=strict)
+            self._add_risk_facts(result, document, index, sentence, reporter, speaker, strict=strict)
         elif category == CAT_FINANCIAL:
-            if not self._add_value_facts(result, document, index, sentence, SUBJECT_FINANCIAL_CONDITIONS, counters, seen, speaker):
-                if not strict and _is_economic_assertion(sentence):
-                    self._emit_text(result, document, index, sentence, SUBJECT_FINANCIAL_CONDITIONS, PREDICATE_ASSESSMENT, counters, seen, speaker)
+            if not reporter.emit_value_facts(result, document, index, sentence, SUBJECT_FINANCIAL_CONDITIONS, speaker):
+                if not strict and is_economic_assertion(sentence):
+                    reporter.emit_text(result, document, index, sentence, SUBJECT_FINANCIAL_CONDITIONS, PREDICATE_ASSESSMENT, speaker)
         elif category == CAT_INFLATION:
-            self._add_inflation_facts(result, document, index, sentence, counters, seen, speaker, strict=strict)
+            self._add_inflation_facts(result, document, index, sentence, reporter, speaker, strict=strict)
         elif category == CAT_LABOUR:
-            self._add_labour_facts(result, document, index, sentence, counters, seen, speaker, strict=strict)
+            self._add_labour_facts(result, document, index, sentence, reporter, speaker, strict=strict)
         elif category == CAT_GROWTH:
-            self._add_growth_facts(result, document, index, sentence, counters, seen, speaker, strict=strict)
+            self._add_growth_facts(result, document, index, sentence, reporter, speaker, strict=strict)
 
     def _categorize(self, sentence: str) -> str:
         if self._matches(_GUIDANCE_ANCHORS, sentence):
@@ -735,85 +462,10 @@ class EcbSpeechExtractor(SpeechExtractor):
         return any(anchor.search(sentence) for anchor in anchors)
 
     # ------------------------------------------------------------------
-    # emission with within-run deduplication
-    # ------------------------------------------------------------------
-    @classmethod
-    def _emit(
-        cls,
-        result: ExtractionResult,
-        document: NormalizedDocument,
-        index: int,
-        source_text: str,
-        subject: str,
-        predicate: str,
-        value: FactValue,
-        confidence: Confidence,
-        counters: dict,
-        seen: set,
-        *,
-        period: FactPeriod | None = None,
-        speaker: str | None = None,
-    ) -> Fact | None:
-        """Build a Fact with a deterministic ordinal qualifier, suppressing
-        within-run duplicates. A quantitative duplicate is defined by subject +
-        predicate + period + value; a qualitative one by subject + predicate +
-        period + normalized verbatim wording."""
-        period_key = period.canonical() if period else ""
-        if value.kind in (ValueKind.NUMBER, ValueKind.PERCENTAGE, ValueKind.BASIS_POINTS, ValueKind.CURRENCY):
-            dedup_key = (subject, predicate, period_key, value.value)
-        else:
-            dedup_key = (subject, predicate, period_key, normalize_title(source_text or ""))
-        if dedup_key in seen:
-            return None
-        seen.add(dedup_key)
-
-        key = (subject, predicate, period_key)
-        ordinal = counters.get(key, 0)
-        counters[key] = ordinal + 1
-
-        return Fact(
-            publication_id=result.publication_id,
-            document_id=document.document_id,
-            subject=subject,
-            predicate=predicate,
-            value=value,
-            period=period,
-            effective_date=None,
-            source_location=FactLocation(LocationKind.SECTION, section=index),
-            source_text=source_text,
-            extraction_method=METHOD_REGEX,
-            extraction_version=EXTRACTION_VERSION,
-            confidence=confidence,
-            speaker=speaker,
-            identity_qualifier=f"speech:{subject}:{ordinal}",
-        )
-
-    @classmethod
-    def _emit_text(
-        cls,
-        result: ExtractionResult,
-        document: NormalizedDocument,
-        index: int,
-        sentence: str,
-        subject: str,
-        predicate: str,
-        counters: dict,
-        seen: set,
-        speaker: str | None,
-    ) -> None:
-        fact = cls._emit(
-            result, document, index, sentence, subject, predicate,
-            FactValue(ValueKind.TEXT, value=sentence, source_text=sentence),
-            Confidence.MEDIUM, counters, seen, speaker=speaker,
-        )
-        if fact is not None:
-            result.add(fact)
-
-    # ------------------------------------------------------------------
     # risk assessment
     # ------------------------------------------------------------------
-    @classmethod
-    def _add_risk_facts(cls, result: ExtractionResult, document: NormalizedDocument, index: int, sentence: str, counters: dict, seen: set, speaker: str | None, *, strict: bool) -> None:
+    @staticmethod
+    def _add_risk_facts(result: ExtractionResult, document: NormalizedDocument, index: int, sentence: str, reporter: Reporter, speaker: str | None, *, strict: bool) -> None:
         """A risk sentence yields a categorical orientation fact when an
         explicit orientation word is present; otherwise a verbatim text
         assessment (unknown sections keep only the categorical orientation —
@@ -825,143 +477,14 @@ class EcbSpeechExtractor(SpeechExtractor):
             subject = SUBJECT_GROWTH_RISK
         else:
             subject = SUBJECT_RISK
-
-        orientation = None
-        if re.search(r"\b(?:broadly\s+)?balanced\b|\btwo-sided\b|\bsymmetric\b", lower):
-            orientation = "balanced"
-        elif re.search(r"\bdownside\b", lower):
-            orientation = "downside"
-        elif re.search(r"\bupside\b", lower):
-            orientation = "upside"
-
-        if orientation is not None:
-            fact = cls._emit(
-                result, document, index, sentence, subject, PREDICATE_ASSESSMENT,
-                categorical(orientation, source_text=sentence),
-                Confidence.HIGH, counters, seen, speaker=speaker,
-            )
-        elif not strict and _is_economic_assertion(sentence):
-            fact = cls._emit(
-                result, document, index, sentence, subject, PREDICATE_ASSESSMENT,
-                FactValue(ValueKind.TEXT, value=sentence, source_text=sentence),
-                Confidence.MEDIUM, counters, seen, speaker=speaker,
-            )
-        else:
-            fact = None
-        if fact is not None:
-            result.add(fact)
+        reporter.emit_risk(result, document, index, sentence, subject, speaker, strict=strict)
 
     # ------------------------------------------------------------------
-    # quantitative value claims
+    # inflation / growth / labour market (subject resolution is bank-specific;
+    # emission and the value/assertion gates are the shared structural helpers)
     # ------------------------------------------------------------------
-    @classmethod
-    def _add_value_facts(cls, result: ExtractionResult, document: NormalizedDocument, index: int, sentence: str, subject: str, counters: dict, seen: set, speaker: str | None) -> int:
-        """Emit ``subject/value`` percentage facts for explicit value claims.
-
-        A percentage followed by an explicit reference period (year, month or
-        quarter) keeps it as ``FactPeriod``; a percentage with no stated period
-        is kept without one — except for *forecasts*, which are under-determined
-        without a reference period and are therefore ignored. Share/ratio units
-        ("% of GDP") are never converted into percentage facts. Returns the
-        number of facts emitted (0 when the sentence is not a value claim).
-        """
-        if not _VALUE_GATE.search(sentence):
-            return 0
-
-        forecast = bool(_FORECAST_VERB.search(sentence))
-        covered: list[tuple[int, int]] = []
-        emitted = 0
-        claimed = False  # a genuine value claim was present (even if deduped or ignored)
-
-        for match in _PERCENT_WITH_QUARTER.finditer(sentence):
-            token = match.group("token")
-            if _is_share(sentence, match):
-                continue
-            claimed = True
-            period = FactPeriod(
-                PeriodKind.QUARTER,
-                f"{match.group('year')}-{_QUARTER_NUM[match.group('quarter').lower()]}",
-                label=sentence[match.start("period") : match.end("year")],
-            )
-            covered.append((match.start("token"), match.end("token")))
-            fact = cls._emit(
-                result, document, index, sentence, subject, PREDICATE_VALUE,
-                percentage(cls._token_value(token), source_text=token),
-                Confidence.HIGH, counters, seen, period=period, speaker=speaker,
-            )
-            if fact is not None:
-                result.add(fact)
-                emitted += 1
-
-        for match in _PERCENT_WITH_MONTH.finditer(sentence):
-            token = match.group("token")
-            if _is_share(sentence, match):
-                continue
-            claimed = True
-            period = FactPeriod(
-                PeriodKind.MONTH,
-                f"{match.group('year')}-{_MONTH_NUM[match.group('month').lower()]}",
-                label=sentence[match.start("period") : match.end("year")],
-            )
-            covered.append((match.start("token"), match.end("token")))
-            fact = cls._emit(
-                result, document, index, sentence, subject, PREDICATE_VALUE,
-                percentage(cls._token_value(token), source_text=token),
-                Confidence.HIGH, counters, seen, period=period, speaker=speaker,
-            )
-            if fact is not None:
-                result.add(fact)
-                emitted += 1
-
-        for match in _PERCENT_WITH_YEAR.finditer(sentence):
-            token = match.group("token")
-            if _is_share(sentence, match):
-                continue
-            claimed = True
-            period = FactPeriod(
-                PeriodKind.YEAR,
-                match.group("year"),
-                label=sentence[match.start("period") : match.end("year")],
-            )
-            covered.append((match.start("token"), match.end("token")))
-            fact = cls._emit(
-                result, document, index, sentence, subject, PREDICATE_VALUE,
-                percentage(cls._token_value(token), source_text=token),
-                Confidence.HIGH, counters, seen, period=period, speaker=speaker,
-            )
-            if fact is not None:
-                result.add(fact)
-                emitted += 1
-
-        for match in _VALUE_TOKEN_ONLY.finditer(sentence):
-            if any(start <= match.start("token") and match.end("token") <= end for start, end in covered):
-                continue
-            if _is_share(sentence, match):
-                continue
-            claimed = True
-            if forecast:
-                continue  # a forecast without an explicit reference period is ignored
-            token = match.group("token")
-            fact = cls._emit(
-                result, document, index, sentence, subject, PREDICATE_VALUE,
-                percentage(cls._token_value(token), source_text=token),
-                Confidence.HIGH, counters, seen, speaker=speaker,
-            )
-            if fact is not None:
-                result.add(fact)
-                emitted += 1
-
-        return emitted if emitted else claimed
-
     @staticmethod
-    def _token_value(token: str) -> float:
-        return float(re.match(r"[0-9.]+", token).group(0))
-
-    # ------------------------------------------------------------------
-    # inflation / growth / labour market
-    # ------------------------------------------------------------------
-    @classmethod
-    def _add_inflation_facts(cls, result: ExtractionResult, document: NormalizedDocument, index: int, sentence: str, counters: dict, seen: set, speaker: str | None, *, strict: bool) -> None:
+    def _add_inflation_facts(result: ExtractionResult, document: NormalizedDocument, index: int, sentence: str, reporter: Reporter, speaker: str | None, *, strict: bool) -> None:
         lower = sentence.lower()
         if "inflation expectations" in lower:
             subject = SUBJECT_INFLATION_EXPECTATIONS
@@ -969,24 +492,24 @@ class EcbSpeechExtractor(SpeechExtractor):
             subject = SUBJECT_CORE_INFLATION
         else:
             subject = SUBJECT_INFLATION
-        if cls._add_value_facts(result, document, index, sentence, subject, counters, seen, speaker):
+        if reporter.emit_value_facts(result, document, index, sentence, subject, speaker):
             return
-        if not strict and _is_economic_assertion(sentence):
-            cls._emit_text(result, document, index, sentence, subject, PREDICATE_ASSESSMENT, counters, seen, speaker)
+        if not strict and is_economic_assertion(sentence):
+            reporter.emit_text(result, document, index, sentence, subject, PREDICATE_ASSESSMENT, speaker)
 
-    @classmethod
-    def _add_growth_facts(cls, result: ExtractionResult, document: NormalizedDocument, index: int, sentence: str, counters: dict, seen: set, speaker: str | None, *, strict: bool) -> None:
+    @staticmethod
+    def _add_growth_facts(result: ExtractionResult, document: NormalizedDocument, index: int, sentence: str, reporter: Reporter, speaker: str | None, *, strict: bool) -> None:
         # A GDP deflator / per-capita mention inside an otherwise-growth
         # sentence must not leak into a GDP value fact (precision first).
         if _GDP_NEAR_MISS.search(sentence):
             return
-        if cls._add_value_facts(result, document, index, sentence, SUBJECT_GDP, counters, seen, speaker):
+        if reporter.emit_value_facts(result, document, index, sentence, SUBJECT_GDP, speaker):
             return
-        if not strict and _is_economic_assertion(sentence):
-            cls._emit_text(result, document, index, sentence, SUBJECT_GROWTH, PREDICATE_ASSESSMENT, counters, seen, speaker)
+        if not strict and is_economic_assertion(sentence):
+            reporter.emit_text(result, document, index, sentence, SUBJECT_GROWTH, PREDICATE_ASSESSMENT, speaker)
 
-    @classmethod
-    def _add_labour_facts(cls, result: ExtractionResult, document: NormalizedDocument, index: int, sentence: str, counters: dict, seen: set, speaker: str | None, *, strict: bool) -> None:
+    @staticmethod
+    def _add_labour_facts(result: ExtractionResult, document: NormalizedDocument, index: int, sentence: str, reporter: Reporter, speaker: str | None, *, strict: bool) -> None:
         lower = sentence.lower()
         if "unemployment" in lower:
             subject = SUBJECT_UNEMPLOYMENT
@@ -994,14 +517,7 @@ class EcbSpeechExtractor(SpeechExtractor):
             subject = SUBJECT_WAGES
         else:
             subject = SUBJECT_LABOUR_MARKET
-        if cls._add_value_facts(result, document, index, sentence, subject, counters, seen, speaker):
+        if reporter.emit_value_facts(result, document, index, sentence, subject, speaker):
             return
-        if not strict and _is_economic_assertion(sentence):
-            cls._emit_text(result, document, index, sentence, subject, PREDICATE_ASSESSMENT, counters, seen, speaker)
-
-
-def _is_share(sentence: str, match: re.Match) -> bool:
-    """True when the value token is followed by a share/ratio unit ("% of
-    GDP", "% of total", …) — such ratios are never stored as percentages."""
-    window = sentence[match.end("token") : match.end("token") + 80]
-    return bool(_SHARE_UNIT.search(window))
+        if not strict and is_economic_assertion(sentence):
+            reporter.emit_text(result, document, index, sentence, subject, PREDICATE_ASSESSMENT, speaker)

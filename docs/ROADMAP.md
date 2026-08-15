@@ -595,6 +595,12 @@ L'architecture doit rester extensible à d'autres banques centrales.
   recovery/recession/slowdown/expansion retirés), fixture adversariale et
   matrice de faux positifs, 513 tests verts et déterministes.
   **Interviews** (`interview`) : hors périmètre, publication type distincte.
+  **Extension multi-banques (Phase 4.x — Speech family)** : ECB conservé comme
+  implémentation de référence ; ajout des extracteurs Fed, BoE, BoJ, SNB, BoC,
+  RBA, RBNZ, Norges, Riksbank partageant les mécanismes structurels
+  `_shared.py` / `_pipeline.py` (`SpeechExtractorBase`) — vocabulaire, ancres et
+  règles de classification propres à chaque banque, source officielle vérifiée
+  (`COVERAGE_SOURCE`). Aucun changement de numérotation de phase.
 
 ## Phase 12 — Temporal / Cross-Publication Analysis
 
@@ -867,6 +873,12 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   **durcissement** (gate qualitatif : assertion explicite requise, platitudes
   rejetées ; ancres génériques remplacées ou supprimées), 513 tests verts et
   déterministes.
+- **Extension multi-banques Speeches (Phase 4.x)** : ECB conservé comme
+  référence ; **Fed, BoE, BoJ, SNB, BoC, RBA, RBNZ, Norges, Riksbank** ajoutés
+  (`src/argus/speeches/{fed,boe,boj,snb,boc,rba,rbnz,norges,riksbank}.py`),
+  partageant `_shared.py` + `_pipeline.py` (`SpeechExtractorBase`),
+  vocabulaire/ancres/classification propres à chaque banque (`COVERAGE_SOURCE`),
+  fixtures + tests multi-banques. 1232 tests verts au total.
 - **Phase 12 (Temporal / Cross-Publication Analysis)** : `src/argus/changes/`
   validé (**durcissement profond**) — `FactChangeAnalyzer` pur et déterministe,
   trois types de changement, matching exact (jamais de comparateur flou/LLM),

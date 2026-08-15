@@ -7,6 +7,15 @@ from .base import (
     extract_speech_batch,
     get_extractor,
 )
+from .fed import FedSpeechExtractor
+from .boe import BoeSpeechExtractor
+from .boj import BojSpeechExtractor
+from .snb import SnbSpeechExtractor
+from .boc import BocSpeechExtractor
+from .rba import RbaSpeechExtractor
+from .rbnz import RbnzSpeechExtractor
+from .norges import NorgesSpeechExtractor
+from .riksbank import RiksbankSpeechExtractor
 from .ecb import (
     EXTRACTION_VERSION,
     SUBJECT_CORE_INFLATION,
@@ -30,6 +39,15 @@ __all__ = [
     "SPEECH_PUBLICATION_TYPES",
     "SpeechExtractor",
     "EcbSpeechExtractor",
+    "FedSpeechExtractor",
+    "BoeSpeechExtractor",
+    "BojSpeechExtractor",
+    "SnbSpeechExtractor",
+    "BocSpeechExtractor",
+    "RbaSpeechExtractor",
+    "RbnzSpeechExtractor",
+    "NorgesSpeechExtractor",
+    "RiksbankSpeechExtractor",
     "EXTRACTION_VERSION",
     "SUBJECT_INFLATION",
     "SUBJECT_CORE_INFLATION",

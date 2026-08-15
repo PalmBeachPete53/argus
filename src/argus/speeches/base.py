@@ -142,11 +142,34 @@ def _is_speech_publication(store, publication, *, expected_types: tuple[str, ...
     return record["publication_type"] in expected_types
 
 
+# -- circular-import note (kept below the module body, see file top) ---------
 from .ecb import EcbSpeechExtractor  # noqa: E402  (see below)
 
-_EXTRACTORS: dict[str, SpeechExtractor] = {
-    EcbSpeechExtractor.bank: EcbSpeechExtractor(),
-}
+_EXTRACTORS: dict[str, SpeechExtractor] = {}
+
+
+def _register(cls) -> None:
+    _EXTRACTORS[cls.bank] = cls()
+
+
+_register(EcbSpeechExtractor)
+
+from .fed import FedSpeechExtractor  # noqa: E402
+from .boe import BoeSpeechExtractor  # noqa: E402
+from .boj import BojSpeechExtractor  # noqa: E402
+from .snb import SnbSpeechExtractor  # noqa: E402
+from .boc import BocSpeechExtractor  # noqa: E402
+from .rba import RbaSpeechExtractor  # noqa: E402
+from .rbnz import RbnzSpeechExtractor  # noqa: E402
+from .norges import NorgesSpeechExtractor  # noqa: E402
+from .riksbank import RiksbankSpeechExtractor  # noqa: E402
+
+for _cls in (
+    FedSpeechExtractor, BoeSpeechExtractor, BojSpeechExtractor, SnbSpeechExtractor,
+    BocSpeechExtractor, RbaSpeechExtractor, RbnzSpeechExtractor,
+    NorgesSpeechExtractor, RiksbankSpeechExtractor,
+):
+    _register(_cls)
 
 
 def get_extractor(bank: str) -> SpeechExtractor | None:
