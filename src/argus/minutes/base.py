@@ -155,3 +155,17 @@ from .fed import FedMinutesExtractor  # noqa: E402
 
 if FedMinutesExtractor.bank not in _EXTRACTORS:
     _EXTRACTORS[FedMinutesExtractor.bank] = FedMinutesExtractor()
+
+from .boe import BoeMinutesExtractor  # noqa: E402
+from .boj import BojMinutesExtractor  # noqa: E402
+from .norges import NorgesMinutesExtractor  # noqa: E402
+from .riksbank import RiksbankMinutesExtractor  # noqa: E402
+
+for _extractor in (
+    BoeMinutesExtractor,
+    BojMinutesExtractor,
+    NorgesMinutesExtractor,
+    RiksbankMinutesExtractor,
+):
+    if _extractor.bank not in _EXTRACTORS:
+        _EXTRACTORS[_extractor.bank] = _extractor()

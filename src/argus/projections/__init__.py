@@ -19,12 +19,14 @@ from .fed import (
     SUBJECT_UNEMPLOYMENT,
     FedSepExtractor,
 )
+from .boj import BojProjectionsExtractor
 
 __all__ = [
     "PROJECTIONS_PUBLICATION_TYPES",
     "ProjectionsExtractor",
     "EcbProjectionsExtractor",
     "FedSepExtractor",
+    "BojProjectionsExtractor",
     "SUBJECT_POLICY_RATE",
     "SUBJECT_UNEMPLOYMENT",
     "EXTRACTION_VERSION",

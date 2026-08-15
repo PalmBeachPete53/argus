@@ -823,6 +823,76 @@ asserts, per fixture:
   empty-result persistence and the `minutes` / `meeting_account` gating),
   classification gating and Phase 5/6/7 coexistence.
 
+## Multi-bank Minutes extractors — BoE, BoJ, Norges, Riksbank
+
+Minutes is a **publication type** (`minutes` / `meeting_account`), not a
+Fact. The four banks below already had authoritative `minutes` classification
+rules in `src/argus/classification/bank_rules.py` but no extractor; they are
+now implemented, registered for generic dispatch (`get_extractor` +
+`extract_minutes`), and covered by fixtures. Each extractor is
+**bank-specific** (heading vocabulary, section structure, attribution wording),
+sharing only the **structural** helpers in `src/argus/minutes/_shared.py`
+(heading normalization, sentence splitting, explicit value-claim gate,
+deterministic attribution + provenance-carrying emission). No bank-specific
+semantics live in the shared helper.
+
+All four follow the Minutes-family rules established by the ECB extractor:
+
+- sections are routed by **exact normalized heading** — known economic sections
+  are mined content-first; the meeting masthead, known non-economic headings
+  (membership, statistical annex, legal notice, glossary) and **unknown**
+  headings are ignored (`UNKNOWN ≠ ECONOMIC`);
+- sentence classification is content-first with a fixed precedence:
+  guidance > policy > risk > financial > inflation > labour > growth;
+- a quantitative value Fact is produced only behind an **explicit value-claim**
+  verb with a percentage and, for a forecast, an explicit reference period
+  (year / month / quarter read from the wording);
+- risks are categorical orientations (`upside` / `downside` / `balanced`) only
+  when the source states one, otherwise verbatim text assessments; the target
+  (`inflation_risk` / `growth_risk` / `risk`) is read from the wording;
+- **attribution without invented identities**: `Fact.speaker` is always `None`,
+  and `identity_qualifier` is `minutes:{attribution}:{n}` where `attribution`
+  is the subject label the source itself states, with precedence `dissent` >
+  `one_member` > `some_members` > `most_members` > `members` > `committee` >
+  `collective` (unmarked sentences). Dissents are traced verbatim, never turned
+  into invented vote counts;
+- verbatim provenance preserved on every Fact; deterministic output; source
+  objects never mutated; no Phase 5/6/7 decision / statement / press-conference
+  subjects, no hawkish/dovish interpretation.
+
+### BoE — `BoeMinutesExtractor`
+`src/argus/minutes/boe.py` (`extraction_version 8.2.0`). Mined sections: the
+BoE monetary policy meeting (`monetary policy committee`, `policy
+considerations`/`policy decisions`), `economic analysis` (demand and output,
+supply costs and prices, the labour market, money credit and financial
+conditions), `risk assessment`. Fixture:
+`tests/fixtures/documents/boe_minutes_full.html` (11 facts, no warnings).
+
+### BoJ — `BojMinutesExtractor`
+`src/argus/minutes/boj.py` (`extraction_version 8.3.0`). Mined sections: the
+BoJ monetary policy meeting (`the policy board`, `policy decisions`,
+`economic and price developments`, `financial market developments`, `risk
+assessment`). Fixture: `tests/fixtures/documents/boj_minutes.html` (6 facts,
+no warnings).
+
+### Norges — `NorgesMinutesExtractor`
+`src/argus/minutes/norges.py` (`extraction_version 8.4.0`). Mined sections:
+`the committee's discussion` (economic situation, inflation, labour market,
+financial conditions, risk assessment, monetary policy / policy rate
+discussion). Fixture: `tests/fixtures/documents/norges_minutes.html` (8 facts,
+no warnings).
+
+### Riksbank — `RiksbankMinutesExtractor`
+`src/argus/minutes/riksbank.py` (`extraction_version 8.5.0`). Mined sections:
+`minutes of the executive board's monetary policy meeting` (economic
+activity, inflation, financial conditions, monetary policy / policy rate
+discussion, risk assessment). Fixture:
+`tests/fixtures/documents/riksbank_minutes.html` (7 facts, no warnings).
+
+See `tests/test_minutes_multibank.py` for the contract, dispatch, attribution,
+provenance, boundary, determinism, immutability, gating and end-to-end
+integration coverage of these four extractors.
+
 # Type-Specific Extractors — Phase 9 (Economic Projections)
 
 ## Pipeline
@@ -1845,14 +1915,14 @@ hardening pass (commit 96e81de → hardened). The key distinction is:
 |------|----------|-----------|---------|-------------|--------------|-------------|
 | ECB | implemented | implemented | implemented (meeting_account) | implemented | implemented (Economic Bulletin) | ✅ (multiple fixtures) |
 | Fed | implemented | implemented | implemented (minutes) | implemented (SEP) | not applicable | ✅ (fixtures) |
-| BoE | implemented | implemented | not implemented | not applicable | implemented (Monetary Policy Report) | ⚠️ (fixtures only) |
-| BoJ | intentionally represented by Statement | implemented | not implemented | not implemented | not applicable | ⚠️ (fixtures only) |
+| BoE | implemented | implemented | implemented (minutes) | not applicable | implemented (Monetary Policy Report) | ⚠️ (fixtures only) |
+| BoJ | intentionally represented by Statement | implemented | implemented (minutes) | not implemented | not applicable | ⚠️ (fixtures only) |
 | SNB | implemented | implemented | not applicable | not applicable | not applicable | ⚠️ (fixtures only) |
 | BoC | implemented | implemented | not applicable | not applicable | implemented (Monetary Policy Report) | ⚠️ (fixtures only) |
 | RBA | implemented | implemented | not applicable | not applicable | implemented (Statement on Monetary Policy) | ⚠️ (fixtures only) |
 | RBNZ | implemented | implemented | not applicable | not applicable | implemented (Monetary Policy Statement) | ⚠️ (fixtures only) |
-| Norges | implemented | not applicable | not implemented | not applicable | implemented (Monetary Policy Report + mixed) | ⚠️ (fixtures only) |
-| Riksbank | implemented | implemented | not implemented | not applicable | not applicable | ⚠️ (fixtures only) |
+| Norges | implemented | not applicable | implemented (minutes) | not applicable | implemented (Monetary Policy Report + mixed) | ⚠️ (fixtures only) |
+| Riksbank | implemented | implemented | implemented (minutes) | not applicable | not applicable | ⚠️ (fixtures only) |
 
 ### BoJ Decision Coverage — Explicit Resolution
 

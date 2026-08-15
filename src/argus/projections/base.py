@@ -155,3 +155,8 @@ from .fed import FedSepExtractor  # noqa: E402
 
 if FedSepExtractor.bank not in _EXTRACTORS:
     _EXTRACTORS[FedSepExtractor.bank] = FedSepExtractor()
+
+from .boj import BojProjectionsExtractor  # noqa: E402
+
+if BojProjectionsExtractor.bank not in _EXTRACTORS:
+    _EXTRACTORS[BojProjectionsExtractor.bank] = BojProjectionsExtractor()

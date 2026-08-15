@@ -953,20 +953,24 @@ def test_get_minutes_extractor_resolves_registered_banks():
     expected = {
         "ecb": "EcbMinutesExtractor",
         "fed": "FedMinutesExtractor",
+        "boe": "BoeMinutesExtractor",
+        "boj": "BojMinutesExtractor",
+        "norges": "NorgesMinutesExtractor",
+        "riksbank": "RiksbankMinutesExtractor",
     }
     for bank, class_name in expected.items():
         ext = get_extractor(bank)
         assert ext is not None, f"{bank}: extractor not registered"
         assert ext.__class__.__name__ == class_name, f"{bank}: wrong extractor {ext.__class__.__name__}"
 
-    # Other banks with minutes publication type but no extractor yet (representative pattern)
-    for bank in ("boe", "boj", "norges", "riksbank"):
-        assert get_extractor(bank) is None, f"{bank}: should not have extractor yet"
-
 
 MINUTES_FIXTURE_MAP = {
     "ecb": "ecb_minutes.html",
     "fed": "fed_minutes.html",
+    "boe": "boe_minutes_full.html",
+    "boj": "boj_minutes.html",
+    "norges": "norges_minutes.html",
+    "riksbank": "riksbank_minutes.html",
 }
 
 

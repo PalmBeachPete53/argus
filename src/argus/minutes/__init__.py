@@ -36,12 +36,20 @@ from .fed import (
     ATTR_STAFF,
     FedMinutesExtractor,
 )
+from .boe import BoeMinutesExtractor
+from .boj import BojMinutesExtractor
+from .norges import NorgesMinutesExtractor
+from .riksbank import RiksbankMinutesExtractor
 
 __all__ = [
     "MINUTES_PUBLICATION_TYPES",
     "MinutesExtractor",
     "EcbMinutesExtractor",
     "FedMinutesExtractor",
+    "BoeMinutesExtractor",
+    "BojMinutesExtractor",
+    "NorgesMinutesExtractor",
+    "RiksbankMinutesExtractor",
     "ATTR_DISSENT",
     "ATTR_ONE_MEMBER",
     "ATTR_SOME_MEMBERS",

@@ -1036,20 +1036,18 @@ def test_get_projections_extractor_resolves_registered_banks():
     expected = {
         "ecb": "EcbProjectionsExtractor",
         "fed": "FedSepExtractor",
+        "boj": "BojProjectionsExtractor",
     }
     for bank, class_name in expected.items():
         ext = get_extractor(bank)
         assert ext is not None, f"{bank}: extractor not registered"
         assert ext.__class__.__name__ == class_name, f"{bank}: wrong extractor {ext.__class__.__name__}"
 
-    # Other banks with economic_projections publication type but no extractor yet
-    for bank in ("boj",):
-        assert get_extractor(bank) is None, f"{bank}: should not have extractor yet"
-
 
 PROJECTIONS_FIXTURE_MAP = {
     "ecb": "ecb_projections.html",
     "fed": "fed_sep.html",
+    "boj": "boj_projections.html",
 }
 
 
@@ -1092,6 +1090,7 @@ def _classify_projections(store: Store, pub_id: str, bank: str) -> None:
 EXPECTED_PROJECTION_SUBJECTS = {
     "ecb": {"inflation", "core_inflation", "gdp"},
     "fed": {"inflation", "core_inflation", "gdp", "unemployment", "policy_rate"},
+    "boj": {"inflation", "core_inflation", "gdp", "unemployment"},
 }
 
 
@@ -1123,8 +1122,8 @@ def test_extract_projections_generic_dispatch(tmp_path, bank):
         assert fact.source_location is not None
         assert fact.source_text
         assert fact.confidence is not None
-        # ECB uses "projections:", Fed SEP uses "sep:"
-        assert fact.identity_qualifier.startswith(("projections:", "sep:"))
+        # ECB uses "projections:", Fed SEP uses "sep:", BoJ Outlook uses "outlook:"
+        assert fact.identity_qualifier.startswith(("projections:", "sep:", "outlook:"))
 
 
 def test_extract_projections_batch_generic_dispatch(tmp_path):
@@ -1146,4 +1145,4 @@ def test_extract_projections_batch_generic_dispatch(tmp_path):
         subjects = {f.subject for f in facts}
         expected = EXPECTED_PROJECTION_SUBJECTS[bank]
         assert expected.issubset(subjects), f"{bank}: missing expected subjects {expected - subjects}"
-        assert all(f.identity_qualifier.startswith(("projections:", "sep:")) for f in facts)
+        assert all(f.identity_qualifier.startswith(("projections:", "sep:", "outlook:")) for f in facts)
