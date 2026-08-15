@@ -568,7 +568,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 12.
 - **Critères de validation** : le caractère inféré est explicite et non
   présenté comme factuel.
-- **Statut** : `NEXT`.
+- **Statut** : `COMPLETE` (durcissement validé — voir « Current Position »).
 
 ## Phase 14 — Monetary Policy State
 
@@ -766,8 +766,34 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   chaînage consécutif F1→F2→F3 sans pont, règles delta, provenance verbatim,
   persistance idempotente, isolation par banque). **685 tests verts et
   déterministes**.
-- **Prochaine phase autorisée : Phase 13 — Policy Reaction Function** (statut
-  `NEXT`).
+- **PHASE 13 — POLICY REACTION FUNCTION (COMPLETE)** : `src/argus/reactions/`
+  validé — `PolicyReactionAnalyzer` pur et déterministe (v13.0.0), relation
+  **dérivée et inférée** `condition change → policy change` (`inferred=True`
+  constant, jamais un `Fact`, formulation explicitement **non-causale**) ;
+  vocabulaire canonique vérifié (10 sujets condition : inflation,
+  core_inflation, inflation_expectations, gdp, growth, unemployment, wages,
+  labour_market, financial_conditions, fiscal_policy ; 9 sujets réaction :
+  policy_rate, main_refinancing_rate, deposit_facility_rate,
+  marginal_lending_rate, policy_guidance, asset_purchase, risk,
+  inflation_risk, growth_risk — les risk assessments sont réaction seule,
+  jamais condition, choix documenté) ; règle temporelle `meeting_date` sinon
+  `publication_date`, **no-look-ahead** (`condition_observed_at ≤
+  policy_observed_at`), fenêtre `0 ≤ lag_days ≤ max_lag_days` (constante
+  documentée `DEFAULT_MAX_LAG_DAYS = 180`, paramètre explicite jamais ajusté
+  sur données) ; identité déterministe `reaction_id` = SHA-256(central_bank,
+  condition_change_id, policy_change_id) ; pairement exhaustif (toute paire
+  éligible même banque → exactement une réaction) ; provenance verbatim
+  dénormalisée des deux côtés jusqu'aux `FactChange`/`Fact`/publications ;
+  avertissements observabilité (`missing_publication`, `undated_publication`,
+  `unplaced_change`) ; table `policy_reactions` persistée de façon idempotente
+  (`rebuild_reactions` par banque, vide-efface, `created_at` préservé, delete
+  par document/publication/banque) ; aucune mutation de `Fact`/`FactChange`,
+  aucun hawkish/dovish, aucun signal trading/forex, aucun LLM/flou/sémantique,
+  aucune causalité, aucun look-ahead ; 8 fixtures golden/adversarial, tests
+  négatifs explicites, isolation cross-banque, déterminisme ×2. **65 tests
+  dédiés — suite complète : 750 tests verts et déterministes.**
+- **Prochaine phase autorisée : Phase 14 — Monetary Policy State** (statut
+  `NOT STARTED`).
 
 ## Out of Scope
 

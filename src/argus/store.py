@@ -225,6 +225,62 @@ CREATE INDEX IF NOT EXISTS idx_fact_changes_bank_subject
     ON fact_changes(central_bank, subject);
 CREATE INDEX IF NOT EXISTS idx_fact_changes_publications
     ON fact_changes(previous_publication_id, current_publication_id);
+
+CREATE TABLE IF NOT EXISTS policy_reactions (
+    -- Phase 13 — empirical, INFERRED temporal associations between a
+    -- condition-side change and a policy-side change (condition → policy).
+    -- `reaction_id` is a deterministic SHA-256 over the relationship
+    -- (central_bank + condition_change_id + policy_change_id), so re-running
+    -- the analysis updates the row instead of duplicating it. `inferred` is a
+    -- constant 1 (never a Fact, never causal). Both sides keep their change /
+    -- fact / publication / document provenance.
+    reaction_id TEXT PRIMARY KEY,
+    central_bank TEXT,
+    inferred INTEGER NOT NULL DEFAULT 1,
+    condition_change_id TEXT NOT NULL,
+    condition_subject TEXT NOT NULL,
+    condition_predicate TEXT NOT NULL,
+    condition_value_kind TEXT,
+    condition_previous_value_json TEXT,
+    condition_current_value_json TEXT,
+    condition_period_kind TEXT,
+    condition_period_value TEXT,
+    condition_period_label TEXT,
+    condition_publication_id TEXT NOT NULL,
+    condition_document_id TEXT NOT NULL,
+    condition_effective_date TEXT,
+    condition_source_text TEXT,
+    condition_observed_at TEXT,
+    policy_change_id TEXT NOT NULL,
+    policy_subject TEXT NOT NULL,
+    policy_predicate TEXT NOT NULL,
+    policy_value_kind TEXT,
+    policy_previous_value_json TEXT,
+    policy_current_value_json TEXT,
+    policy_period_kind TEXT,
+    policy_period_value TEXT,
+    policy_period_label TEXT,
+    policy_publication_id TEXT NOT NULL,
+    policy_document_id TEXT NOT NULL,
+    policy_effective_date TEXT,
+    policy_source_text TEXT,
+    policy_observed_at TEXT,
+    lag_days INTEGER,
+    max_lag_days INTEGER,
+    formulation TEXT,
+    analysis_version TEXT,
+    analyzed_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_policy_reactions_condition
+    ON policy_reactions(condition_change_id);
+CREATE INDEX IF NOT EXISTS idx_policy_reactions_policy
+    ON policy_reactions(policy_change_id);
+CREATE INDEX IF NOT EXISTS idx_policy_reactions_bank
+    ON policy_reactions(central_bank);
+CREATE INDEX IF NOT EXISTS idx_policy_reactions_publications
+    ON policy_reactions(condition_publication_id, policy_publication_id);
 """
 
 
@@ -1519,6 +1575,375 @@ class Store:
             current_effective_date=from_iso(row["current_effective_date"]),
             previous_source_text=row["previous_source_text"],
             current_source_text=row["current_source_text"],
+            analysis_version=row["analysis_version"],
+            analyzed_at=from_iso(row["analyzed_at"]),
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 13 — policy reactions
+    # ------------------------------------------------------------------
+    def save_reaction(self, reaction) -> None:
+        """Persist one ``PolicyReaction``, upserting by its deterministic id.
+
+        Idempotent: re-saving the same reaction overwrites the row in place,
+        preserving ``created_at``.
+        """
+        from .reactions.base import PolicyReaction
+
+        if not isinstance(reaction, PolicyReaction):
+            raise TypeError(f"expected PolicyReaction, got {type(reaction).__name__}")
+        reaction_id = reaction.resolve_id()
+        now_iso = iso(now_utc())
+        existing = self._conn.execute(
+            "SELECT created_at FROM policy_reactions WHERE reaction_id = ?", (reaction_id,)
+        ).fetchone()
+        created_at = existing["created_at"] if existing else now_iso
+        self._conn.execute(
+            """
+            INSERT INTO policy_reactions
+                (reaction_id, central_bank, inferred,
+                 condition_change_id, condition_subject, condition_predicate,
+                 condition_value_kind, condition_previous_value_json,
+                 condition_current_value_json,
+                 condition_period_kind, condition_period_value, condition_period_label,
+                 condition_publication_id, condition_document_id,
+                 condition_effective_date, condition_source_text, condition_observed_at,
+                 policy_change_id, policy_subject, policy_predicate,
+                 policy_value_kind, policy_previous_value_json,
+                 policy_current_value_json,
+                 policy_period_kind, policy_period_value, policy_period_label,
+                 policy_publication_id, policy_document_id,
+                 policy_effective_date, policy_source_text, policy_observed_at,
+                 lag_days, max_lag_days, formulation,
+                 analysis_version, analyzed_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(reaction_id) DO UPDATE SET
+                central_bank=excluded.central_bank,
+                inferred=excluded.inferred,
+                condition_change_id=excluded.condition_change_id,
+                condition_subject=excluded.condition_subject,
+                condition_predicate=excluded.condition_predicate,
+                condition_value_kind=excluded.condition_value_kind,
+                condition_previous_value_json=excluded.condition_previous_value_json,
+                condition_current_value_json=excluded.condition_current_value_json,
+                condition_period_kind=excluded.condition_period_kind,
+                condition_period_value=excluded.condition_period_value,
+                condition_period_label=excluded.condition_period_label,
+                condition_publication_id=excluded.condition_publication_id,
+                condition_document_id=excluded.condition_document_id,
+                condition_effective_date=excluded.condition_effective_date,
+                condition_source_text=excluded.condition_source_text,
+                condition_observed_at=excluded.condition_observed_at,
+                policy_change_id=excluded.policy_change_id,
+                policy_subject=excluded.policy_subject,
+                policy_predicate=excluded.policy_predicate,
+                policy_value_kind=excluded.policy_value_kind,
+                policy_previous_value_json=excluded.policy_previous_value_json,
+                policy_current_value_json=excluded.policy_current_value_json,
+                policy_period_kind=excluded.policy_period_kind,
+                policy_period_value=excluded.policy_period_value,
+                policy_period_label=excluded.policy_period_label,
+                policy_publication_id=excluded.policy_publication_id,
+                policy_document_id=excluded.policy_document_id,
+                policy_effective_date=excluded.policy_effective_date,
+                policy_source_text=excluded.policy_source_text,
+                policy_observed_at=excluded.policy_observed_at,
+                lag_days=excluded.lag_days,
+                max_lag_days=excluded.max_lag_days,
+                formulation=excluded.formulation,
+                analysis_version=excluded.analysis_version,
+                analyzed_at=excluded.analyzed_at,
+                updated_at=excluded.updated_at
+            """,
+            (
+                reaction_id,
+                reaction.central_bank,
+                1 if reaction.inferred else 0,
+                reaction.condition_change_id,
+                reaction.condition_subject,
+                reaction.condition_predicate,
+                reaction.condition_value_kind,
+                json.dumps(reaction.condition_previous_value.to_dict()) if reaction.condition_previous_value else None,
+                json.dumps(reaction.condition_current_value.to_dict()) if reaction.condition_current_value else None,
+                reaction.condition_period.kind.value if reaction.condition_period else None,
+                reaction.condition_period.value if reaction.condition_period else None,
+                reaction.condition_period.label if reaction.condition_period else None,
+                reaction.condition_publication_id,
+                reaction.condition_document_id,
+                iso(reaction.condition_effective_date),
+                reaction.condition_source_text,
+                iso(reaction.condition_observed_at),
+                reaction.policy_change_id,
+                reaction.policy_subject,
+                reaction.policy_predicate,
+                reaction.policy_value_kind,
+                json.dumps(reaction.policy_previous_value.to_dict()) if reaction.policy_previous_value else None,
+                json.dumps(reaction.policy_current_value.to_dict()) if reaction.policy_current_value else None,
+                reaction.policy_period.kind.value if reaction.policy_period else None,
+                reaction.policy_period.value if reaction.policy_period else None,
+                reaction.policy_period.label if reaction.policy_period else None,
+                reaction.policy_publication_id,
+                reaction.policy_document_id,
+                iso(reaction.policy_effective_date),
+                reaction.policy_source_text,
+                iso(reaction.policy_observed_at),
+                reaction.lag_days,
+                reaction.max_lag_days,
+                reaction.formulation,
+                reaction.analysis_version,
+                iso(reaction.analyzed_at),
+                created_at,
+                now_iso,
+            ),
+        )
+        self._conn.commit()
+
+    def save_reactions(self, reactions) -> int:
+        """Persist a list of ``PolicyReaction`` (or a ``PolicyReactionResult``).
+        Returns count."""
+        if hasattr(reactions, "reactions"):
+            reactions = reactions.reactions
+        count = 0
+        for reaction in reactions:
+            self.save_reaction(reaction)
+            count += 1
+        return count
+
+    def get_reaction(self, reaction_id: str):
+        row = self._conn.execute(
+            "SELECT * FROM policy_reactions WHERE reaction_id = ?", (reaction_id,)
+        ).fetchone()
+        return self._reaction_from_row(row) if row else None
+
+    def get_reactions(
+        self,
+        *,
+        bank: str | tuple[str, ...] | None = None,
+        condition_change_id: str | None = None,
+        policy_change_id: str | None = None,
+        subject: str | None = None,
+        limit: int | None = None,
+    ) -> list:
+        query = "SELECT * FROM policy_reactions"
+        clauses: list[str] = []
+        params: list = []
+        if bank is not None:
+            banks = (bank,) if isinstance(bank, str) else tuple(bank)
+            if banks:
+                clauses.append(f"central_bank IN ({','.join('?' * len(banks))})")
+                params.extend(banks)
+        if condition_change_id is not None:
+            clauses.append("condition_change_id = ?")
+            params.append(condition_change_id)
+        if policy_change_id is not None:
+            clauses.append("policy_change_id = ?")
+            params.append(policy_change_id)
+        if subject is not None:
+            clauses.append("(condition_subject = ? OR policy_subject = ?)")
+            params.extend((subject, subject))
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY condition_subject, policy_subject, reaction_id"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._reaction_from_row(r) for r in rows]
+
+    def delete_reactions(self, *, bank: str | None = None) -> int:
+        """Delete every reaction of a bank (or of the whole store)."""
+        if bank is not None:
+            cursor = self._conn.execute(
+                "DELETE FROM policy_reactions WHERE central_bank = ?", (bank,)
+            )
+        else:
+            cursor = self._conn.execute("DELETE FROM policy_reactions")
+        self._conn.commit()
+        return cursor.rowcount
+
+    def delete_reactions_for_document(self, document_id: str) -> int:
+        """Delete every reaction involving a document (either side)."""
+        cursor = self._conn.execute(
+            "DELETE FROM policy_reactions WHERE condition_document_id = ? OR policy_document_id = ?",
+            (document_id, document_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def delete_reactions_for_publication(self, publication_id: str) -> int:
+        """Delete every reaction involving a publication (either side)."""
+        cursor = self._conn.execute(
+            "DELETE FROM policy_reactions WHERE condition_publication_id = ? OR policy_publication_id = ?",
+            (publication_id, publication_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def rebuild_reactions(self, reactions, *, bank: str | None = None) -> int:
+        """Replace a bank's (or the store's) reactions with ``reactions`` in one
+        transaction.
+
+        ``reactions`` is a list of ``PolicyReaction`` or a
+        ``PolicyReactionResult``. ``policy_reactions`` is derived data: the bank
+        scope is fully recomputed each time, so re-analysis is idempotent, an
+        empty result clears the scope, and no stale reaction survives the
+        changes it relates.
+        """
+        from .reactions.base import PolicyReaction
+
+        if hasattr(reactions, "reactions"):
+            reactions = reactions.reactions
+        try:
+            if bank is not None:
+                self._conn.execute(
+                    "DELETE FROM policy_reactions WHERE central_bank = ?", (bank,)
+                )
+            else:
+                self._conn.execute("DELETE FROM policy_reactions")
+            count = 0
+            for reaction in reactions:
+                if not isinstance(reaction, PolicyReaction):
+                    raise TypeError(
+                        f"expected PolicyReaction, got {type(reaction).__name__}"
+                    )
+                reaction_id = reaction.resolve_id()
+                now_iso = iso(now_utc())
+                self._conn.execute(
+                    """
+                    INSERT INTO policy_reactions
+                        (reaction_id, central_bank, inferred,
+                         condition_change_id, condition_subject, condition_predicate,
+                         condition_value_kind, condition_previous_value_json,
+                         condition_current_value_json,
+                         condition_period_kind, condition_period_value, condition_period_label,
+                         condition_publication_id, condition_document_id,
+                         condition_effective_date, condition_source_text, condition_observed_at,
+                         policy_change_id, policy_subject, policy_predicate,
+                         policy_value_kind, policy_previous_value_json,
+                         policy_current_value_json,
+                         policy_period_kind, policy_period_value, policy_period_label,
+                         policy_publication_id, policy_document_id,
+                         policy_effective_date, policy_source_text, policy_observed_at,
+                         lag_days, max_lag_days, formulation,
+                         analysis_version, analyzed_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        reaction_id,
+                        reaction.central_bank,
+                        1 if reaction.inferred else 0,
+                        reaction.condition_change_id,
+                        reaction.condition_subject,
+                        reaction.condition_predicate,
+                        reaction.condition_value_kind,
+                        json.dumps(reaction.condition_previous_value.to_dict()) if reaction.condition_previous_value else None,
+                        json.dumps(reaction.condition_current_value.to_dict()) if reaction.condition_current_value else None,
+                        reaction.condition_period.kind.value if reaction.condition_period else None,
+                        reaction.condition_period.value if reaction.condition_period else None,
+                        reaction.condition_period.label if reaction.condition_period else None,
+                        reaction.condition_publication_id,
+                        reaction.condition_document_id,
+                        iso(reaction.condition_effective_date),
+                        reaction.condition_source_text,
+                        iso(reaction.condition_observed_at),
+                        reaction.policy_change_id,
+                        reaction.policy_subject,
+                        reaction.policy_predicate,
+                        reaction.policy_value_kind,
+                        json.dumps(reaction.policy_previous_value.to_dict()) if reaction.policy_previous_value else None,
+                        json.dumps(reaction.policy_current_value.to_dict()) if reaction.policy_current_value else None,
+                        reaction.policy_period.kind.value if reaction.policy_period else None,
+                        reaction.policy_period.value if reaction.policy_period else None,
+                        reaction.policy_period.label if reaction.policy_period else None,
+                        reaction.policy_publication_id,
+                        reaction.policy_document_id,
+                        iso(reaction.policy_effective_date),
+                        reaction.policy_source_text,
+                        iso(reaction.policy_observed_at),
+                        reaction.lag_days,
+                        reaction.max_lag_days,
+                        reaction.formulation,
+                        reaction.analysis_version,
+                        iso(reaction.analyzed_at),
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                count += 1
+            self._conn.commit()
+            return count
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    @staticmethod
+    def _reaction_from_row(row: sqlite3.Row):
+        from .facts.base import FactPeriod, FactValue
+        from .reactions.base import PolicyReaction
+
+        return PolicyReaction(
+            reaction_id=row["reaction_id"],
+            central_bank=row["central_bank"],
+            inferred=bool(row["inferred"]),
+            condition_change_id=row["condition_change_id"],
+            condition_subject=row["condition_subject"],
+            condition_predicate=row["condition_predicate"],
+            condition_value_kind=row["condition_value_kind"],
+            condition_previous_value=(
+                FactValue.from_dict(json.loads(row["condition_previous_value_json"]))
+                if row["condition_previous_value_json"]
+                else None
+            ),
+            condition_current_value=(
+                FactValue.from_dict(json.loads(row["condition_current_value_json"]))
+                if row["condition_current_value_json"]
+                else None
+            ),
+            condition_period=(
+                FactPeriod(
+                    kind=row["condition_period_kind"],
+                    value=row["condition_period_value"],
+                    label=row["condition_period_label"],
+                )
+                if row["condition_period_kind"]
+                else None
+            ),
+            condition_publication_id=row["condition_publication_id"],
+            condition_document_id=row["condition_document_id"],
+            condition_effective_date=from_iso(row["condition_effective_date"]),
+            condition_source_text=row["condition_source_text"],
+            condition_observed_at=from_iso(row["condition_observed_at"]),
+            policy_change_id=row["policy_change_id"],
+            policy_subject=row["policy_subject"],
+            policy_predicate=row["policy_predicate"],
+            policy_value_kind=row["policy_value_kind"],
+            policy_previous_value=(
+                FactValue.from_dict(json.loads(row["policy_previous_value_json"]))
+                if row["policy_previous_value_json"]
+                else None
+            ),
+            policy_current_value=(
+                FactValue.from_dict(json.loads(row["policy_current_value_json"]))
+                if row["policy_current_value_json"]
+                else None
+            ),
+            policy_period=(
+                FactPeriod(
+                    kind=row["policy_period_kind"],
+                    value=row["policy_period_value"],
+                    label=row["policy_period_label"],
+                )
+                if row["policy_period_kind"]
+                else None
+            ),
+            policy_publication_id=row["policy_publication_id"],
+            policy_document_id=row["policy_document_id"],
+            policy_effective_date=from_iso(row["policy_effective_date"]),
+            policy_source_text=row["policy_source_text"],
+            policy_observed_at=from_iso(row["policy_observed_at"]),
+            lag_days=row["lag_days"],
+            max_lag_days=row["max_lag_days"],
+            formulation=row["formulation"],
             analysis_version=row["analysis_version"],
             analyzed_at=from_iso(row["analyzed_at"]),
         )

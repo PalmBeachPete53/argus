@@ -124,6 +124,15 @@ documents are re-tried on later runs up to a per-document retry budget.
   source_text, extraction_method/version, confidence, extracted_at
 - `ExtractionResult` (Phase 4) — publication_id, document_id, facts[], warnings[]
   (contract returned by future type-specific extractors)
+- `FactChange` (Phase 12) — change_id (deterministic SHA-256 over previous fact
+  id + current fact id + change type), previous_fact_id → current_fact_id,
+  change_type (numeric/qualitative/text_changed), denormalized provenance of
+  **both** source Facts (publication, document, value, period, effective date,
+  verbatim source text), delta (numeric only), analysis_version, analyzed_at
+- `PolicyReaction` (Phase 13) — reaction_id (deterministic SHA-256 over
+  central_bank + condition_change_id + policy_change_id), inferred (constant
+  `True`), condition side + policy side (each a denormalized `FactChange`
+  provenance), lag_days, max_lag_days, non-causal formulation, analysis_version
 
 ## Phase 2A — Normalization (`documents/`)
 
@@ -224,6 +233,39 @@ in the `facts` table is idempotent (`save_fact` upserts by `fact_id`;
 Future type-specific extractors return an `ExtractionResult(publication_id,
 document_id, facts, warnings)`. No extractor exists yet: this phase only
 defines the contract and the data model.
+
+## Phase 12 — Temporal / Cross-Publication Analysis (`changes/`)
+
+`FactChangeAnalyzer` relates consecutive observations of the same lineage
+(same central bank, subject, predicate, value kind, canonical period,
+qualifier and **authoritative** publication type — from the `classifications`
+table, never the denormalized cache). Facts are ordered by their publication
+temporal reference (`meeting_date`, else `publication_date`), chained
+consecutively (F1→F2→F3, never a fixed baseline), and each adjacent pair is
+evaluated independently: identical values or an incomparable pair produce **no
+change** and are never bridged over. A `FactChange` is strictly descriptive —
+never an economic interpretation. It is derived data: `fact_changes` is
+rebuilt idempotently per bank (`rebuild_changes`), empty results clear the
+scope, and source `Fact`s are never modified. See `docs/CHANGES.md`.
+
+## Phase 13 — Policy Reaction Function (`reactions/`)
+
+`PolicyReactionAnalyzer` derives **inferred, non-causal** temporal associations
+between Phase 12 `FactChange`s: a condition-side change (condition vocabulary:
+inflation, core_inflation, inflation_expectations, gdp, growth, unemployment,
+wages, labour_market, financial_conditions, fiscal_policy) temporally followed
+by a policy-side change (reaction vocabulary: policy_rate,
+main_refinancing_rate, deposit_facility_rate, marginal_lending_rate,
+policy_guidance, asset_purchase, risk, inflation_risk, growth_risk). The
+observation time of each change is the temporal reference of its current-side
+publication (`meeting_date`, else `publication_date`). Pairing is per central
+bank, requires **no look-ahead** (`condition_observed_at ≤ policy_observed_at`)
+and a lag within the documented window (`DEFAULT_MAX_LAG_DAYS = 180`); every
+eligible pair yields exactly one `PolicyReaction`. A reaction is never a Fact,
+never causal, and carries no stance/trading interpretation. It is derived data:
+`policy_reactions` is rebuilt idempotently per bank (`rebuild_reactions`),
+empty results clear the scope, and source `Fact`s / `FactChange`s are never
+modified. See `docs/REACTIONS.md`.
 
 ## Deduplication
 
