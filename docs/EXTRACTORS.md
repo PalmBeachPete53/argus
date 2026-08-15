@@ -900,9 +900,12 @@ asserts, per fixture:
 ## Multi-bank Minutes extractors — BoE, BoJ, Norges, RBA, Riksbank
 
 Minutes is a **publication type** (`minutes` / `meeting_account`), not a
-Fact. The five banks below already had authoritative `minutes` classification
-rules in `src/argus/classification/bank_rules.py` but no extractor; they are
-now implemented, registered for generic dispatch (`get_extractor` +
+Fact. BoE, BoJ, Norges and Riksbank were already classifiable `minutes` by
+authoritative bank rules in `src/argus/classification/bank_rules.py` but had
+no extractor; RBA Board Minutes had no dedicated rule, but are discriminated
+by the dedicated Board-Minutes archive source (Tier‑1 source type-hint, HIGH
+confidence) plus the generic `minutes` URL rule in `src/argus/classification/rules.py`.
+All five are now implemented, registered for generic dispatch (`get_extractor` +
 `extract_minutes`), and covered by fixtures. Each extractor is
 **bank-specific** (heading vocabulary, section structure, attribution wording),
 sharing only the **structural** helpers in `src/argus/minutes/_shared.py`
@@ -961,8 +964,12 @@ no warnings).
 decision`, `considerations for monetary policy` (monetary policy / policy rate
 discussion, risk assessment), and the economic sections (`financial
 conditions`, `economic conditions` including GDP, unemployment and wages,
-inflation). Fixture: `tests/fixtures/documents/rba_minutes.html` (11 facts, no
-warnings).
+inflation). The Board-Minutes archive source (`rba_board_minutes_archive` in
+`src/argus/adapters/rba.py`) makes real official Board Minutes discoverable and
+classifies them `minutes` (Tier‑1 source type-hint). The fixture
+`tests/fixtures/documents/rba_minutes.html` (11 facts, no warnings) is
+**synthetic**; no real-historical-corpus validation has been performed (Phase
+16 remains `DEFERRED`).
 
 ### Riksbank — `RiksbankMinutesExtractor`
 `src/argus/minutes/riksbank.py` (`extraction_version 8.5.0`). Mined sections:

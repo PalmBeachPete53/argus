@@ -63,8 +63,11 @@ explicitly excluded.
 - Rich RSS set (media releases, SMP, speeches, …), RSS-CB 1.2 with `dc:date`.
   Decisions moved from `/monetary-policy/decisions/` to `/monetary-policy/int-rate-decisions/`.
 - Media releases: `/media-releases/<YYYY>/mr-YY-NN.html`; SMP has HTML + PDF.
+- Board Minutes: dated leaves under `/monetary-policy/rba-board-minutes/<YYYY>/<YYYY-MM-DD>.html`
+  (discovered via `rba_board_minutes_archive`, classified `minutes`).
 - Adapter sources: `rba_media_releases_rss` (1), `rba_smp_rss` (2),
-  `rba_int_rate_archive` (4), `rba_sitemap_monetary` (6).
+  `rba_int_rate_archive` (4), `rba_sitemap_monetary` (6),
+  `rba_board_minutes_archive` (7).
 
 ### Reserve Bank of New Zealand (`rbnz` · rbnz.govt.nz)
 - No RSS. The OCR decision timeline table is static HTML — primary source.

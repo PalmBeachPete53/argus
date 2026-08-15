@@ -415,10 +415,12 @@ Phase 5/6/12/13/14/15 sémantique. 1 fixture + tests synthétiques
 - **Statut** : `COMPLETE` — la famille `minutes` / `meeting_account` est étendue
   de 1 à **6 banques** : ECB (Meeting Account, conservé) auxquelles s'ajoutent
   **BoE** (`BoeMinutesExtractor` v8.2.0), **BoJ** (`BojMinutesExtractor`
-  v8.3.0), **Norges** (`NorgesMinutesExtractor` v8.4.0), **Riba**
+  v8.3.0), **Norges** (`NorgesMinutesExtractor` v8.4.0), **RBA**
   (`RbaMinutesExtractor` v8.6.0) et **Riksbank**
-  (`RiksbankMinutesExtractor` v8.5.0) — les cinq banques déjà **classifiées**
-  `minutes` sans extracteur.
+  (`RiksbankMinutesExtractor` v8.5.0) — les quatre banques déjà **classifiées**
+  `minutes` par règle de banque sans extracteur ; l'écart RBA (découverte de
+  l'archive Board Minutes via `src/argus/adapters/rba.py` + extraction) est
+  fermé.
 - Extracteurs **banque-spécifiques** partageant uniquement des helpers
   **structurels** (`src/argus/minutes/_shared.py` : normalisation des titres,
   découpage des phrases, gate de valeur explicite, attribution déterministe +
