@@ -1430,20 +1430,28 @@ def test_get_reports_extractor_resolves_registered_banks():
     expected = {
         "ecb": "EcbReportsExtractor",
         "norges": "NorgesReportExtractor",
+        "boe": "BoeReportExtractor",
+        "boc": "BocReportExtractor",
+        "rba": "RbaReportExtractor",
+        "rbnz": "RbnzReportExtractor",
     }
     for bank, class_name in expected.items():
         ext = get_extractor(bank)
         assert ext is not None, f"{bank}: extractor not registered"
         assert ext.__class__.__name__ == class_name, f"{bank}: wrong extractor {ext.__class__.__name__}"
 
-    # Other banks with monetary_policy_report publication type but no extractor yet
-    for bank in ("boe", "boc", "rba", "rbnz"):
-        assert get_extractor(bank) is None, f"{bank}: should not have extractor yet"
+    # Banks with no monetary_policy_report publication type (per taxonomy)
+    for bank in ("fed", "boj", "snb", "riksbank"):
+        assert get_extractor(bank) is None, f"{bank}: should not have report extractor"
 
 
 REPORTS_FIXTURE_MAP = {
     "ecb": "ecb_report.html",
     "norges": "norges_mpr.html",
+    "boe": "boe_report.html",
+    "boc": "boc_report.html",
+    "rba": "rba_report.html",
+    "rbnz": "rbnz_report.html",
 }
 
 

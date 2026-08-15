@@ -30,12 +30,20 @@ from .norges import (
     SUBJECT_POLICY_RATE_PROJECTION,
     NorgesReportExtractor,
 )
+from .boe import BoeReportExtractor
+from .boc import BocReportExtractor
+from .rba import RbaReportExtractor
+from .rbnz import RbnzReportExtractor
 
 __all__ = [
     "REPORT_PUBLICATION_TYPES",
     "ReportsExtractor",
     "EcbReportsExtractor",
     "NorgesReportExtractor",
+    "BoeReportExtractor",
+    "BocReportExtractor",
+    "RbaReportExtractor",
+    "RbnzReportExtractor",
     "SUBJECT_POLICY_RATE_PROJECTION",
     "EXTRACTION_VERSION",
     "SUBJECT_INFLATION",

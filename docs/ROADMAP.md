@@ -504,6 +504,34 @@ L'architecture doit rester extensible à d'autres banques centrales.
   classification et coexistence Phases 5/6/7/8/9 vérifiées ;
   `docs/EXTRACTORS.md` documente la couverture réelle.
 
+### Phase 4.x — Extension multi-banques des Reports
+
+- **Statut** : `COMPLETE` — la famille `monetary_policy_report` est étendue de
+  2 à **6 banques** : ECB (Economic Bulletin, conservé) et Norges (Monetary
+  Policy Report + contenu mixte, conservé), auxquelles s'ajoutent **BoE**
+  (`BoeReportExtractor` v10.2.0), **BoC** (`BocReportExtractor` v10.3.0),
+  **RBA** (`RbaReportExtractor` v10.4.0, Statement on Monetary Policy) et
+  **RBNZ** (`RbnzReportExtractor` v10.5.0, Monetary Policy Statement) — les
+  quatre banques déjà **classifiées** `monetary_policy_report` sans extracteur.
+- Extracteurs **banque-spécifiques** partageant uniquement des helpers
+  **structurels** (`src/argus/reports/_shared.py` : normalisation des titres,
+  découpage des phrases, gate de valeur explicite, émission déterministe avec
+  processus/déduplication) ; aucune sémantique banque-spécifique dans le code
+  partagé. Pas de symétrie artificielle : Fed, BoJ, SNB et Riksbank restent
+  `not applicable` / représentés par une autre famille (raisons documentées).
+- Contract Fact canonique respecté : banque, sujet, prédicat, valeur, kind,
+  unité, période, provenance publication/document, `speaker`/`effective_date`
+  `None`, qualificateur `report:{subject}:{ordinal}`. Valeurs supportées par la
+  source uniquement ; prévision sans période ignorée ; parts (« % of GDP »)
+  jamais des pourcentages ; projection vs observation respecté.
+- 4 fixtures (`boe_report.html`, `boc_report.html`, `rba_report.html`,
+  `rbnz_report.html`), tests de contrat / dispatch générique / provenance /
+  limites / déterminisme (répétition + indépendance d'ordre) / immutabilité /
+  intégration (publication → classification → extracteur → faits →
+  persistance → récupération) dans `tests/test_reports_multibank.py`.
+- 67 nouveaux tests verts et déterministes (957 → 1024), `compileall` propre.
+  **Phase 16 (validation historique) reste `DEFERRED`.**
+
 ## Phase 11 — Speeches & Interviews
 
 - **Objectif** : conserver speaker, role, date, event, audience, topic,

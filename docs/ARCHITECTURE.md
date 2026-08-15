@@ -254,8 +254,32 @@ in the `facts` table is idempotent (`save_fact` upserts by `fact_id`;
 `rebuild_facts_for_document` replaces a document's facts in one transaction).
 
 Future type-specific extractors return an `ExtractionResult(publication_id,
-document_id, facts, warnings)`. No extractor exists yet: this phase only
-defines the contract and the data model.
+ document_id, facts, warnings)`. No extractor exists yet: this phase only
+ defines the contract and the data model.
+
+## Type-specific extractor families (Phases 5–11, 4.x)
+
+Each **publication type** is mined by its own extractor family — decisions,
+statements, press conferences, minutes/meeting accounts, economic projections,
+monetary policy **reports**, and speeches — and extraction is **gated on
+classification** (the `classifications` table is the single source of truth),
+so the families are disjoint and never cross-mine. Within a family, extraction
+is **bank-specific**: one extractor per bank, dispatched generically on
+`central_bank` (`get_extractor(bank)`), because bank wording, section labels
+and report structures differ materially. Only **structural** helpers (heading
+normalization, sentence splitting, the explicit value-claim gate, a
+deterministic provenance-carrying fact emitter with within-run deduplication)
+are shared between a family's extractors (`src/argus/reports/_shared.py`);
+**no bank-specific semantics** live in those helpers.
+
+A **monetary policy report is a publication type** (`monetary_policy_report`),
+not a Fact: the pipeline is `official source → publication → classification →
+bank-specific Report extractor → canonical Facts`. Report extractors never
+produce downstream semantic Facts (no hawkish/dovish, stance, directional or
+forex interpretation) and never mutate source objects. The Report family
+currently covers ECB, Norges, BoE, BoC, RBA and RBNZ; Fed, BoJ, SNB and
+Riksbank are documented as not-applicable / represented by another family (see
+`docs/EXTRACTORS.md`).
 
 ## Phase 12 — Temporal / Cross-Publication Analysis (`changes/`)
 

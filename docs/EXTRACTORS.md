@@ -1395,6 +1395,107 @@ asserts, per fixture:
 - deterministic extraction and idempotent Store persistence (including
   empty-result persistence and the `monetary_policy_report` gating),
   classification gating and Phase 5/6/7/8/9 coexistence.
+
+## Norges Bank report extractor
+
+`src/argus/reports/norges.py` — `NorgesReportExtractor`
+(`extraction_version 10.1.0`). Norges Bank's "Monetary Policy Report" is a
+**mixed-content** document: it carries the macroeconomic narrative (inflation,
+growth, labour market, risks) **and** the published **policy-rate path**
+(projected future levels of the policy rate). This extractor handles both
+faces:
+
+- economic sections are routed deterministically by normalized heading; an
+  unknown section is never mined for bare assessments (precision over recall);
+- a quantitative value Fact is produced only behind an explicit value claim
+  with an explicit reference year;
+- the policy-rate path is extracted only from sentences that explicitly put a
+  numeric policy-rate level in a future year ("a policy rate of 1.90 per cent
+  in 2028") as a `policy_rate_projection/value` Fact;
+- the current policy-rate decision stays Phase 5 (gated on decision
+  publications) — the report never re-prices it; the full projection tables
+  stay Phase 9; hawkish/dovish interpretation is never produced.
+
+## Multi-bank Report extractors — BoE, BoC, RBA, RBNZ
+
+The Report family is a **publication type** (`monetary_policy_report`), not a
+Fact. The four banks below were already **classified** as
+`monetary_policy_report` in `src/argus/classification/bank_rules.py` but had no
+extractor; they are now implemented, registered for generic dispatch and
+covered by fixtures. Each extractor is **bank-specific** (heading vocabulary,
+section structure, policy terminology), sharing only the **structural** helpers
+in `src/argus/reports/_shared.py` (heading normalization, sentence splitting,
+explicit value-claim gate, deterministic provenance-carrying emission with
+within-run deduplication). No bank-specific semantics live in the shared
+helper.
+
+All four follow the Report-family **precision-over-recall** rule:
+
+- sections are routed by **exact normalized heading** — known economic headings
+  are mined content-first; the report masthead, known non-economic headings
+  (contents, glossary, annex, appendix, methodology, legal notice, boxes,
+  assumptions) and **unknown** headings are ignored (`UNKNOWN ≠ ECONOMIC`);
+- sentence classification is content-first with a fixed precedence:
+  guidance > policy > risk > financial > inflation > labour > growth;
+- a quantitative value Fact is produced only behind an **explicit value-claim**
+  verb with a percentage and, for a forecast, an explicit reference period
+  (year / month / quarter read from the wording); a forecast without a period
+  is under-determined and ignored; share/ratio units
+  ("% of GDP", "% of total") are never converted into percentage Facts; a bare
+  statement ("Inflation is 2.4 per cent in 2025") yields no value;
+- risks are categorical orientations (`upside` / `downside` / `balanced`) only
+  when the source states one, otherwise verbatim text assessments; the target
+  (`inflation_risk` / `growth_risk` / `risk`) is read from the wording;
+- GDP near-misses ("GDP deflator", "GDP per capita", "per capita GDP") never
+  anchor a growth sentence and never leak a GDP value;
+- `Fact.speaker` is always `None`, `Fact.effective_date` is always `None`,
+  `identity_qualifier` is `report:{subject}:{ordinal}`;
+- verbatim provenance preserved on every Fact; within-run deduplication;
+  deterministic output; source objects never mutated.
+
+### BoE — `BoeReportExtractor` (v10.2.0)
+
+Publication: the Bank of England **Monetary Policy Report**. Mined sections
+include `summary`, `demand and output`, `supply costs and prices`,
+`the labour market`, `financial conditions`, `monetary policy`, `risks`.
+Supports inflation (CPI), GDP, unemployment, wages, financial conditions,
+monetary-policy statement, forward guidance and risk orientations. Fixture:
+`tests/fixtures/documents/boe_report.html` (12 facts, no warnings).
+
+### BoC — `BocReportExtractor` (v10.3.0)
+
+Publication: the Bank of Canada **Monetary Policy Report**. Mined sections
+include `executive summary`, `growth in canada and abroad`,
+`the outlook for inflation`, `the labour market`, `financial conditions`,
+`monetary policy`, `risks`. Supports inflation, GDP, unemployment, wages,
+financial conditions, monetary-policy statement, forward guidance and risk
+orientations. Fixture: `tests/fixtures/documents/boc_report.html` (12 facts,
+no warnings).
+
+### RBA — `RbaReportExtractor` (v10.4.0)
+
+Publication: the RBA **Statement on Monetary Policy** (the report-family type
+for the RBA; the cash-rate decision stays Phase 5). Mined sections include
+`overview`, `domestic economic conditions`, `the international environment`,
+`the labour market`, `inflation and prices`, `financial conditions`,
+`the stance of monetary policy`, `risks`. Underlying-inflation measures
+(trimmed mean / weighted median) are not read as headline-CPI values. Fixture:
+`tests/fixtures/documents/rba_report.html` (11 facts, no warnings).
+
+### RBNZ — `RbnzReportExtractor` (v10.5.0)
+
+Publication: the RBNZ **Monetary Policy Statement** (the report-family type;
+the OCR decision stays Phase 5). Mined sections include `executive summary`,
+`the economic outlook`, `the new zealand economy`, `the labour market`,
+`inflation`, `financial conditions`, `monetary policy`, `risks`. Supports
+inflation, GDP, unemployment, wages, financial conditions, monetary-policy
+statement, forward guidance and risk orientations. The structured OCR-path /
+projection tables stay Phase 9. Fixture:
+`tests/fixtures/documents/rbnz_report.html` (11 facts, no warnings).
+
+See `tests/test_reports_multibank.py` for the contract, dispatch, provenance,
+boundary, determinism, immutability and end-to-end integration coverage of
+these four extractors.
 # Type-Specific Extractors — Phase 11 (Speeches / Remarks / Address)
 
 ## Pipeline
@@ -1744,12 +1845,12 @@ hardening pass (commit 96e81de → hardened). The key distinction is:
 |------|----------|-----------|---------|-------------|--------------|-------------|
 | ECB | implemented | implemented | implemented (meeting_account) | implemented | implemented (Economic Bulletin) | ✅ (multiple fixtures) |
 | Fed | implemented | implemented | implemented (minutes) | implemented (SEP) | not applicable | ✅ (fixtures) |
-| BoE | implemented | implemented | not implemented | not applicable | not implemented | ⚠️ (fixtures only) |
+| BoE | implemented | implemented | not implemented | not applicable | implemented (Monetary Policy Report) | ⚠️ (fixtures only) |
 | BoJ | intentionally represented by Statement | implemented | not implemented | not implemented | not applicable | ⚠️ (fixtures only) |
 | SNB | implemented | implemented | not applicable | not applicable | not applicable | ⚠️ (fixtures only) |
-| BoC | implemented | implemented | not applicable | not applicable | not implemented | ⚠️ (fixtures only) |
-| RBA | implemented | implemented | not applicable | not applicable | not implemented | ⚠️ (fixtures only) |
-| RBNZ | implemented | implemented | not applicable | not applicable | not implemented | ⚠️ (fixtures only) |
+| BoC | implemented | implemented | not applicable | not applicable | implemented (Monetary Policy Report) | ⚠️ (fixtures only) |
+| RBA | implemented | implemented | not applicable | not applicable | implemented (Statement on Monetary Policy) | ⚠️ (fixtures only) |
+| RBNZ | implemented | implemented | not applicable | not applicable | implemented (Monetary Policy Statement) | ⚠️ (fixtures only) |
 | Norges | implemented | not applicable | not implemented | not applicable | implemented (Monetary Policy Report + mixed) | ⚠️ (fixtures only) |
 | Riksbank | implemented | implemented | not implemented | not applicable | not applicable | ⚠️ (fixtures only) |
 
@@ -1811,22 +1912,31 @@ from argus.projections import get_extractor as get_projections
 assert get_projections("ecb").__class__.__name__ == "EcbProjectionsExtractor"
 assert get_projections("fed").__class__.__name__ == "FedSepExtractor"
 
-# Reports (2 representative banks)
+# Reports (6 banks)
 from argus.reports import get_extractor as get_reports
 assert get_reports("ecb").__class__.__name__ == "EcbReportsExtractor"
 assert get_reports("norges").__class__.__name__ == "NorgesReportExtractor"
+assert get_reports("boe").__class__.__name__ == "BoeReportExtractor"
+assert get_reports("boc").__class__.__name__ == "BocReportExtractor"
+assert get_reports("rba").__class__.__name__ == "RbaReportExtractor"
+assert get_reports("rbnz").__class__.__name__ == "RbnzReportExtractor"
+assert get_reports("fed") is None  # not applicable
+assert get_reports("boj") is None  # represented by projections
+assert get_reports("snb") is None  # not applicable
+assert get_reports("riksbank") is None  # not applicable
 ```
 
 ### Test Results (Hardening Pass)
 
-- **All tests pass**: 957 tests × 3 runs = deterministic
+- **All tests pass**: 1024 tests × 3 runs = deterministic
 - **compileall**: clean
 - **New integration tests added**:
   - Decision generic dispatch: 9 banks × 1 fixture each
   - Statement generic dispatch: 9 banks × 1 fixture each
   - Minutes generic dispatch: 2 banks × 1 fixture each
   - Projections generic dispatch: 2 banks × 1 fixture each
-  - Reports generic dispatch: 2 banks × 1 fixture each
+  - Reports generic dispatch: 6 banks × 1 fixture each (Phase 4.x extension:
+    BoE, BoC, RBA, RBNZ added alongside ECB and Norges)
 - **No regressions**: All existing golden tests, gating tests, idempotence tests, phase coexistence tests pass
 
 ### Phase 16 Status

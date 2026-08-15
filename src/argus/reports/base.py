@@ -142,9 +142,17 @@ def _is_report_publication(store, publication, *, expected_types: tuple[str, ...
 
 
 from .ecb import EcbReportsExtractor  # noqa: E402  (see below)
+from .boe import BoeReportExtractor  # noqa: E402
+from .boc import BocReportExtractor  # noqa: E402
+from .rba import RbaReportExtractor  # noqa: E402
+from .rbnz import RbnzReportExtractor  # noqa: E402
 
 _EXTRACTORS: dict[str, ReportsExtractor] = {
     EcbReportsExtractor.bank: EcbReportsExtractor(),
+    BoeReportExtractor.bank: BoeReportExtractor(),
+    BocReportExtractor.bank: BocReportExtractor(),
+    RbaReportExtractor.bank: RbaReportExtractor(),
+    RbnzReportExtractor.bank: RbnzReportExtractor(),
 }
 
 
