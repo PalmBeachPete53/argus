@@ -15,7 +15,7 @@ Fact                                    ← Phase 4 (src/argus/facts/)
 Temporal / Cross-Publication Analysis   ← Phase 12 (src/argus/changes/)
     ↓
 Policy Reaction Function                ← Phase 13 (src/argus/reactions/, THIS layer)
-Monetary Policy State                   ← Phase 14 (NOT STARTED)
+Monetary Policy State                   ← Phase 14 (COMPLETE — docs/MONETARY_POLICY_STATE.md)
 Forex Fundamentals                      ← Phase 15 (NOT STARTED)
 ```
 

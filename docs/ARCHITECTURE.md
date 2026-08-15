@@ -133,6 +133,13 @@ documents are re-tried on later runs up to a per-document retry budget.
   central_bank + condition_change_id + policy_change_id), inferred (constant
   `True`), condition side + policy side (each a denormalized `FactChange`
   provenance), lag_days, max_lag_days, non-causal formulation, analysis_version
+- `MonetaryPolicyState` (Phase 14) — state_id (deterministic SHA-256 over
+  central_bank + source_change_id), synthesized (constant `True`), one policy
+  dimension (subject, predicate, value_kind, qualifier, period, authoritative
+  publication type), the observed level (current side of the source
+  `FactChange`, verbatim — never invented or converted), observed_at
+  (meeting_date, else publication_date; `effective_date` kept separate),
+  denormalized current-side provenance, analysis_version
 
 ## Phase 2A — Normalization (`documents/`)
 
@@ -269,6 +276,29 @@ never causal, and carries no stance/trading interpretation. It is derived data:
 `policy_reactions` is rebuilt idempotently per bank (`rebuild_reactions`),
 empty results clear the scope, and source `Fact`s / `FactChange`s are never
 modified. See `docs/REACTIONS.md`.
+
+## Phase 14 — Monetary Policy State (`states/`)
+
+`MonetaryPolicyStateAnalyzer` synthesizes a **derived, dated** state of the
+**observable policy dimensions** of each central bank from Phase 12
+`FactChange`s. Each eligible policy change (subject in `STATE_SUBJECTS`, which
+is exactly Phase 13's reaction vocabulary; predicate not in
+`STATE_EXCLUDED_PREDICATES = {"projection"}`) yields exactly one state entry:
+the current side of the change is the newest known level of that dimension,
+observed at the temporal reference of the current-side publication
+(`meeting_date`, else `publication_date`). The `central_bank` is a property of
+the `FactChange`, never resolved from the publication (`unplaced_change`
+warning otherwise). The observed value is copied verbatim — policy rates are
+never reduced to a single rate, never invented, never converted; guidance /
+asset purchase / risk assessments are kept as observed with **no directional
+interpretation**. `synthesized` is a constant `True` (state synthesis is
+authorized, economic/market interpretation is not). The state at an instant T
+is answered by `get_policy_state_as_of(bank, T)` — the latest entry per
+dimension with `observed_at ≤ T` (no look-ahead; a dimension with no observed
+change is simply absent). It is derived data: `monetary_policy_states` is
+rebuilt idempotently per bank (`rebuild_policy_states`), empty results clear
+the scope, and source `Fact`s / `FactChange`s are never modified. See
+`docs/MONETARY_POLICY_STATE.md`.
 
 ## Deduplication
 

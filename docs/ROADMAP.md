@@ -577,22 +577,24 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Modèle cible** :
   ```
   Policy State
-  ├── stance
-  ├── direction
-  ├── rate_level
-  ├── rate_expectation
-  ├── inflation_risk
-  ├── growth_risk
-  ├── labour_risk
+  ├── rate_level            (policy_rate, main_refinancing_rate,
+  │                          deposit_facility_rate, marginal_lending_rate)
   ├── guidance
-  ├── confidence
-  └── as_of
+  ├── asset_purchase
+  ├── inflation_risk / growth_risk / risk
+  └── as_of                 (observed_at)
   ```
+- **Déviations documentées** : le modèle cible initial listait `stance`,
+  `direction`, `rate_expectation`, `labour_risk`, `confidence`. Ces dimensions
+  ne sont **pas structurées par les données actuelles** (aucun sujet/fait
+  observé correspondant) → exclues de la Phase 14, listées comme gaps explicites
+  (`unknown > invention`), jamais inventées.
 - **Livrables** : constructeur d'état, historisation, tests, documentation.
-- **Dépendances** : Phase 12.
-- **Critères de validation** : chaque état est daté (`as_of`), historisé et
-  remontable aux faits.
-- **Statut** : `NOT STARTED`.
+- **Dépendances** : Phase 12 (source des `FactChange`) et vocabulaire de la
+  Phase 13 (`STATE_SUBJECTS = REACTION_SUBJECTS`).
+- **Critères de validation** : chaque état est daté (`observed_at`), historisé,
+  remontable aux faits, sans look-ahead ni interprétation.
+- **Statut** : `COMPLETE` (voir « Current Position »).
 
 ## Phase 15 — Forex Fundamentals
 
@@ -685,9 +687,13 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   RSS, sitemap/sitemap index et HTML archives avec pagination ; les APIs
   officielles et calendriers ne sont pas encore mobilisés pour toutes les
   banques. Cela reste du périmètre Phase 1 sans réouverture d'architecture.
-- **Vocabulaire** : « state » (Phase 14) est un concept cible, sans modèle
-  actuel ; toute implémentation devra définir des types de valeur explicites
-  (`value_type`, `unit`, `period`) dès la Phase 4 pour éviter la dérive.
+- **Vocabulaire** : « state » (Phase 14) est maintenant implémenté
+  (`src/argus/states/`, `docs/MONETARY_POLICY_STATE.md`) : il consomme les
+  types de valeur explicites déjà définis dès la Phase 4 (`value.kind`,
+  `unit`, `FactPeriod`) et le vocabulaire de dimension de la Phase 13 ; les
+  dimensions cible non structurées par les données (`stance`, `direction`,
+  `rate_expectation`, `labour_risk`, `confidence`) restent des gaps
+  documentés, jamais inventés.
 - **Extensibilité** : l'architecture cible et la Phase 1 sont alignées sur
   l'exigence « configuration déclarative » ; aucune banque initiale ne
   nécessite un codage particulier du cœur, vérifié pour les 10 banques du
@@ -766,7 +772,7 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   chaînage consécutif F1→F2→F3 sans pont, règles delta, provenance verbatim,
   persistance idempotente, isolation par banque). **685 tests verts et
   déterministes**.
-- **PHASE 13 — POLICY REACTION FUNCTION (COMPLETE)** : `src/argus/reactions/`
+- **PHASE 13 — POLICY REACTION FUNCTION (COMPLETE / FROZEN)** : `src/argus/reactions/`
   validé — `PolicyReactionAnalyzer` pur et déterministe (v13.0.0), relation
   **dérivée et inférée** `condition change → policy change` (`inferred=True`
   constant, jamais un `Fact`, formulation explicitement **non-causale**) ;
@@ -797,7 +803,40 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   aucune causalité, aucun look-ahead ; 8 fixtures golden/adversarial, tests
   négatifs explicites, isolation cross-banque, déterminisme ×2. **65 tests
   dédiés — suite complète : 750 tests verts et déterministes.**
-- **Prochaine phase autorisée : Phase 14 — Monetary Policy State** (statut
+- **PHASE 14 — MONETARY POLICY STATE (COMPLETE)** : `src/argus/states/`
+  validé — `MonetaryPolicyStateAnalyzer` pur et déterministe (v14.0.0), état
+  **dérivé, daté et synthétisé** des dimensions de politique monétaire
+  observables (`synthesized=True` constant, jamais un `Fact`, jamais une
+  interprétation) ; dimensions = vocabulaire réaction Phase 13
+  (`STATE_SUBJECTS = REACTION_SUBJECTS` : policy_rate,
+  main_refinancing_rate, deposit_facility_rate, marginal_lending_rate,
+  policy_guidance, asset_purchase, risk, inflation_risk, growth_risk) ;
+  **source = Phase 12** — chaque `FactChange` de dimension produit exactement
+  un état, la valeur = côté courant du changement (verbatim, jamais inventée,
+  jamais convertie, les taux ne sont jamais réduits à un seul) ; règle
+  temporelle `meeting_date` sinon `publication_date`, **`effective_date` et
+  `period` jamais dates d'observation** (conservées séparées) ; lignées
+  « projection » exclues (`out_of_scope_change:<change_id>`) ; isolation
+  stricte par `central_bank` (propriété du `FactChange`, jamais de la
+  publication : `unplaced_change`) ; identité déterministe `state_id` =
+  SHA-256(central_bank, source_change_id) ; **état à une date** sans look-ahead
+  (`get_policy_state_as_of(bank, T)` = dernière entrée par dimension avec
+  `observed_at ≤ T`, une dimension jamais observée est absente, `unknown >
+  invention`) ; provenance verbatim dénormalisée du côté courant jusqu'au
+  `FactChange`/`Fact`/publications, type de publication autoritatif
+  (classifications, jamais le cache dénormalisé) ; avertissements
+  observabilité (`missing_publication`, `undated_publication`,
+  `unplaced_change`, `valueless_change`, `missing_classification`,
+  `out_of_scope_change`) ; table `monetary_policy_states` persistée de façon
+  idempotente (`rebuild_policy_states` par banque, vide-efface, `created_at`
+  préservé, delete par document/publication/banque) ; aucune mutation de
+  `Fact`/`FactChange`/`PolicyReaction`, aucun hawkish/dovish, aucun stance,
+  aucun forecast, aucune comparaison inter-banques, aucun signal
+  trading/forex, aucun LLM/flou/sémantique, aucune causalité ; gaps vs modèle
+  cible documentés (`stance`, `direction`, `rate_expectation`, `labour_risk`,
+  `confidence` non structurés par les données → exclus, jamais inventés) ; 74
+  tests dédiés — **suite complète : 827 tests verts et déterministes.**
+- **Prochaine phase autorisée : Phase 15 — Forex Fundamentals** (statut
   `NOT STARTED`).
 
 ## Out of Scope

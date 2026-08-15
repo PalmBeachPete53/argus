@@ -281,6 +281,53 @@ CREATE INDEX IF NOT EXISTS idx_policy_reactions_bank
     ON policy_reactions(central_bank);
 CREATE INDEX IF NOT EXISTS idx_policy_reactions_publications
     ON policy_reactions(condition_publication_id, policy_publication_id);
+
+CREATE TABLE IF NOT EXISTS monetary_policy_states (
+    -- Phase 14 — derived, dated monetary policy state observations. Each row
+    -- is ONE policy dimension of ONE central bank established by ONE
+    -- FactChange: the current side of the change is the newest known value of
+    -- the dimension, known at `observed_at` (meeting_date else
+    -- publication_date of the current-side publication). `state_id` is a
+    -- deterministic SHA-256 over (central_bank, source_change_id), so
+    -- re-running the analysis updates the row instead of duplicating it.
+    -- `synthesized` is a constant 1 (never a Fact, never inferred, never a
+    -- stance/forecast/trading signal). Provenance is denormalized from the
+    -- current side up to its change / fact / publication / document.
+    state_id TEXT PRIMARY KEY,
+    central_bank TEXT,
+    synthesized INTEGER NOT NULL DEFAULT 1,
+    source_change_id TEXT NOT NULL,
+    dimension_key TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    value_kind TEXT,
+    qualifier TEXT,
+    period_kind TEXT,
+    period_value TEXT,
+    period_label TEXT,
+    publication_type TEXT NOT NULL,
+    value_json TEXT,
+    previous_value_json TEXT,
+    observed_at TEXT,
+    publication_id TEXT NOT NULL,
+    document_id TEXT NOT NULL,
+    effective_date TEXT,
+    source_text TEXT,
+    analysis_version TEXT,
+    analyzed_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_policy_states_bank
+    ON monetary_policy_states(central_bank);
+CREATE INDEX IF NOT EXISTS idx_policy_states_change
+    ON monetary_policy_states(source_change_id);
+CREATE INDEX IF NOT EXISTS idx_policy_states_dimension
+    ON monetary_policy_states(dimension_key);
+CREATE INDEX IF NOT EXISTS idx_policy_states_observed_at
+    ON monetary_policy_states(observed_at);
+CREATE INDEX IF NOT EXISTS idx_policy_states_publication
+    ON monetary_policy_states(publication_id);
 """
 
 
@@ -1944,6 +1991,319 @@ class Store:
             lag_days=row["lag_days"],
             max_lag_days=row["max_lag_days"],
             formulation=row["formulation"],
+            analysis_version=row["analysis_version"],
+            analyzed_at=from_iso(row["analyzed_at"]),
+        )
+    # ------------------------------------------------------------------
+    # Phase 14 — monetary policy states
+    # ------------------------------------------------------------------
+    def save_policy_state(self, state) -> None:
+        """Persist one ``MonetaryPolicyState``, upserting by its deterministic
+        id.
+
+        Idempotent: re-saving the same state overwrites the row in place,
+        preserving ``created_at``.
+        """
+        from .states.base import MonetaryPolicyState
+
+        if not isinstance(state, MonetaryPolicyState):
+            raise TypeError(f"expected MonetaryPolicyState, got {type(state).__name__}")
+        state_id = state.resolve_id()
+        now_iso = iso(now_utc())
+        existing = self._conn.execute(
+            "SELECT created_at FROM monetary_policy_states WHERE state_id = ?", (state_id,)
+        ).fetchone()
+        created_at = existing["created_at"] if existing else now_iso
+        self._conn.execute(
+            """
+            INSERT INTO monetary_policy_states
+                (state_id, central_bank, synthesized, source_change_id,
+                 dimension_key, subject, predicate, value_kind, qualifier,
+                 period_kind, period_value, period_label, publication_type,
+                 value_json, previous_value_json, observed_at,
+                 publication_id, document_id, effective_date, source_text,
+                 analysis_version, analyzed_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(state_id) DO UPDATE SET
+                central_bank=excluded.central_bank,
+                synthesized=excluded.synthesized,
+                source_change_id=excluded.source_change_id,
+                dimension_key=excluded.dimension_key,
+                subject=excluded.subject,
+                predicate=excluded.predicate,
+                value_kind=excluded.value_kind,
+                qualifier=excluded.qualifier,
+                period_kind=excluded.period_kind,
+                period_value=excluded.period_value,
+                period_label=excluded.period_label,
+                publication_type=excluded.publication_type,
+                value_json=excluded.value_json,
+                previous_value_json=excluded.previous_value_json,
+                observed_at=excluded.observed_at,
+                publication_id=excluded.publication_id,
+                document_id=excluded.document_id,
+                effective_date=excluded.effective_date,
+                source_text=excluded.source_text,
+                analysis_version=excluded.analysis_version,
+                analyzed_at=excluded.analyzed_at,
+                updated_at=excluded.updated_at
+            """,
+            (
+                state_id,
+                state.central_bank,
+                1 if state.synthesized else 0,
+                state.source_change_id,
+                state.dimension_key,
+                state.subject,
+                state.predicate,
+                state.value_kind,
+                state.qualifier,
+                state.period.kind.value if state.period else None,
+                state.period.value if state.period else None,
+                state.period.label if state.period else None,
+                state.publication_type,
+                json.dumps(state.value.to_dict()) if state.value else None,
+                json.dumps(state.previous_value.to_dict()) if state.previous_value else None,
+                iso(state.observed_at),
+                state.publication_id,
+                state.document_id,
+                iso(state.effective_date),
+                state.source_text,
+                state.analysis_version,
+                iso(state.analyzed_at),
+                created_at,
+                now_iso,
+            ),
+        )
+        self._conn.commit()
+
+    def save_policy_states(self, states) -> int:
+        """Persist a list of ``MonetaryPolicyState`` (or a
+        ``MonetaryPolicyStateResult``). Returns count."""
+        if hasattr(states, "states"):
+            states = states.states
+        count = 0
+        for state in states:
+            self.save_policy_state(state)
+            count += 1
+        return count
+
+    def get_policy_state(self, state_id: str):
+        row = self._conn.execute(
+            "SELECT * FROM monetary_policy_states WHERE state_id = ?", (state_id,)
+        ).fetchone()
+        return self._state_from_row(row) if row else None
+
+    def get_policy_states(
+        self,
+        *,
+        bank: str | tuple[str, ...] | None = None,
+        subject: str | None = None,
+        predicate: str | None = None,
+        source_change_id: str | None = None,
+        publication_id: str | None = None,
+        limit: int | None = None,
+    ) -> list:
+        query = "SELECT * FROM monetary_policy_states"
+        clauses: list[str] = []
+        params: list = []
+        if bank is not None:
+            banks = (bank,) if isinstance(bank, str) else tuple(bank)
+            if banks:
+                clauses.append(f"central_bank IN ({','.join('?' * len(banks))})")
+                params.extend(banks)
+        if subject is not None:
+            clauses.append("subject = ?")
+            params.append(subject)
+        if predicate is not None:
+            clauses.append("predicate = ?")
+            params.append(predicate)
+        if source_change_id is not None:
+            clauses.append("source_change_id = ?")
+            params.append(source_change_id)
+        if publication_id is not None:
+            clauses.append("publication_id = ?")
+            params.append(publication_id)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY subject, observed_at, state_id"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._state_from_row(r) for r in rows]
+
+    def get_policy_state_as_of(self, bank: str, as_of=None) -> list:
+        """Return the latest state entry per dimension with ``observed_at ≤
+        as_of`` (the "state at a date" view, no look-ahead). ``as_of=None``
+        means no upper bound. ``observed_at`` is the temporal reference of the
+        current-side publication (meeting_date else publication_date);
+        ``effective_date`` is never used as an observation time."""
+        if as_of is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM monetary_policy_states "
+                "WHERE central_bank = ? AND observed_at <= ?",
+                (bank, iso(as_of)),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM monetary_policy_states WHERE central_bank = ?",
+                (bank,),
+            ).fetchall()
+        latest: dict[str, tuple] = {}
+        for row in rows:
+            key = row["dimension_key"]
+            if key not in latest:
+                latest[key] = row
+                continue
+            current, candidate = latest[key], row
+            if candidate["observed_at"] > current["observed_at"]:
+                latest[key] = candidate
+            elif candidate["observed_at"] == current["observed_at"] and candidate["state_id"] < current["state_id"]:
+                latest[key] = candidate
+        return [self._state_from_row(r) for r in sorted(latest.values(), key=lambda r: r["state_id"])]
+
+    def delete_policy_states(self, *, bank: str | None = None) -> int:
+        """Delete every state of a bank (or of the whole store)."""
+        if bank is not None:
+            cursor = self._conn.execute(
+                "DELETE FROM monetary_policy_states WHERE central_bank = ?", (bank,)
+            )
+        else:
+            cursor = self._conn.execute("DELETE FROM monetary_policy_states")
+        self._conn.commit()
+        return cursor.rowcount
+
+    def delete_policy_states_for_document(self, document_id: str) -> int:
+        """Delete every state established from a document."""
+        cursor = self._conn.execute(
+            "DELETE FROM monetary_policy_states WHERE document_id = ?", (document_id,)
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def delete_policy_states_for_publication(self, publication_id: str) -> int:
+        """Delete every state established from a publication."""
+        cursor = self._conn.execute(
+            "DELETE FROM monetary_policy_states WHERE publication_id = ?", (publication_id,)
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def rebuild_policy_states(self, states, *, bank: str | None = None) -> int:
+        """Replace a bank's (or the store's) states with ``states`` in one
+        transaction.
+
+        ``states`` is a list of ``MonetaryPolicyState`` or a
+        ``MonetaryPolicyStateResult``. ``monetary_policy_states`` is derived
+        data: the bank scope is fully recomputed each time, so re-analysis is
+        idempotent, an empty result clears the scope, and no stale state
+        survives the change it summarizes.
+        """
+        from .states.base import MonetaryPolicyState
+
+        if hasattr(states, "states"):
+            states = states.states
+        try:
+            if bank is not None:
+                self._conn.execute(
+                    "DELETE FROM monetary_policy_states WHERE central_bank = ?", (bank,)
+                )
+            else:
+                self._conn.execute("DELETE FROM monetary_policy_states")
+            count = 0
+            for state in states:
+                if not isinstance(state, MonetaryPolicyState):
+                    raise TypeError(
+                        f"expected MonetaryPolicyState, got {type(state).__name__}"
+                    )
+                state_id = state.resolve_id()
+                now_iso = iso(now_utc())
+                self._conn.execute(
+                    """
+                    INSERT INTO monetary_policy_states
+                        (state_id, central_bank, synthesized, source_change_id,
+                         dimension_key, subject, predicate, value_kind, qualifier,
+                         period_kind, period_value, period_label, publication_type,
+                         value_json, previous_value_json, observed_at,
+                         publication_id, document_id, effective_date, source_text,
+                         analysis_version, analyzed_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        state_id,
+                        state.central_bank,
+                        1 if state.synthesized else 0,
+                        state.source_change_id,
+                        state.dimension_key,
+                        state.subject,
+                        state.predicate,
+                        state.value_kind,
+                        state.qualifier,
+                        state.period.kind.value if state.period else None,
+                        state.period.value if state.period else None,
+                        state.period.label if state.period else None,
+                        state.publication_type,
+                        json.dumps(state.value.to_dict()) if state.value else None,
+                        json.dumps(state.previous_value.to_dict()) if state.previous_value else None,
+                        iso(state.observed_at),
+                        state.publication_id,
+                        state.document_id,
+                        iso(state.effective_date),
+                        state.source_text,
+                        state.analysis_version,
+                        iso(state.analyzed_at),
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                count += 1
+            self._conn.commit()
+            return count
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    @staticmethod
+    def _state_from_row(row: sqlite3.Row):
+        from .facts.base import FactPeriod, FactValue
+        from .states.base import MonetaryPolicyState
+
+        return MonetaryPolicyState(
+            state_id=row["state_id"],
+            central_bank=row["central_bank"],
+            synthesized=bool(row["synthesized"]),
+            source_change_id=row["source_change_id"],
+            dimension_key=row["dimension_key"],
+            subject=row["subject"],
+            predicate=row["predicate"],
+            value_kind=row["value_kind"],
+            qualifier=row["qualifier"] or "",
+            period=(
+                FactPeriod(
+                    kind=row["period_kind"],
+                    value=row["period_value"],
+                    label=row["period_label"],
+                )
+                if row["period_kind"]
+                else None
+            ),
+            publication_type=row["publication_type"],
+            value=(
+                FactValue.from_dict(json.loads(row["value_json"]))
+                if row["value_json"]
+                else None
+            ),
+            previous_value=(
+                FactValue.from_dict(json.loads(row["previous_value_json"]))
+                if row["previous_value_json"]
+                else None
+            ),
+            observed_at=from_iso(row["observed_at"]),
+            publication_id=row["publication_id"],
+            document_id=row["document_id"],
+            effective_date=from_iso(row["effective_date"]),
+            source_text=row["source_text"],
             analysis_version=row["analysis_version"],
             analyzed_at=from_iso(row["analyzed_at"]),
         )
