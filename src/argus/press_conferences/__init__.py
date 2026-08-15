@@ -26,12 +26,18 @@ from .ecb import (
     SUBJECT_WAGES,
     EcbPressConferenceExtractor,
 )
+from .fed import (
+    EXTRACTION_VERSION as FED_EXTRACTION_VERSION,
+    FedPressConferenceExtractor,
+)
 
 __all__ = [
     "PRESS_CONFERENCE_PUBLICATION_TYPE",
     "PressConferenceExtractor",
     "EcbPressConferenceExtractor",
+    "FedPressConferenceExtractor",
     "EXTRACTION_VERSION",
+    "FED_EXTRACTION_VERSION",
     "SUBJECT_INFLATION",
     "SUBJECT_CORE_INFLATION",
     "SUBJECT_INFLATION_EXPECTATIONS",

@@ -27,6 +27,15 @@ BANK_RULES: dict[str, tuple[TypeRule, ...]] = {
             url=(r"fomcprojtabl",),
             title=(r"projections", r"summary of economic projections"),
         ),
+        TypeRule(
+            "press_conference",
+            "fed",
+            url=(r"presconf", r"press-?conference"),
+            title=(
+                r"press conference",
+                r"(?:chair|chairman|chairwoman)[!'’]?s?\s+press\s+conference",
+            ),
+        ),
     ),
     "ecb": (
         TypeRule(

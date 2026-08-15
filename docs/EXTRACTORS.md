@@ -625,6 +625,80 @@ regression tests** (no new fixtures, documents built inline):
   extracted, with the answer content, subject, predicate, value, period,
   `identity_qualifier`, `source_text`, `source_location` and `speaker` asserted —
   not just the fact count.
+
+### Multi-bank Press Conference extractor — Fed
+
+Press conference is a **publication type**, not a Fact. The Fed publish FOMC
+press conference transcripts (PDF `/mediacenter/files/FOMCpresconf<date>.pdf`,
+event pages `/newsevents/pressconferences/fomc-press-conference-<date>.htm`) that
+the generic classification rules left as `unknown` — a genuine coverage gap;
+the Fed `press_conference` TypeRule (url `/FOMCpresconf/`,
+`/press-?conference/`; title "press conference" / "[chair's] press conference")
+now closes it. The Fed extractor
+`src/argus/press_conferences/fed.py` — `FedPressConferenceExtractor`
+(`extraction_version 7.1.0`) is registered for generic dispatch and shares only
+the **structural** helpers in `src/argus/press_conferences/_shared.py` (the
+explicit value gate, qualitative assertion gate, risk anchors,
+`PressConferenceReporter`); no Fed semantics live in the shared helper. The ECB
+extractor remains the untouched reference implementation.
+
+**The Fed transcript is a turn-based dialog** — unlike the ECB transcript there
+are **no** `Question:` / `Answer:` colon markers; the speech-verbatim ALL-CAPS
+speaker label alone starts a turn:
+
+```
+CHAIRMAN WARSH.
+Good afternoon, everyone. …
+CHRIS RUGABER.
+Mr. Chairman, is the Committee still considering another rise …
+CHAIRMAN WARSH.
+We will decide meeting by meeting as new data arrive.
+VICE CHAIR DONALD LERNER.
+Let me add that inflation expectations remain well anchored.
+```
+
+Mode is line-driven: the first Fed-official turn before any journalist label is
+**remarks** (collective FOMC communication, `speaker = None`); after the first
+journalist label every Fed-official turn is a **Q&A answer** (attributed
+verbatim). The Q&A turn counter increments at each journalist label. A
+Fed-official label is one containing a role word (`CHAIRMAN` / `CHAIRWOMAN` /
+`VICE CHAIR` / `VICE-CHAIR` / `CHAIR` / `GOVERNOR` / `PRESIDENT`); every other
+ALL-CAPS name label — and the ambiguous `MR.` / `MS.` forms — is a **journalist /
+moderator** turn: it starts a new turn, is **never mined** and never invented a
+speaker. The label is preserved verbatim in `Fact.speaker` (ALL-CAPS, trailing
+period stripped). `identity_qualifier` follows the Phase 7 contract —
+`remarks:{n}` / `answer:{turn}:{n}` — which is what distinguishes *collective
+communication* from *individual attribution*.
+
+**Bank-specific knowledge** kept in `fed.py`: the label/turn structure, the FOMC
+guidance phrasing ("as appropriate", "will be patient", "meeting by meeting",
+"data dependent", "depends on the data", "will not hesitate to", "stands ready
+to", "will continue to monitor/assess/evaluate", "for as long as
+necessary/needed", "future meetings/decisions/policy", "will take (the incoming)
+data into account"), the Fed policy vocabulary ("the FOMC", "the Committee",
+"the Federal Reserve", "the funds rate", "interest rates", …) and the Fed
+inflation vocabulary ("PCE", "consumer prices", "core inflation"). Everything
+else is the shared structural machinery.
+
+Supported facts, value gate, risk facts, confidence (`HIGH` percentages and
+categorical orientations, `MEDIUM` verbatim text) and warnings (`no_sections`,
+`no_remarks`, `no_qna`, `no_risk_assessment`, `no_forward_guidance`) are
+identical to the ECB press conference extractor. Deliberately **not** extracted:
+the decision itself (Phase 5), decision rationale (Phase 6),
+hawkish/dovish / stance / market / forex interpretation; journalist question
+content is never mined.
+
+**Test coverage**: `tests/test_press_conferences_fed.py` (fixture
+`tests/fixtures/documents/fed_press_conf.html` — 13 golden facts, no warnings)
+plus synthetic documents asserting speaker attribution (verbatim, remarks never
+attributed), the Q&A boundary and turn numbering, unprefixed/unattributed
+content skipped, the value gate (forecast without period ignored, share units
+never percentages, `GDP_NEAR_MISS` — "Real GDP growth held steady while the GDP
+deflator rose by 2.1%" yields no GDP fact — wired into `emit_value_facts`), the
+negative epistemic suite (no stance / hawkish / dovish / rate-expectation
+subjects), determinism, immutability, classification gating and Store
+persistence. See `docs/PRESS_CONFERENCES.md`.
+
 ---
 
 # Type-Specific Extractors — Phase 8 (Minutes / Meeting Accounts)

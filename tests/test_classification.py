@@ -156,6 +156,63 @@ def test_title_contradiction_skips_url_tier():
     assert result.method in (METHOD_TITLE_PATTERN, METHOD_URL_PATTERN)
 
 
+def test_fed_press_conference_transcript_pdf_url():
+    # The Fed-specific rule closes the `FOMCpresconf<date>.pdf` gap: the generic
+    # `press[_-]conference` URL rule never matches `presconf`.
+    result = classify(
+        publication(
+            central_bank="fed",
+            title="",
+            url="https://www.federalreserve.gov/mediacenter/files/FOMCpresconf20260617.pdf",
+        )
+    )
+    assert result.publication_type == "press_conference"
+    assert result.method == METHOD_URL_PATTERN
+
+
+def test_fed_press_conference_event_url_variants():
+    for url in (
+        "https://www.federalreserve.gov/newsevents/pressconferences/pressconf20260617.htm",
+        "https://www.federalreserve.gov/newsevents/pressconferences/fomc-press-conference-20260617.htm",
+    ):
+        result = classify(publication(central_bank="fed", title="", url=url))
+        assert result.publication_type == "press_conference"
+        assert result.method == METHOD_URL_PATTERN
+
+
+def test_fed_press_conference_title_variants():
+    for title in (
+        "Transcript of Chairman Warsh's Press Conference",
+        "Transcript of Chair Powell's Press Conference — June 17, 2026",
+    ):
+        result = classify(publication(central_bank="fed", title=title))
+        assert result.publication_type == "press_conference"
+        assert result.method == METHOD_TITLE_PATTERN
+
+
+def test_fed_press_conference_rules_do_not_collide():
+    # The Fed-specific press_conference rule must never swallow the other Fed
+    # publication types (statement, minutes, projections, speech) or any other
+    # publication that merely shares a URL slug.
+    for url, expected in (
+        ("https://www.federalreserve.gov/newsevents/pressreleases/monetary20260729a.htm", "monetary_policy_decision"),
+        ("https://www.federalreserve.gov/monetarypolicy/fomcminutes20260408.htm", "minutes"),
+        ("https://www.federalreserve.gov/monetarypolicy/fomcprojtabl20260617.htm", "economic_projections"),
+        ("https://www.federalreserve.gov/newsevents/speeches/warsh20260603a.htm", "speech"),
+    ):
+        result = classify(publication(central_bank="fed", title="", url=url))
+        assert result.publication_type == expected
+    # A press conference on monetary policy contours is never a decision.
+    result = classify(
+        publication(
+            central_bank="fed",
+            title="FOMC Press Conference",
+            url="https://www.federalreserve.gov/newsevents/pressconferences/fomc-press-conference-20260617.htm",
+        )
+    )
+    assert result.publication_type == "press_conference"
+
+
 # ---------------------------------------------------------------------------
 # Tier 4/5 — document metadata & content heuristic
 # ---------------------------------------------------------------------------

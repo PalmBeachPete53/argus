@@ -357,6 +357,20 @@ L'architecture doit rester extensible à d'autres banques centrales.
   par classification et coexistence Phases 5/6/7 vérifiées ;
   `docs/EXTRACTORS.md` documente la couverture réelle.
 
+**Extension multi-banque (Phase 4.x)** — extracteur Fed
+`FedPressConferenceExtractor` (v7.1.0, `src/argus/press_conferences/fed.py`, +
+`_shared.py` structurel), enregistré pour le dispatch générique. Les
+transcriptions FOMC (`/FOMCpresconf<date>.pdf`, `/press-?conference/`) étaient
+classées `unknown` : règle TypeRule `press_conference` ajoutée (URL/titre).
+Transcription Fed en dialogue par tours (labels ALL-CAPS) : premier tour Fed
+= remarks (collectif, `speaker=None`), ensuite réponses individuelles
+(`answer:{turn}:{n}`, locuteur verbatim, e.g. `CHAIRMAN WARSH`), tout label non
+Fed (journalistes, `MR./MS.`) = frontière de tour jamais exploitée. Mêmes sujets,
+gating, valeurs (avec `GDP_NEAR_MISS`) et boundary que Phase 7 ; pas de
+Phase 5/6/12/13/14/15 sémantique. 1 fixture + tests synthétiques
+(`tests/test_press_conferences_fed.py`, 33 tests) ; la Phase 16 reste
+`DEFERRED`.
+
 ## Phase 8 — Minutes / Meeting Accounts
 
 - **Objectif** : extraire opinions, divergences, risques, arguments,

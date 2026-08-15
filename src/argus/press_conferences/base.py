@@ -137,9 +137,11 @@ def _is_press_conference_publication(store, publication, *, expected_type: str) 
 
 
 from .ecb import EcbPressConferenceExtractor  # noqa: E402  (see below)
+from .fed import FedPressConferenceExtractor  # noqa: E402  (see below)
 
 _EXTRACTORS: dict[str, PressConferenceExtractor] = {
     EcbPressConferenceExtractor.bank: EcbPressConferenceExtractor(),
+    FedPressConferenceExtractor.bank: FedPressConferenceExtractor(),
 }
 
 
