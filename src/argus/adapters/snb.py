@@ -1,6 +1,8 @@
 from ..models import CentralBank
 from .base import BankAdapter, html_source, rss_source
 
+_SUMMARIES_PAGE = "https://www.snb.ch/en/publications/communication/summaries"
+
 
 class SNBAdapter(BankAdapter):
     def _build(self):
@@ -20,6 +22,16 @@ class SNBAdapter(BankAdapter):
                 "SNB press releases RSS",
                 "https://www.snb.ch/public/rss/en/pressrel",
                 priority=2,
+            ),
+            html_source(
+                "snb_summaries",
+                "snb",
+                "SNB summaries of the monetary policy assessment discussion",
+                _SUMMARIES_PAGE,
+                priority=3,
+                types=("minutes",),
+                include=(r"zus_\d{8}",),
+                scope_prefixes=("https://www.snb.ch/",),
             ),
             html_source(
                 "snb_decision_archive",

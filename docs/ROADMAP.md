@@ -173,6 +173,23 @@ L'architecture doit rester extensible à d'autres banques centrales.
   evidence ; les classifications live issues de `Source.publication_types`
   priment sur les hints périmés. Tests de classification et de CLI
   (`--classify`, `--report`).
+- **Correctif de collision (Phase 4.x)** — SNB « Summary of the monetary
+  policy assessment discussion » (résumé de discussion type minutes, publié
+  depuis septembre 2025) : classé à tort `monetary_policy_decision` car son
+  titre contenait la règle SNB de décision (`monetary policy assessment`).
+  La règle de titre de décision est restreinte à `monetary policy assessment
+  of <jour> ` et une règle SNB `minutes` est ajoutée (URL `zus_\d{8}`, titre
+  `summary of discussion` / `summary of the monetary policy assessment
+  discussion`) ; la règle URL de décision `pre_\d{8}` est inchangée et
+  préserve chaque décision réelle. Découverte : source `snb_summaries`
+  (`types=("minutes",)`, hint Tier‑1 HIGH) ; le résumé de septembre 2025 déjà
+  découvert via le RSS mopo est classé `minutes` par le titre (le tier de
+  contradiction URL/titre fait gagner le titre explicite). **Extraction** :
+  la famille Minutes n'a aucun extracteur SNB — le résumé reste classé mais
+  non extrait (document-only), et la classification `minutes` bloque
+  l'extracteur Décision SNB (gating) qui produisait auparavant des faits
+  `policy_rate`/date de décision erronés. Tests :
+  `tests/test_classification_snb_summaries.py` ; Phase 16 reste `DEFERRED`.
 - **Statut** : `COMPLETE`.
 
 ## Phase 4 — Fact Model

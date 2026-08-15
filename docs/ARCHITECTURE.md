@@ -232,6 +232,23 @@ the `Publication` field is only a lightweight cache for listing/filtering. Batch
 All bank-specific knowledge lives declaratively in `bank_rules.py`; the engine in
 `classifier.py` never branches on bank id.
 
+Classification is **collision-corrected** where a new official document family
+shares a title token with an existing one: the SNB "Summary of the monetary
+policy assessment discussion" (minutes-like, published since September 2025)
+used to classify `monetary_policy_decision` because the SNB decision title rule
+was the bare `monetary policy assessment`. The decision rule was narrowed to
+`monetary policy assessment of <day> ` and a bank-specific SNB `minutes` rule
+(URL `zus_\d{8}`, title `summary of discussion`) was added, so the summary
+classifies `minutes` while the `pre_\d{8}` URL rule keeps every real decision
+`monetary_policy_decision`. Discovery adds the declared-type `snb_summaries`
+source (`types=("minutes",)`) — the Tier‑1 type-hint is the strongest signal —
+and the URL/title contradiction tier lets the explicit summary title win over a
+`pre_<date>` RSS URL. The Minutes family has **no** SNB extractor, so the
+summary is intentionally classified-but-unextracted (document-only); the
+`minutes` classification also gates the SNB Decision extractor off it. See
+`docs/EXTRACTORS.md` (SNB discussion-summary subsection) and
+`tests/test_classification_snb_summaries.py`.
+
 ## Phase 4 — Facts (`facts/`)
 
 `Fact` is the canonical, structured representation of information **explicitly

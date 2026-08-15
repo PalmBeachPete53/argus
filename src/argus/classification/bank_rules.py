@@ -103,8 +103,17 @@ BANK_RULES: dict[str, tuple[TypeRule, ...]] = {
             "monetary_policy_decision",
             "snb",
             url=(r"pre_\d{8}",),
-            title=(r"monetary policy assessment",),
+            title=(r"monetary policy assessment of \d{1,2} ",),
             content=(r"swiss national bank (is|keeps|maintains|raises|lowers) the (snb|policy) rate",),
+        ),
+        TypeRule(
+            "minutes",
+            "snb",
+            url=(r"zus_\d{8}",),
+            title=(
+                r"summary of discussion",
+                r"summary of (the )?monetary policy assessment discussion",
+            ),
         ),
     ),
     "boc": (

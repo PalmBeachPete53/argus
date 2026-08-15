@@ -49,7 +49,12 @@ explicitly excluded.
 - Full monetary-policy decisions archive (static HTML, 2000→present):
   `/en/the-snb/mandates-goals/monetary-policy/decisions`; decision press releases
   `pre_<YYYYMMDD>`. RSS carries `dc:date` and PDF enclosures.
-- Adapter sources: `snb_mopo_rss` (1), `snb_pressrel_rss` (2), `snb_decision_archive` (4, allow_future).
+- **Summaries of the monetary policy assessment discussion** (minutes-like,
+  published since September 2025 four weeks after each decision): index
+  `/en/publications/communication/summaries`, pages `zus_<YYYYMMDD>`, classified
+  `minutes`.
+- Adapter sources: `snb_mopo_rss` (1), `snb_pressrel_rss` (2), `snb_summaries`
+  (3, html, `types=("minutes",)`), `snb_decision_archive` (4, allow_future).
 
 ### Bank of Canada (`boc` · bankofcanada.ca)
 - WordPress site: content-type feeds (`content_type/press-releases/feed/`, RDF/RSS1.0),

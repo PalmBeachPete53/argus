@@ -1072,6 +1072,39 @@ activity, inflation, financial conditions, monetary policy / policy rate
 discussion, risk assessment). Fixture:
 `tests/fixtures/documents/riksbank_minutes.html` (7 facts, no warnings).
 
+### SNB — discussion summaries classify `minutes` (document-only)
+
+The SNB has published **"Summary of the monetary policy assessment discussion"**
+documents since September 2025, four weeks after each monetary policy decision
+(HTML under `…/publications/communication/summaries/zus_<date>`, PDF assets, and
+an older RSS shape `pre_<date>_1`). They are minutes-like discussion summaries
+of the Governing Board and must never be mined as the monetary policy decision
+itself. Classification is corrected in `src/argus/classification/bank_rules.py`:
+
+- the SNB `monetary_policy_decision` **title** rule was narrowed from the bare
+  `monetary policy assessment` to `monetary policy assessment of <day> `, so a
+  summary title ("Monetary policy assessment of June 2026: Summary of
+  discussion") no longer matches it — the decision URL rule (`pre_\d{8}`) is
+  untouched and remains the authoritative decision signal;
+- a bank-specific SNB `minutes` rule (URL `zus_\d{8}`; title `summary of
+  discussion` / `summary of the monetary policy assessment discussion`)
+  classifies the summaries as `minutes`.
+
+Discovery: the `snb_summaries` html source (`src/argus/adapters/snb.py`,
+`types=("minutes",)`) makes the summaries index discoverable with a Tier‑1
+source type-hint (HIGH confidence); the Sept 2025 summary already discovered via
+the mopo RSS classifies `minutes` through the title rule (the URL/title
+contradiction tier lets the explicit title win over the `pre_<date>` URL).
+
+**Extraction status — intentional document-only.** The Minutes family has **no**
+SNB extractor, so `extract_minutes("snb")` dispatches to nothing and the summary
+remains classified-but-unextracted (document-only). This is deliberate and
+tested: the `minutes` classification also **refuses the SNB Decision extractor**
+(gated on classification), which previously mined the summary into spurious
+`policy_rate` / decision-date facts. See
+`tests/test_classification_snb_summaries.py` for the boundary, false-positive
+and dispatch-consequence coverage.
+
 See `tests/test_minutes_multibank.py` for the contract, dispatch, attribution,
 provenance, boundary, determinism, immutability, gating and end-to-end
 integration coverage of these five extractors.
