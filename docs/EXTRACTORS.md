@@ -1369,11 +1369,20 @@ class ReportsExtractor(ABC):
   mined; anything else — and an absent classification — is refused
   (`REPORT_PUBLICATION_TYPES = ("monetary_policy_report",)`).
 
-## ECB report extractor
+ ## ECB report extractor
 
 `src/argus/reports/ecb.py` — `EcbReportsExtractor` (`extraction_version
 10.0.0`). It answers *"what does the report explicitly state about the economy,
 its risks and about monetary policy?"*.
+
+The ECB's report-like publication is the **Economic Bulletin**. Classification
+(Phase 4.x): the ECB-specific `monetary_policy_report` rule
+(`url=economic-bulletin`, `title=economic bulletin`) in
+`src/argus/classification/bank_rules.py` maps the bulletin issue pages
+(`/press/economic-bulletin/html/eb<YYYYMM>.en.html`) to
+`monetary_policy_report`; they are discovered through `ecb_publications_rss`.
+The decision/statement/minutes/press-conference/speech families are untouched.
+`get_extractor("ecb")` dispatches `EcbReportsExtractor`.
 
 Phase 10 is the most over-extraction-prone phase, so its cardinal rule is
 **precision over recall**: a Fact is only produced from a known economic
@@ -2210,6 +2219,18 @@ hardening pass (commit 96e81de → hardened). The key distinction is:
 - No separate `monetary_policy_decision` subject facts are fabricated beyond the vote/decision wording above
 - Outlook for Economic Activity and Prices (projections) → Phase 9
 - Individual member opinions / dissents beyond verbatim vote sentence → Phase 8
+
+**Reachability (Phase 4.x)**: the current BoJ Statement URL shape is
+`/en/mopo/mpmdeci/mpr_<year>/k<date>.pdf` (the "Statement on Monetary Policy"
+issue PDF). The BoJ bank rule was extended with the URL pattern `mpr_\d{4}/k`,
+the generic `monetary_policy_report` rule now excludes BoJ, and the stale
+`mpr_\d{4}` URL pattern was removed from the BoJ `economic_projections` rule
+(the real Outlook uses `/mopo/outlook/gor<date>.pdf`, never `mpr_<year>`).
+The fused Statement resolves deterministically to `monetary_policy_statement`
+via its URL (no title dependence); the Outlook stays `economic_projections`;
+Minutes and Summary of Opinions are unaffected. `get_extractor("boj")`
+dispatches `BojStatementExtractor`. Tests: `tests/test_classification.py`
+(`test_boj_statement_*`).
 
 ### Implementation vs. Coverage Distinction
 

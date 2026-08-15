@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>ECB Publications</title>
+    <link>https://www.ecb.europa.eu/pub/html/index.en.html</link>
+    <description>Publications from the ECB</description>
+    <item>
+      <title> Economic Bulletin Issue 5, 2026</title>
+      <link>https://www.ecb.europa.eu/press/economic-bulletin/html/eb202605.en.html</link>
+      <guid>https://www.ecb.europa.eu/press/economic-bulletin/html/eb202605.en.html</guid>
+      <pubDate>Thu, 06 Aug 2026 10:00:00 GMT</pubDate>
+      <description>Economic Bulletin Issue 5, 2026</description>
+    </item>
+    <item>
+      <title>Account of the monetary policy meeting of the Governing Council</title>
+      <link>https://www.ecb.europa.eu/press/accounts/2026/html/ecb.acc260715~a1b2c3d4e5.en.html</link>
+      <guid>https://www.ecb.europa.eu/press/accounts/2026/html/ecb.acc260715~a1b2c3d4e5.en.html</guid>
+      <pubDate>Thu, 06 Aug 2026 09:00:00 GMT</pubDate>
+      <description>Account of the monetary policy meeting</description>
+    </item>
+  </channel>
+</rss>

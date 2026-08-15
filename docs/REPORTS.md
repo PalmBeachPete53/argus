@@ -122,6 +122,24 @@ Fed, BoJ and SNB are documented `not applicable` / represented by another
 family (see `docs/EXTRACTORS.md`); the shared generic dispatch
 (`get_extractor(bank)`) resolves only the banks above.
 
+### ECB — `EcbReportsExtractor` (v10.0.0)
+
+Publication: the **Economic Bulletin** (the euro-area report-like publication)
+at `/press/economic-bulletin/html/eb<YYYYMM>.en.html`. Classification (Phase
+4.x): the ECB-specific `monetary_policy_report` rule (`economic-bulletin`) maps
+the bulletin issue pages to `monetary_policy_report`; they are discovered via
+`ecb_publications_rss`. The fixture `tests/fixtures/documents/ecb_report.html`
+models the report body (inflation, GDP, core inflation, unemployment, wages,
+financial conditions, fiscal policy, monetary-policy statement, forward
+guidance, risks) and extracts 19 canonical Facts; it also contains a non-claim
+sentence and a narrative reference to a previous rate decision that must not
+become a decision/projection fact. A real-source integration check on bulletin
+5/2026 verified discovery → `monetary_policy_report` classification → dispatch
+→ persistence; live extraction is conservative (0 facts) because the live HTML
+landing page is a JS-rendered single-section page and the linked PDFs carry
+uncontrolled section headings — no fact is invented (`UNKNOWN ≠ ECONOMIC`).
+This is real-source verification, not Phase 16 historical validation.
+
 ### BoC — `BocReportExtractor` (v10.3.0)
 
 Publication: the Bank of Canada quarterly **Monetary Policy Report** at

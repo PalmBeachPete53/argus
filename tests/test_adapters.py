@@ -133,6 +133,25 @@ def test_ecb_sitemap_fallback(fixture_bytes):
     assert all("careers" not in p.url for p in publications)
 
 
+def test_ecb_publications_rss_discovers_economic_bulletin(fixture_bytes):
+    adapter = ECBAdapter()
+    source = next(s for s in adapter.sources if s.id == "ecb_publications_rss")
+    assert source.discovery.kind == "rss"
+    session = FakeSession({
+        source.discovery.url: response(fixture_bytes("ecb_publications.xml"), url=source.discovery.url, content_type="application/xml"),
+    })
+    publications = create(source, make_client(session)).discover()
+    urls = [p.url for p in publications]
+    assert "https://www.ecb.europa.eu/press/economic-bulletin/html/eb202605.en.html" in urls
+    bulletin = next(p for p in publications if "economic-bulletin" in p.url)
+    assert bulletin.central_bank == "ecb"
+    assert bulletin.source_id == "ecb_publications_rss"
+    assert bulletin.title
+    assert bulletin.publication_date is not None
+    # the meeting account is a distinct publication, surfaced by the same feed
+    assert any("press/accounts" in u for u in urls)
+
+
 def test_boe_press_conference_html_discovery(fixture_bytes):
     adapter = BoEAdapter()
     source = next(s for s in adapter.sources if s.id == "boe_mpc_press_conference")

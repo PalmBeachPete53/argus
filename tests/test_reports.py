@@ -149,7 +149,7 @@ def _numeric_values(result, subject: str) -> dict:
 GOLDEN = {
     "ecb_report.html": {
         "warnings": [],
-        "count": 17,
+        "count": 19,
         "triples": [
             (SUBJECT_GROWTH, "assessment", None),
             (SUBJECT_GDP, "value", "quarter:2026-Q1"),
@@ -163,6 +163,8 @@ GOLDEN = {
             (SUBJECT_INFLATION_EXPECTATIONS, "assessment", None),
             (SUBJECT_FINANCIAL_CONDITIONS, "value", "month:2026-06"),
             (SUBJECT_FINANCIAL_CONDITIONS, "assessment", None),
+            (SUBJECT_UNEMPLOYMENT, "value", "year:2026"),
+            (SUBJECT_WAGES, "assessment", None),
             (SUBJECT_FISCAL_POLICY, "assessment", None),
             (SUBJECT_MONETARY_POLICY, "statement", None),
             (SUBJECT_POLICY_GUIDANCE, "statement", None),
@@ -178,6 +180,7 @@ GOLDEN = {
             (SUBJECT_INFLATION, "year:2027"): 1.9,
             (SUBJECT_CORE_INFLATION, "month:2026-06"): 2.3,
             (SUBJECT_FINANCIAL_CONDITIONS, "month:2026-06"): 4.2,
+            (SUBJECT_UNEMPLOYMENT, "year:2026"): 6.5,
         },
         "risk_orientations": {
             (SUBJECT_GROWTH_RISK, None): "balanced",
@@ -294,7 +297,7 @@ def test_golden_risks_fixture_has_both_orientations():
 
 def test_known_economic_sections_are_mined():
     result = extract_fixture("ecb_report.html")
-    assert len(result.facts) == 17
+    assert len(result.facts) == 19
 
 
 def test_non_economic_sections_are_ignored():
@@ -1223,7 +1226,7 @@ def test_extract_report_persists_facts(tmp_path):
     results = extract_report(store, reports_publication())
     assert len(results) == 1
     persisted = store.get_facts(publication_id="pub-ecb-report")
-    assert len(persisted) == 17
+    assert len(persisted) == 19
     assert all(f.central_bank == "ecb" for f in persisted)
     assert all(f.extraction_version == EcbReportsExtractor.extraction_version for f in persisted)
     gdp = next(f for f in persisted if f.subject == SUBJECT_GDP and period_of(f) == "quarter:2026-Q1")
@@ -1240,7 +1243,7 @@ def test_extract_report_is_idempotent(tmp_path):
     extract_report(store, pub)  # re-run: same deterministic fact_ids
     second = sorted((f.fact_id, f.subject, f.predicate, period_of(f), f.value.value) for f in store.get_facts(publication_id="pub-ecb-report"))
     assert first == second
-    assert len(second) == 17
+    assert len(second) == 19
 
 
 def test_extraction_is_deterministic(tmp_path):
@@ -1274,7 +1277,7 @@ def test_gating_report_classification_allows_extraction(tmp_path):
     classify_report(store, publication_type="monetary_policy_report")
     results = extract_report(store, reports_publication())
     assert len(results) == 1
-    assert len(store.get_facts(publication_id="pub-ecb-report")) == 17
+    assert len(store.get_facts(publication_id="pub-ecb-report")) == 19
 
 
 def test_gating_other_classification_refuses_extraction(tmp_path):
@@ -1306,7 +1309,7 @@ def test_gating_batch_respects_classification(tmp_path):
     classify_report(store)
     results = extract_report_batch(store)
     assert len(results) == 1
-    assert len(store.get_facts(bank="ecb")) == 17
+    assert len(store.get_facts(bank="ecb")) == 19
 
 
 def test_gating_never_persists_facts_when_not_authorized(tmp_path):
@@ -1323,10 +1326,10 @@ def test_gating_refusal_never_deletes_existing_facts(tmp_path):
     store = _store_report(tmp_path)
     classify_report(store)
     assert len(extract_report(store, reports_publication())) == 1
-    assert len(store.get_facts(publication_id="pub-ecb-report")) == 17
+    assert len(store.get_facts(publication_id="pub-ecb-report")) == 19
     classify_report(store, publication_type="economic_projections")
     assert extract_report(store, reports_publication()) == []
-    assert len(store.get_facts(publication_id="pub-ecb-report")) == 17
+    assert len(store.get_facts(publication_id="pub-ecb-report")) == 19
 
 
 def test_report_publication_types_are_recognized():
@@ -1343,7 +1346,7 @@ def test_empty_result_persistence_clears_stale_facts(tmp_path):
     classify_report(store)
     pub = reports_publication()
     extract_report(store, pub)
-    assert len(store.get_facts(publication_id="pub-ecb-report")) == 17
+    assert len(store.get_facts(publication_id="pub-ecb-report")) == 19
     results = extract_report(store, pub, extractor=_ZeroFactReportsExtractor())
     assert len(results) == 1
     assert results[0].facts == []
@@ -1356,7 +1359,7 @@ def test_empty_result_persistence_preserves_other_documents(tmp_path):
     pub = reports_publication()
     extract_report(store, pub)
     extract_report(store, pub, document=normalized_fixture("ecb_report_minimal.html"))
-    assert len(store.get_facts(publication_id="pub-ecb-report")) == 18
+    assert len(store.get_facts(publication_id="pub-ecb-report")) == 20
     # zero-out only the nominal document; the other document's facts must stay
     extract_report(
         store, pub, document=normalized_fixture("ecb_report.html"),
@@ -1373,7 +1376,7 @@ def test_empty_result_persistence_is_idempotent(tmp_path):
     classify_report(store)
     pub = reports_publication()
     extract_report(store, pub)
-    assert len(store.get_facts(publication_id="pub-ecb-report")) == 17
+    assert len(store.get_facts(publication_id="pub-ecb-report")) == 19
     zero = _ZeroFactReportsExtractor()
     extract_report(store, pub, extractor=zero)
     extract_report(store, pub, extractor=zero)

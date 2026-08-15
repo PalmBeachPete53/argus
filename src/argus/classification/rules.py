@@ -174,6 +174,7 @@ GENERIC_RULES: tuple[TypeRule, ...] = (
             r"monetary policy report",
             r"this monetary policy report",
         ),
+        exclude_banks=("boj",),
     ),
     TypeRule(
         "speech",

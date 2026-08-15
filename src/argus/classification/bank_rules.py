@@ -55,6 +55,12 @@ BANK_RULES: dict[str, tuple[TypeRule, ...]] = {
             "ecb",
             url=(r"press/govcdec[/]",),
         ),
+        TypeRule(
+            "monetary_policy_report",
+            "ecb",
+            url=(r"economic-bulletin",),
+            title=(r"economic bulletin",),
+        ),
     ),
     "boe": (
         TypeRule(
@@ -82,13 +88,13 @@ BANK_RULES: dict[str, tuple[TypeRule, ...]] = {
         TypeRule(
             "monetary_policy_statement",
             "boj",
-            url=(r"statement_on_monetary_policy",),
+            url=(r"statement_on_monetary_policy", r"mpr_\d{4}/k"),
             title=(r"statement on monetary policy",),
         ),
         TypeRule(
             "economic_projections",
             "boj",
-            url=(r"outlook-for-economic-activity", r"outlook_report", r"mpr_\d{4}"),
+            url=(r"outlook-for-economic-activity", r"outlook_report"),
             title=(r"outlook for economic activity and prices",),
         ),
         TypeRule(

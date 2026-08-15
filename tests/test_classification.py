@@ -116,6 +116,196 @@ def test_ecb_meeting_account_from_url():
     assert evidence_prefix(result.evidence, "url_pattern=meeting_account")
 
 
+def test_ecb_economic_bulletin_from_url():
+    result = classify(
+        publication(
+            central_bank="ecb",
+            title="Economic Bulletin Issue 5, 2026",
+            url="https://www.ecb.europa.eu/press/economic-bulletin/html/eb202605.en.html",
+        )
+    )
+    assert result.publication_type == "monetary_policy_report"
+    assert result.method == METHOD_URL_PATTERN
+    assert result.confidence == Confidence.MEDIUM
+    assert evidence_prefix(result.evidence, "url_pattern=monetary_policy_report (economic-bulletin)")
+
+
+def test_ecb_economic_bulletin_from_title():
+    result = classify(
+        publication(
+            central_bank="ecb",
+            title="Economic Bulletin Issue 5/2026",
+            url="https://www.ecb.europa.eu/pub/economic-bulletin/html/ecb.eb202605.en.html",
+        )
+    )
+    assert result.publication_type == "monetary_policy_report"
+    assert result.method in (METHOD_URL_PATTERN, METHOD_TITLE_PATTERN)
+
+
+def test_ecb_economic_bulletin_is_not_decision_or_statement():
+    for url, title in (
+        ("https://www.ecb.europa.eu/press/economic-bulletin/html/eb202605.en.html", "Economic Bulletin Issue 5, 2026"),
+        ("https://www.ecb.europa.eu/pub/economic-bulletin/html/ecb.eb202605.en.html", "Economic Bulletin, Issue 5/2026"),
+    ):
+        result = classify(publication(central_bank="ecb", title=title, url=url))
+        assert result.publication_type == "monetary_policy_report"
+        assert result.publication_type not in ("monetary_policy_decision", "monetary_policy_statement")
+
+
+def test_ecb_decision_is_not_a_report():
+    result = classify(
+        publication(
+            central_bank="ecb",
+            title="Monetary policy decisions",
+            url="https://www.ecb.europa.eu/press/govcdec/2026/html/ecb.gc260715~a1b2.en.html",
+        )
+    )
+    assert result.publication_type == "monetary_policy_decision"
+    assert result.publication_type != "monetary_policy_report"
+
+
+def test_ecb_statement_is_not_a_report():
+    result = classify(
+        publication(
+            central_bank="ecb",
+            title="Monetary policy statement",
+            url="https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/2026/html/ecb.is260715~a1b2.en.html",
+        )
+    )
+    assert result.publication_type == "monetary_policy_statement"
+    assert result.publication_type != "monetary_policy_report"
+
+
+def test_ecb_press_conference_is_not_a_report():
+    result = classify(
+        publication(
+            central_bank="ecb",
+            title="Press conference",
+            url="https://www.ecb.europa.eu/press/press_conference/monetary-policy-statement/2026/html/ecb.pc260715~a1b2.en.html",
+        )
+    )
+    assert result.publication_type == "press_conference"
+    assert result.publication_type != "monetary_policy_report"
+
+
+def test_ecb_speech_is_not_a_report():
+    result = classify(
+        publication(
+            central_bank="ecb",
+            title="Speech by Christine Lagarde, President of the ECB",
+            url="https://www.ecb.europa.eu/press/key/date/2026/html/ecb.sp260714~a1b2.en.html",
+        )
+    )
+    assert result.publication_type == "speech"
+    assert result.publication_type != "monetary_policy_report"
+
+
+def test_ecb_unrelated_press_release_is_not_a_report():
+    result = classify(
+        publication(
+            central_bank="ecb",
+            title="ECB announces new banknote series",
+            url="https://www.ecb.europa.eu/press/pr/date/2026/html/ecb.pr260801~a1b2.en.html",
+        )
+    )
+    assert result.publication_type != "monetary_policy_report"
+
+
+# ---------------------------------------------------------------------------
+# BoJ Statement — fused Decision + Statement reachability (Phase 4.x)
+# ---------------------------------------------------------------------------
+
+
+def test_boj_statement_current_url_classifies_as_statement():
+    """The current BoJ Statement URL shape (mpr_<year>/k<date>.pdf) must not
+    become unknown: it is the fused Decision+Statement publication."""
+    result = classify(
+        publication(
+            central_bank="boj",
+            title="Statement on Monetary Policy",
+            url="http://www.boj.or.jp/en/mopo/mpmdeci/mpr_2026/k260731a.pdf",
+        )
+    )
+    assert result.publication_type == "monetary_policy_statement"
+    assert result.method in (METHOD_URL_PATTERN, METHOD_TITLE_PATTERN)
+    assert result.publication_type != "monetary_policy_report"
+
+
+def test_boj_statement_legacy_url_classifies_as_statement():
+    result = classify(
+        publication(
+            central_bank="boj",
+            title="Statement on Monetary Policy",
+            url="https://www.boj.or.jp/en/mopo/mpmdeci/statement_on_monetary_policy/ko250618a.html",
+        )
+    )
+    assert result.publication_type == "monetary_policy_statement"
+
+
+def test_boj_statement_is_not_a_report():
+    result = classify(
+        publication(
+            central_bank="boj",
+            title="Statement on Monetary Policy",
+            url="http://www.boj.or.jp/en/mopo/mpmdeci/mpr_2026/k260731a.pdf",
+        )
+    )
+    assert result.publication_type != "monetary_policy_report"
+
+
+def test_boj_outlook_remains_projections():
+    """The BoJ Outlook (mpr_<year> / outlook URLs) must stay economic_projections
+    after the statement fix — the statement rule must not swallow it."""
+    result = classify(
+        publication(
+            central_bank="boj",
+            title="Outlook for Economic Activity and Prices (July 2026, The Bank's View)",
+            url="http://www.boj.or.jp/en/mopo/outlook/gor2607a.pdf",
+        )
+    )
+    assert result.publication_type == "economic_projections"
+
+
+def test_boj_minutes_remain_minutes():
+    result = classify(
+        publication(
+            central_bank="boj",
+            title="Minutes of the Monetary Policy Meeting on June 15 and 16, 2026",
+            url="http://www.boj.or.jp/en/mopo/mpmsche_minu/minu_2026/g260616.pdf",
+        )
+    )
+    assert result.publication_type == "minutes"
+    assert result.publication_type != "monetary_policy_statement"
+
+
+def test_boj_summary_of_opinions_not_statement():
+    """The Summary of Opinions is a separate minutes-family document — it must
+    not be swallowed by the statement rule."""
+    result = classify(
+        publication(
+            central_bank="boj",
+            title="Summary of Opinions at the Monetary Policy Meeting on July 30 and 31, 2026",
+            url="http://www.boj.or.jp/en/mopo/mpmsche_minu/opinion_2026/opi260731.pdf",
+        )
+    )
+    assert result.publication_type != "monetary_policy_statement"
+
+
+def test_boj_statement_no_report_collision():
+    """The generic report rule must not apply to BoJ: the fused statement must
+    resolve to monetary_policy_statement, not tie with monetary_policy_report."""
+    for url, title in (
+        ("http://www.boj.or.jp/en/mopo/mpmdeci/mpr_2026/k260731a.pdf", "Statement on Monetary Policy"),
+        ("https://www.boj.or.jp/en/mopo/mpmdeci/statement_on_monetary_policy/ko250618a.html", "Statement on Monetary Policy"),
+    ):
+        result = classify(publication(central_bank="boj", title=title, url=url))
+        assert result.publication_type == "monetary_policy_statement"
+        assert result.publication_type not in (
+            "monetary_policy_report", "economic_projections", "minutes",
+        )
+
+
+
 def test_snb_bank_rule_from_url():
     result = classify(
         publication(
@@ -240,8 +430,8 @@ def test_content_heuristic_low_confidence():
     result = classify(
         publication(
             central_bank="ecb",
-            title="ECB Economic Bulletin, Issue 3/2026",
-            url="https://www.ecb.europa.eu/pub/economic-bulletin/html/eb202603.en.html",
+            title="ECB miscellaneous release",
+            url="https://www.ecb.europa.eu/press/other/2026/html/ecb.other260801~a1b2.en.html",
         ),
         normalized=doc,
     )

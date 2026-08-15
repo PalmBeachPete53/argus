@@ -32,6 +32,11 @@ explicitly excluded.
 - The main publication listings are JS-driven — do **not** scrape; use RSS + sitemap.
 - Monetary policy decisions are press releases under `/press/pr/date/<YYYY>/html/ecb.<tag><YYMMDD>~<hash>.en.html`.
 - `pubDate` is authoritative; meeting dates come from the GC calendar page.
+- Economic Bulletin (the Report-family publication): issue pages under
+  `/press/economic-bulletin/html/eb<YYYYMM>.en.html` (HTML landing page plus
+  full-report PDFs), carried by the publications RSS
+  (`ecb_publications_rss`) and classified `monetary_policy_report` by the
+  ECB-specific rule `economic-bulletin`.
 - Adapter sources: `ecb_press_rss` (1), `ecb_publications_rss` (2), `ecb_sitemap_monetary` (6).
 
 ### Bank of England (`boe` · bankofengland.co.uk)
@@ -43,6 +48,10 @@ explicitly excluded.
 - Single RSS feed `whatsnew.xml` (EN). No sitemap. Documents are PDFs per meeting
   (statement, outlook, summary of opinions, minutes); the meeting schedule page
   `/en/mopo/mpmsche_minu/index.htm` lists meeting + release dates.
+- Statement on Monetary Policy (the fused Decision+Statement publication):
+  issue PDFs under `/en/mopo/mpmdeci/mpr_<year>/k<date>.pdf` (previously
+  `statement_on_monetary_policy/...`), classified `monetary_policy_statement`
+  by the BoJ bank rule (url `statement_on_monetary_policy` or `mpr_<year>/k`).
 - Adapter sources: `boj_whatsnew_rss` (1), `boj_mopo_archive` (4, year pages via pagination).
 
 ### Swiss National Bank (`snb` · snb.ch)

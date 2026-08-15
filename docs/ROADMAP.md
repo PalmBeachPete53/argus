@@ -647,15 +647,58 @@ reste `DEFERRED`.
   `boc_mpr_feed` (`types=("monetary_policy_report",)`), et la source du
   calendrier exclut `/publications/mpr/` — collision de famille supprimée de
   façon déterministe (aucune dépendance à l'ordre des sources). Le MPR réel
-  se classe `monetary_policy_report` (source hint, sinon règle générique
-  `mpr[_-]\d{4}`) et `BocReportExtractor` v10.3.0 est dispatché. Fixture
-  `boc_mpr_feed.xml` (decouverte), fixture document synthétique enrichie d'une
-  phrase non-claim, suite dédiée `tests/test_reports_boc_mpr.py` (20 tests :
-  découverte, classification positive/négative/sans collision, dispatch,
-  extraction, contrat, frontières négatives, déterminisme, immutabilité,
-  persistance de bout en bout), vérification d'intégration live sur le MPR
-  officiel de juillet 2026 (découverte → fetch → normalize → classification →
-  extraction → persistance, 7 faits canoniques, provenance verbatim).
+   se classe `monetary_policy_report` (source hint, sinon règle générique
+   `mpr[_-]\d{4}`) et `BocReportExtractor` v10.3.0 est dispatché. Fixture
+   `boc_mpr_feed.xml` (decouverte), fixture document synthétique enrichie d'une
+   phrase non-claim, suite dédiée `tests/test_reports_boc_mpr.py` (20 tests :
+   découverte, classification positive/négative/sans collision, dispatch,
+   extraction, contrat, frontières négatives, déterminisme, immutabilité,
+   persistance de bout en bout), vérification d'intégration live sur le MPR
+   officiel de juillet 2026 (découverte → fetch → normalize → classification →
+   extraction → persistance, 7 faits canoniques, provenance verbatim).
+   **Phase 16 (validation historique) reste `DEFERRED`.**
+- **Correctif de classification ECB Economic Bulletin (Phase 4.x)** : le
+  bulletin économique de l'ECB (`/press/economic-bulletin/html/eb<YYYYMM>.en.html`),
+  publication de type Rapport pour la zone euro, était découvert via
+  `ecb_publications_rss` mais classé `unknown` (aucune règle URL/titre ne
+  mappait `economic-bulletin`) — `EcbReportsExtractor` (implémentation de
+  référence Phase 10) n'était jamais dispatché. La règle banque-spécifique
+  `monetary_policy_report` (`url=economic-bulletin`, `title=economic bulletin`)
+  est ajoutée dans `bank_rules.py` ; les bulletins réels se classent
+  `monetary_policy_report` (url_pattern) et `EcbReportsExtractor` est dispatché.
+  Décision/statement/minutes/press_conference/speech restent exclus (tests
+  négatifs). Fixture document `ecb_report.html` enrichie (valeur chômage 6.5%,
+  assessment wages, phrase non-claim, référence de décision narrative qui ne
+  devient pas un fait de décision) — 19 faits canoniques. Suite dédiée
+  `tests/test_reports_ecb_bulletin.py` (22 tests : découverte, classification
+  positive/négative/sans collision, dispatch, extraction, contrat, frontières
+  négatives, déterminisme, immutabilité, persistance de bout en bout).
+  Vérification d'intégration live sur le bulletin officiel 5/2026 : découverte
+  (publications RSS) → classification `monetary_policy_report` → dispatch →
+  persistance ; l'extraction live est conservative (0 fait : la page HTML réelle
+  est un écran JS et les PDF liés ont des titres de section non contrôlés —
+  `UNKNOWN ≠ ECONOMIC`, aucun fait inventé). Ceci n'est PAS une validation
+   historique Phase 16. **Phase 16 (validation historique) reste `DEFERRED`.**
+- **Correctif de reachability Statement BoJ (Phase 4.x)** : le « Statement on
+  Monetary Policy » (publication fusionnée Decision+Statement, canoniquement
+  `monetary_policy_statement`) est désormais publié sous
+  `/en/mopo/mpmdeci/mpr_<year>/k<date>.pdf`. L'ancienne forme
+  `statement_on_monetary_policy/...` ne matche plus l'URL réelle ; la règle
+  générique `monetary_policy_report` (titre `statement on monetary policy`,
+  URL `mpr[_-]\d{4}`) et la règle `economic_projections` (`mpr_\d{4}`)
+  entraient en collision → `unknown`. Correctif minimal déterministe : la
+  règle générique `monetary_policy_report` exclut désormais BoJ
+  (`exclude_banks=("boj",)`), la règle boj `monetary_policy_statement` gagne
+  le pattern URL `mpr_\d{4}/k`, et le pattern périmé `mpr_\d{4}` est retiré de
+  la règle boj `economic_projections` (l'Outlook réel est sous
+  `/mopo/outlook/gor<date>.pdf`, jamais `mpr_<year>`). Le Statement réel se
+  classe `monetary_policy_statement` **via son URL uniquement** (aucune
+  dépendance au titre) et `BojStatementExtractor` est dispatché ; l'Outlook
+  reste `economic_projections`, les Minutes et le Summary of Opinions restent
+  inchangés. Fed/SNB/BoE/BoC restent **intentionnellement représentés** par
+  `monetary_policy_decision` (document unique fusionné décision+statement,
+  tests de classification existants le verrouillent) — pas de vraie absence de
+  couverture, pas de nouveau family. Tests `test_boj_statement_*` ajoutés.
   **Phase 16 (validation historique) reste `DEFERRED`.**
 
 ## Phase 11 — Speeches & Interviews
