@@ -7,6 +7,10 @@ from .base import (
     extract_press_conference_batch,
     get_extractor,
 )
+from .boe import (
+    EXTRACTION_VERSION as BOE_EXTRACTION_VERSION,
+    BoEPressConferenceExtractor,
+)
 from .ecb import (
     EXTRACTION_VERSION,
     SUBJECT_CORE_INFLATION,
@@ -36,8 +40,10 @@ __all__ = [
     "PressConferenceExtractor",
     "EcbPressConferenceExtractor",
     "FedPressConferenceExtractor",
+    "BoEPressConferenceExtractor",
     "EXTRACTION_VERSION",
     "FED_EXTRACTION_VERSION",
+    "BOE_EXTRACTION_VERSION",
     "SUBJECT_INFLATION",
     "SUBJECT_CORE_INFLATION",
     "SUBJECT_INFLATION_EXPECTATIONS",

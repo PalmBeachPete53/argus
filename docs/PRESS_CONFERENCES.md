@@ -49,6 +49,13 @@ the economy and their policy stance during the FOMC press conference?"*,
 caps N official facts from the Fed transcript, and never mines the
 journalists' questions.
 
+It also adds the **BoE** press conference extractor
+(`src/argus/press_conferences/boe.py`, `BoEPressConferenceExtractor`). It
+answers *"what do the MPC members (Governor and Deputy Governors) explicitly
+state about the economy and their policy stance during the MPR press
+conference?"*, preserves each official's verbatim name label, and never mines
+the journalists' questions.
+
 ## 2. Epistemic boundary
 
 Press conference extraction MUST **never** infer, emit, or label:
@@ -293,9 +300,9 @@ convention, no code import graph between families):
 - the canonical Phase 7 subject/predicate constants and the generic English
   financial / inflation / labour / growth / risk anchor sets.
 
-Bank-specific semantics live **only** in `fed.py` (Fed transcript labels, Fed
-turn parsing, Fed guidance / policy vocabulary). No `if bank == "…":` dispatch
-anywhere.
+Bank-specific semantics live **only** in `fed.py` and `boe.py` (bank transcript
+labels, bank turn parsing, bank guidance / policy vocabulary). No
+`if bank == "…":` dispatch anywhere.
 
 ## 11. Bank-specific extractor — Fed
 
@@ -315,9 +322,123 @@ Registration: `FedPressConferenceExtractor` is added to `_EXTRACTORS` in
 `src/argus/press_conferences/base.py` (generic dispatch `get_extractor("fed")`)
 and exported from `src/argus/press_conferences/__init__.py`.
 
-## 12. Final output
+## 12. Bank-specific extractor — BoE
 
-The Press Conference family (ECB conserved + Fed added) emits canonical `Fact`s
-only. Nothing here introduces Phases 12–15 semantics, no LLM, no network calls,
-no fuzzy inference, and no new top-level roadmap phase. Phase 16 remains
+`src/argus/press_conferences/boe.py` — `BoEPressConferenceExtractor`.
+Bank-specific logic:
+
+### 12.1 Source & discovery
+
+BoE publishes the MPC press conference transcript as a **PDF** on the MPR issue
+page (`…/monetary-policy-report/<yyyy>/<month>-<yyyy>`, link *"Press conference
+transcript (PDF)"*). Discovery is a declared-type source
+`boe_mpc_press_conference` (priority 6, `types=("press_conference",)`,
+`keep_documents=True`). Classification flows through the source **type_hint**
+(`METHOD_SOURCE_TYPE_HINT`, `HIGH` confidence) — BoE has **no** URL/title
+TypeRule for press conferences (the transcript PDF `mpr-press-conference-transcript-*`
+does not match the generic `press[_-]conference` rule). The opening remarks are
+a separate PDF; the transcript is a **pure Q&A** document that opens with the
+tail of the Governor's closing remarks.
+
+### 12.2 Transcript structure & label detection
+
+The transcript body is a **turn-based dialog** of standalone capitalized name
+labels (e.g. `Andrew Bailey`, `Clare Lombardelli`, `Dave Ramsden`), each
+followed by that speaker's wrapped words. There are no ALL-CAPS role labels and
+no `Question:` / `Answer:` markers. Speaker labels are **not** a fixed corpus:
+the conservative official identity is the known MPC membership as of 2026
+(Governor + Deputy Governors + external members, `_BOE_MPC_MEMBERS`); any other
+label is a journalist / moderator boundary.
+
+Label acceptance is deliberately conservative (`_is_label_line`): a label must
+be a multi-word capitalized name that either is a known MPC member or sits at a
+clean turn boundary (start of the transcript, directly after a sentence-ending
+line, or directly after another label). This rejects the two BoE PDF artifacts
+seen in the real transcript:
+
+- a **single-word interjection** (`Yeah.`) — never becomes a journalist
+  boundary, so the answer it opens is still mined;
+- a **wrapped PDF fragment** (`Charter Act.` from `1844 Bank Charter Act.`) —
+  treated as content, so the enclosing answer is not split.
+
+### 12.3 Turn parsing & speaker attribution
+
+Turn parsing mirrors the Fed model: the first MPC-member turn before any
+journalist label is **remarks** (collective, `Fact.speaker = None`); each
+journalist label increments the Q&A turn counter and is **never mined**; every
+MPC-member turn after a journalist label is an **answer** attributed verbatim
+to the member's label. A content line with no preceding label is unattributed
+and never mined.
+
+Because the PDF is page-based and `document.sections` are pages, the walker
+accumulates a turn's wrapped lines across page sections (`_RunState.pending`)
+and mines the joined paragraph once the next label arrives, so a turn spanning a
+page break keeps its speaker and its provenance. A sentence split across pages
+is only guaranteed to be contiguous in the **full document text** (whitespace
+normalized), not in a single page section — the provenance contract for BoE
+tests normalizes whitespace accordingly.
+
+`identity_qualifier` follows the Phase 7 contract: `remarks:{n}` and
+`answer:{turn}:{n}`.
+
+### 12.4 BoE vocabulary
+
+- `_GUIDANCE_ANCHORS` — BoE forward-guidance phrasing: `stand ready to`,
+  `will not hesitate to`, `for as long as necessary`, `meeting by meeting`,
+  `data dependent`, `will be guided by`, `depends on the (incoming) data`,
+  `will continue to monitor|assess|evaluate`, `will take into account`,
+  `will decide`, `future (policy) decisions`, `there will be a decision`,
+  `will form the judgment`, `will keep (monetary) policy under review`.
+- `_POLICY_TERM` × `_POLICY_STANCE` compound: a BoE policy sentence needs a
+  stance word (`stance`, `decided to`, `decision(s)`, `appropriate`,
+  `restrictive`, `accommodative`, `tightening`, `easing`, `unchanged`, `hold`,
+  `primary tool`) **and** a BoE term (`Bank Rate`, `monetary (policy)`,
+  `interest rates`, `the MPC`, `the Bank of England`, `the Bank`, `policy
+  rates`, `quantitative tightening`).
+- `_INFLATION_EXTRAS` — `CPI`, `disinflation`, food/energy prices, second-round
+  effects, inflationary; `_FINANCIAL_EXTRAS` — gilts, yields, term premia, QT,
+  balance sheet, reserves; `_RISK_EXTRAS` — `distribution of risk`,
+  `on the upside|downside`; `_INFLATION_DRIVER` — driven/driving/drivers,
+  owing to, boosted by, weighed on, energy/food/oil/gas/services prices.
+- The shared `_VALUE_GATE` in `_shared.py` gained an approximation-qualifier
+  alternation (`… was | were | is | are | stood | stands | standing | averaged |
+  running | remain(s|ed|ing)? [at] about|around|roughly|approximately …`) so
+  the real July 2026 sentence *"So it was about 0.1% growth in the last
+  quarter."* is mined as an explicit GDP value. The gate change is
+  bank-agnostic and was verified not to disturb the ECB/Fed press-conference
+  suites.
+
+### 12.5 Canonical facts
+
+BoE emits the same canonical subjects / predicates as the Fed extractor
+(`§6`). On the real July 2026 transcript the extractor emits 27 facts with no
+warnings: risk (11), monetary_policy (5), inflation_risk (4), policy_guidance
+(2), plus inflation, inflation_driver, gdp (value 0.1%, from "was about 0.1%
+growth in the last quarter"), financial_conditions and growth — speaker-attributed
+across the Governor and both Deputy Governors, with the risks-tilted-to-upside
+and "10-year gilt yields have risen by about 350 basis points" claims preserved
+verbatim. Currency claims ("around £4 billion a year") and basis-point claims
+that are not percentages are never value facts.
+
+### 12.6 Registration & tests
+
+Registration mirrors Fed: `BoEPressConferenceExtractor` is added to
+`_EXTRACTORS` in `base.py` (`get_extractor("boe")`) and exported from
+`press_conferences/__init__.py` (`BOE_EXTRACTION_VERSION`). Tests live in
+`tests/test_press_conferences_boe.py` (dispatch, golden facts, contract fields,
+speaker attribution, Q&A boundary / turn numbering, page-spanning accumulation,
+value gate incl. the approximation-qualifier regression, negative epistemic,
+provenance round-trip via `Store`, gating, idempotent persistence, batch
+extraction, and BoE classification) against the synthetic fixture
+`tests/fixtures/documents/boe_press_conf.txt` (a multi-page turn-based dialog
+that reproduces the label interjection and wrapped-fragment cases) and inline
+synthetic documents. A live-source verification was run against the real July
+2026 transcript (discovery → fetch → normalize `pdf_text` → classify
+`press_conference`/`source_type_hint` → extract → persist, 27 facts retrieved).
+
+## 13. Final output
+
+The Press Conference family (ECB conserved + Fed and BoE added) emits canonical
+`Fact`s only. Nothing here introduces Phases 12–15 semantics, no LLM, no network
+calls, no fuzzy inference, and no new top-level roadmap phase. Phase 16 remains
 `DEFERRED`; nothing here starts Phase 17.

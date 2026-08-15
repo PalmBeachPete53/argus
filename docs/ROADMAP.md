@@ -371,6 +371,31 @@ Phase 5/6/12/13/14/15 sémantique. 1 fixture + tests synthétiques
 (`tests/test_press_conferences_fed.py`, 33 tests) ; la Phase 16 reste
 `DEFERRED`.
 
+**Extension multi-banque (Phase 4.x)** — extracteur BoE
+`BoEPressConferenceExtractor` (v7.2.0, `src/argus/press_conferences/boe.py`),
+enregistré pour le dispatch générique (`get_extractor("boe")`). Les
+transcriptions MPR (`mpr-press-conference-transcript-<mois>-<année>.pdf`) n'ont
+**pas** de règle URL/titre : la classification passe par la source déclarée
+`boe_mpc_press_conference` (`types=("press_conference",)`, hint
+`METHOD_SOURCE_TYPE_HINT`, HIGH). Transcription en dialogue par tours (labels
+nommés en capitales : `Andrew Bailey`, `Clare Lombardelli`, `Dave Ramsden`) :
+premier tour MPC = remarks (collectif, `speaker=None`), ensuite réponses
+individuelles (`answer:{turn}:{n}`, locuteur verbatim), tout label non-MPC
+(journalistes) = frontière de tour jamais exploitée. Détection de label
+conservatrice (`_is_label_line`) qui rejette deux artefacts réels du PDF BoE :
+interjection monosyllabique (`Yeah.`) et fragment de ligne coupé
+(`Charter Act.` de `1844 Bank Charter Act.`) — jamais des frontières. Un tour
+franchissant une page de section est accumulé (provenance sur texte complet
+normalisé en blanc). Vocabulaire BoE (membres MPC, guidance `there will be a
+decision` / `will form the judgment`, composé politique Bank Rate/MPC, CPI,
+QT/term premia) ; le `_VALUE_GATE` partagé accepte désormais les qualificatifs
+d'approximation (`was about 0.1%`). Mêmes sujets, gating et boundary que Phase
+7 ; pas de Phase 5/6/12/13/14/15 sémantique. 1 fixture + tests synthétiques
+(`tests/test_press_conferences_boe.py`, 36 tests) ; vérification live de bout
+en bout sur la transcription réelle de juillet 2026 (discovery → fetch →
+normalize → classify → extract → persist, 27 faits, 0 warning) ; la Phase 16
+reste `DEFERRED`.
+
 ## Phase 8 — Minutes / Meeting Accounts
 
 - **Objectif** : extraire opinions, divergences, risques, arguments,

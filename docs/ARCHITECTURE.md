@@ -270,7 +270,13 @@ and report structures differ materially. Only **structural** helpers (heading
 normalization, sentence splitting, the explicit value-claim gate, a
 deterministic provenance-carrying fact emitter with within-run deduplication)
 are shared between a family's extractors (`src/argus/reports/_shared.py`);
-**no bank-specific semantics** live in those helpers.
+**no bank-specific semantics** live in those helpers. The press-conference
+family (`src/argus/press_conferences/`) follows the same split: ECB (Phase 7
+reference implementation, conserved), Fed and BoE extractors are dispatched
+generically on `central_bank`, and only structural mechanics are shared
+(`press_conferences/_shared.py`). BoE press conferences are classified via the
+declared-type source `boe_mpc_press_conference` (`METHOD_SOURCE_TYPE_HINT`) —
+the MPR transcript PDF URL matches no URL/title TypeRule.
 
 A **monetary policy report is a publication type** (`monetary_policy_report`),
 not a Fact: the pipeline is `official source → publication → classification →

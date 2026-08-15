@@ -125,7 +125,9 @@ _VALUE_GATE = re.compile(
     r"|(?:stood at|standing at|averaged|was at|were at|is at|are at|stands at|running at|remain(?:s|ed|ing)? at|"
     r"declined to|declined by|declined from|fell to|fell by|fell from|dropped to|dropped by|dropped from|"
     r"rose to|rose by|rose from|increased to|increased by|increased from|"
-    r"expanded by|grew by|contracted by|narrowed to|widened to|reached)\s+",
+    r"expanded by|grew by|contracted by|narrowed to|widened to|reached)\s+"
+    r"|(?:was|were|is|are|stood|stands|standing|averaged|running|remain(?:s|ed|ing)?)\s+"
+    r"(?:at\s+)?(?:about|around|roughly|approximately)\s+",
     re.IGNORECASE,
 )
 _FORECAST_VERB = re.compile(r"\b(?:projected|expected|forecast)\b", re.IGNORECASE)

@@ -1,0 +1,49 @@
+SYNTHETIC — BoE MPR press conference transcript (June 2026), built to mirror
+the structure of the official BoE PDF transcript:
+  * turn-based dialog with standalone capitalized name labels (no ALL-CAPS
+    roles, no Question:/Answer: markers)
+  * opening remarks are a separate PDF; the transcript opens with the tail of
+    the Governor's closing remarks
+  * wrapped lines and page breaks fall between turns and sometimes mid-sentence
+    (page-spanning turns must be accumulated before mining)
+  * a single-word interjection ("Yeah.") and a wrapped PDF fragment
+    ("Charter Act.") must never be treated as speaker labels
+  * journalist questions carry numeric claims that are never mined
+  * a quoted third party is never attributed to an MPC member
+
+==== PAGE 1 ====
+Andrew Bailey
+So with that, Dave, Clare and I will be happy to take your questions. Thank you.
+Katie Martin
+Should we do Mehreen and then Ed.
+Mehreen Khan
+Governor, markets appear to be pricing rate cuts next year. Is GDP really expected to grow by about 1.5 percent this year?
+Andrew Bailey
+We took a decision today to leave Bank Rate unchanged, and that is the relevant conclusion.
+==== PAGE 2 ====
+Clare Lombardelli
+Yeah.
+On activity at the moment is we judge it to be relatively weak. So it was about 0.1%
+growth in the last quarter. That's obviously below what we would expect supply to be.
+So you've got weakness there.
+Andrew Bailey
+And it's about those pieces of data and how they all interact with each other that
+will form the judgment on where rates need to go.
+Tim Wallace
+Does the Committee see the risks to inflation as tilted to the upside?
+Dave Ramsden
+10-year gilt yields have risen by about 350 basis points. I think we've been very
+clear that we see the balance of risks on inflation tilted to the upside.
+Andrew Bailey
+There will be a decision in September, as there always is, and we will announce it.
+Inflation is expected to average 2.1 percent in 2027.
+Unemployment is projected to average 4.5 percent.
+One researcher told us that the natural rate may have risen, but we do not share that view.
+==== PAGE 3 ====
+Andrew Bailey
+And it really reflects this, that our balance sheet is split into two parts by the 1844 Bank
+Charter Act.
+So we have what's called the Banking Department and the Issue Department.
+Financial conditions have tightened notably over the course of this year.
+Huw Pill
+We remain vigilant.

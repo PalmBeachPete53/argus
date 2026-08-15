@@ -699,6 +699,100 @@ negative epistemic suite (no stance / hawkish / dovish / rate-expectation
 subjects), determinism, immutability, classification gating and Store
 persistence. See `docs/PRESS_CONFERENCES.md`.
 
+### Multi-bank Press Conference extractor — BoE
+
+`src/argus/press_conferences/boe.py` — `BoEPressConferenceExtractor`
+(`extraction_version 7.2.0`) is registered for generic dispatch
+(`get_extractor("boe")`) and shares the same structural machinery as Fed/ECB
+(`press_conferences/_shared.py`): the explicit value gate, qualitative
+assertion gate, risk anchors and `PressConferenceReporter`. It is the third
+member of the press-conference family (ECB reference implementation conserved,
+Fed added, BoE added).
+
+**Source & classification.** BoE MPR press conference transcripts are PDFs
+linked from the MPR issue page. Discovery is the declared-type source
+`boe_mpc_press_conference` (priority 6, `types=("press_conference",)`,
+`keep_documents=True`); classification flows through the source type_hint
+(`METHOD_SOURCE_TYPE_HINT`, `HIGH`). BoE has **no** URL/title press-conference
+TypeRule — the transcript URL `mpr-press-conference-transcript-<month>-<year>.pdf`
+does not match the generic `press[_-]conference` rule — so the source-declared
+type is the only classification path.
+
+**The BoE transcript is a turn-based dialog** of standalone capitalized name
+labels (`Andrew Bailey`, `Clare Lombardelli`, `Dave Ramsden`), each followed by
+that speaker's wrapped words; there are no ALL-CAPS role labels and no
+`Question:` / `Answer:` markers:
+
+```
+Andrew Bailey.
+So this is, I think, … we took a decision today to leave Bank Rate
+unchanged, and that is the relevant conclusion.
+Tom Greatrex.
+Does the Governor agree with the Chancellor …?
+Clare Lombardelli.
+So it was about 0.1% growth in the last quarter.
+```
+
+The known MPC membership (Governor + Deputy Governors + external members, 2026)
+identifies officials; every other label is a **journalist / moderator** turn.
+Label acceptance is deliberately conservative (`_is_label_line`): a label must
+be a multi-word capitalized name that is either a known MPC member or sits at a
+clean turn boundary (start of transcript, after a sentence-ending line, or
+directly after another label). This rejects two real BoE PDF artifacts: a
+single-word interjection (`Yeah.`) that would otherwise become a spurious
+journalist boundary and drop the answer it opens, and a wrapped PDF fragment
+(`Charter Act.` from `1844 Bank Charter Act.`) that would split an answer in
+two.
+
+**Turn parsing & attribution** mirror the Fed model: the first MPC-member turn
+before any journalist label is **remarks** (`speaker = None`); each journalist
+label increments the Q&A turn counter and is **never mined**; every MPC-member
+turn after a journalist label is an **answer** attributed verbatim to the
+member's name label. `identity_qualifier` is `remarks:{n}` / `answer:{turn}:{n}`.
+Because the PDF is page-based, a turn's wrapped lines are accumulated across
+page sections and mined once the next label arrives, so a turn spanning a page
+break keeps its speaker and provenance (a sentence split across pages is only
+contiguous in the whitespace-normalized full document text, not in a single page
+section).
+
+**Bank-specific vocabulary** kept in `boe.py`: the MPC membership set, the
+label/turn structure, BoE guidance phrasing ("stand ready to", "will not
+hesitate to", "for as long as necessary", "meeting by meeting", "data
+dependent", "there will be a decision", "will form the judgment", "will keep
+policy under review", …), the BoE policy compound (a stance word — `decided to`,
+`decision(s)`, `stance`, `unchanged`, `hold`, `primary tool`, … — **and** a BoE
+term — `Bank Rate`, `monetary policy`, `interest rates`, `the MPC`, `the Bank
+of England`, `quantitative tightening`, …) and BoE additions (CPI,
+disinflation, gilts/yields/term premia, QT/balance sheet, food/energy prices,
+`distribution of risk`, `on the upside|downside`, `driven by`). The shared
+`_VALUE_GATE` gained an approximation-qualifier alternation ("was | were | is |
+are | stood | stands | standing | averaged | running | remain(s|ed|ing)?
+[at] about|around|roughly|approximately …") so the real July 2026 sentence
+*"So it was about 0.1% growth in the last quarter."* is an explicit GDP value;
+the gate change is bank-agnostic and did not disturb the ECB/Fed suites.
+
+Supported facts, value gate, risk facts, confidence and warnings are identical
+to Fed/ECB. Currency claims ("around £4 billion a year") and non-percentage
+basis-point claims are never value facts. Journalist question content is never
+mined.
+
+**Test coverage**: `tests/test_press_conferences_boe.py` (fixture
+`tests/fixtures/documents/boe_press_conf.txt` — a multi-page turn-based dialog
+reproducing the label interjection and wrapped-fragment cases — plus inline
+synthetic documents): dispatch, golden facts, contract fields, verbatim speaker
+attribution (journalist excluded, remarks `speaker=None`), the Q&A boundary and
+turn numbering, page-spanning turn accumulation, the approximation-qualifier
+value gate, forecast-without-period ignored, share units never percentages, the
+negative epistemic suite, quoted third parties never attributed, no-downstream
+semantics, determinism, immutability, classification gating, idempotent
+persistence, batch extraction and Store provenance round-trip. A live
+integration run against the real July 2026 transcript (discovery → fetch →
+normalize `pdf_text` → classify `press_conference`/`source_type_hint` →
+extract → persist) produced 27 facts with no warnings (risk 11,
+monetary_policy 5, inflation_risk 4, policy_guidance 2, inflation,
+inflation_driver, gdp, financial_conditions, growth), all speaker-attributed
+across the Governor and both Deputy Governors. See `docs/PRESS_CONFERENCES.md`.
+
 ---
 
 # Type-Specific Extractors — Phase 8 (Minutes / Meeting Accounts)
