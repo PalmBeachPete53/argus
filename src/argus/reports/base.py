@@ -150,3 +150,9 @@ _EXTRACTORS: dict[str, ReportsExtractor] = {
 
 def get_extractor(bank: str) -> ReportsExtractor | None:
     return _EXTRACTORS.get(bank)
+
+
+from .norges import NorgesReportExtractor  # noqa: E402
+
+if NorgesReportExtractor.bank not in _EXTRACTORS:
+    _EXTRACTORS[NorgesReportExtractor.bank] = NorgesReportExtractor()

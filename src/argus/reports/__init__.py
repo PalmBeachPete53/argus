@@ -26,11 +26,17 @@ from .ecb import (
     SUBJECT_WAGES,
     EcbReportsExtractor,
 )
+from .norges import (
+    SUBJECT_POLICY_RATE_PROJECTION,
+    NorgesReportExtractor,
+)
 
 __all__ = [
     "REPORT_PUBLICATION_TYPES",
     "ReportsExtractor",
     "EcbReportsExtractor",
+    "NorgesReportExtractor",
+    "SUBJECT_POLICY_RATE_PROJECTION",
     "EXTRACTION_VERSION",
     "SUBJECT_INFLATION",
     "SUBJECT_CORE_INFLATION",

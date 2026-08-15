@@ -149,3 +149,9 @@ _EXTRACTORS: dict[str, MinutesExtractor] = {
 
 def get_extractor(bank: str) -> MinutesExtractor | None:
     return _EXTRACTORS.get(bank)
+
+
+from .fed import FedMinutesExtractor  # noqa: E402
+
+if FedMinutesExtractor.bank not in _EXTRACTORS:
+    _EXTRACTORS[FedMinutesExtractor.bank] = FedMinutesExtractor()

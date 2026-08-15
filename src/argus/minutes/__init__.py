@@ -25,11 +25,31 @@ from .ecb import (
     SUBJECT_WAGES,
     EcbMinutesExtractor,
 )
+from .fed import (
+    ATTR_COMMITTEE,
+    ATTR_COLLECTIVE,
+    ATTR_DISSENT,
+    ATTR_MEMBERS,
+    ATTR_MOST_MEMBERS,
+    ATTR_ONE_MEMBER,
+    ATTR_SOME_MEMBERS,
+    ATTR_STAFF,
+    FedMinutesExtractor,
+)
 
 __all__ = [
     "MINUTES_PUBLICATION_TYPES",
     "MinutesExtractor",
     "EcbMinutesExtractor",
+    "FedMinutesExtractor",
+    "ATTR_DISSENT",
+    "ATTR_ONE_MEMBER",
+    "ATTR_SOME_MEMBERS",
+    "ATTR_MOST_MEMBERS",
+    "ATTR_MEMBERS",
+    "ATTR_STAFF",
+    "ATTR_COMMITTEE",
+    "ATTR_COLLECTIVE",
     "EXTRACTION_VERSION",
     "SUBJECT_INFLATION",
     "SUBJECT_CORE_INFLATION",

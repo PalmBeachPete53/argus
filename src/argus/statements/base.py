@@ -135,3 +135,26 @@ _EXTRACTORS: dict[str, StatementExtractor] = {
 
 def get_extractor(bank: str) -> StatementExtractor | None:
     return _EXTRACTORS.get(bank)
+
+
+from .boj import BojStatementExtractor  # noqa: E402
+from .boc import BocStatementExtractor  # noqa: E402
+from .boe import BoeStatementExtractor  # noqa: E402
+from .fed import FedStatementExtractor  # noqa: E402
+from .rba import RbaStatementExtractor  # noqa: E402
+from .rbnz import RbnzStatementExtractor  # noqa: E402
+from .riksbank import RiksbankStatementExtractor  # noqa: E402
+from .snb import SnbStatementExtractor  # noqa: E402
+
+for _extractor in (
+    BojStatementExtractor,
+    BocStatementExtractor,
+    BoeStatementExtractor,
+    FedStatementExtractor,
+    RbaStatementExtractor,
+    RbnzStatementExtractor,
+    RiksbankStatementExtractor,
+    SnbStatementExtractor,
+):
+    if _extractor.bank not in _EXTRACTORS:
+        _EXTRACTORS[_extractor.bank] = _extractor()

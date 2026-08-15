@@ -14,11 +14,19 @@ from .ecb import (
     SUBJECT_INFLATION,
     EcbProjectionsExtractor,
 )
+from .fed import (
+    SUBJECT_POLICY_RATE,
+    SUBJECT_UNEMPLOYMENT,
+    FedSepExtractor,
+)
 
 __all__ = [
     "PROJECTIONS_PUBLICATION_TYPES",
     "ProjectionsExtractor",
     "EcbProjectionsExtractor",
+    "FedSepExtractor",
+    "SUBJECT_POLICY_RATE",
+    "SUBJECT_UNEMPLOYMENT",
     "EXTRACTION_VERSION",
     "SUBJECT_INFLATION",
     "SUBJECT_CORE_INFLATION",
