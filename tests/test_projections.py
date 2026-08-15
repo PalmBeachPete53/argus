@@ -14,6 +14,8 @@ persistence, and Phase 5/6/7/8 coexistence.
 
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
 from argus.classification.base import Confidence
@@ -1020,3 +1022,128 @@ def test_projections_extractor_refuses_other_publication_types(tmp_path):
     classify_projections(store, publication_type="meeting_account")
     assert extract_projections(store, projections_publication()) == []
     assert store.get_facts(publication_id="pub-ecb-projections") == []
+
+
+# ---------------------------------------------------------------------------
+# generic dispatch integration tests (Phase 4 hardening)
+# ---------------------------------------------------------------------------
+
+
+def test_get_projections_extractor_resolves_registered_banks():
+    """Verify the generic registry resolves the correct extractor for each bank."""
+    from argus.projections import get_extractor
+
+    expected = {
+        "ecb": "EcbProjectionsExtractor",
+        "fed": "FedSepExtractor",
+    }
+    for bank, class_name in expected.items():
+        ext = get_extractor(bank)
+        assert ext is not None, f"{bank}: extractor not registered"
+        assert ext.__class__.__name__ == class_name, f"{bank}: wrong extractor {ext.__class__.__name__}"
+
+    # Other banks with economic_projections publication type but no extractor yet
+    for bank in ("boj",):
+        assert get_extractor(bank) is None, f"{bank}: should not have extractor yet"
+
+
+PROJECTIONS_FIXTURE_MAP = {
+    "ecb": "ecb_projections.html",
+    "fed": "fed_sep.html",
+}
+
+
+def _normalized_projections_fixture(bank: str, name: str):
+    from argus.documents import Normalizer
+    from argus.models import Document, DocumentStatus
+    return Normalizer().parse(
+        Document(
+            publication_id=f"pub-{bank}-projections",
+            url=f"https://example.com/{bank}/{name}",
+            kind="html",
+            status=DocumentStatus.FETCHED,
+            local_path=str(FIXTURES / name),
+        )
+    )
+
+
+def _projections_publication(bank: str, pub_id: str = None) -> Publication:
+    return Publication(
+        central_bank=bank,
+        title="Economic projections",
+        url=f"https://example.com/{bank}/projections",
+        source_id=f"{bank}-projections",
+        source_url=f"https://example.com/{bank}/feed.xml",
+        id=pub_id or f"pub-{bank}-projections",
+    )
+
+
+def _classify_projections(store: Store, pub_id: str, bank: str) -> None:
+    store.set_classification(
+        pub_id,
+        central_bank=bank,
+        publication_type="economic_projections",
+        confidence=Confidence.HIGH.value,
+        method="url_pattern",
+        evidence=[],
+    )
+
+
+EXPECTED_PROJECTION_SUBJECTS = {
+    "ecb": {"inflation", "core_inflation", "gdp"},
+    "fed": {"inflation", "core_inflation", "gdp", "unemployment", "policy_rate"},
+}
+
+
+@pytest.mark.parametrize("bank", list(PROJECTIONS_FIXTURE_MAP.keys()))
+def test_extract_projections_generic_dispatch(tmp_path, bank):
+    """Test the generic extract_projections dispatch for each registered bank."""
+    store = Store(tmp_path / f"{bank}_projections.db")
+    pub = _projections_publication(bank)
+    store.upsert_publication(pub)
+    doc = _normalized_projections_fixture(bank, PROJECTIONS_FIXTURE_MAP[bank])
+    store.upsert_normalized_document(doc)
+    _classify_projections(store, pub.id, bank)
+
+    results = extract_projections(store, pub)
+    assert len(results) == 1, f"{bank}: expected 1 result"
+    result = results[0]
+    assert result.publication_id == pub.id
+    assert result.document_id == doc.document_id
+
+    # Verify canonical facts were produced
+    subjects = {f.subject for f in result.facts}
+    expected = EXPECTED_PROJECTION_SUBJECTS[bank]
+    assert expected.issubset(subjects), f"{bank}: missing expected subjects {expected - subjects}"
+
+    # Verify provenance is preserved
+    for fact in result.facts:
+        assert fact.extraction_version
+        assert fact.extraction_method
+        assert fact.source_location is not None
+        assert fact.source_text
+        assert fact.confidence is not None
+        # ECB uses "projections:", Fed SEP uses "sep:"
+        assert fact.identity_qualifier.startswith(("projections:", "sep:"))
+
+
+def test_extract_projections_batch_generic_dispatch(tmp_path):
+    """Test extract_projections_batch runs all classified projections via generic dispatch."""
+    store = Store(tmp_path / "batch_projections.db")
+    for bank in PROJECTIONS_FIXTURE_MAP:
+        pub = _projections_publication(bank, pub_id=f"pub-{bank}-projections")
+        store.upsert_publication(pub)
+        doc = _normalized_projections_fixture(bank, PROJECTIONS_FIXTURE_MAP[bank])
+        store.upsert_normalized_document(doc)
+        _classify_projections(store, pub.id, bank)
+
+    results = extract_projections_batch(store)
+    assert len(results) == len(PROJECTIONS_FIXTURE_MAP)
+
+    for bank in PROJECTIONS_FIXTURE_MAP:
+        facts = store.get_facts(publication_id=f"pub-{bank}-projections")
+        assert facts, f"{bank}: no facts persisted"
+        subjects = {f.subject for f in facts}
+        expected = EXPECTED_PROJECTION_SUBJECTS[bank]
+        assert expected.issubset(subjects), f"{bank}: missing expected subjects {expected - subjects}"
+        assert all(f.identity_qualifier.startswith(("projections:", "sep:")) for f in facts)

@@ -3,6 +3,7 @@ local HTML fixtures and the existing Store (vertical slice)."""
 
 from __future__ import annotations
 
+import pytest
 from pathlib import Path
 
 from argus.classification.base import Confidence
@@ -831,3 +832,146 @@ def test_phase5_and_phase6_do_not_overlap(tmp_path):
     persisted = store.get_facts(publication_id="pub-ecb-stmt")
     assert all(f.subject != "monetary_policy_decision" for f in persisted)
     assert any(f.subject == SUBJECT_POLICY_GUIDANCE for f in persisted)
+
+
+# ---------------------------------------------------------------------------
+# generic dispatch integration tests (Phase 4 hardening)
+# ---------------------------------------------------------------------------
+
+
+def test_get_statement_extractor_resolves_all_registered_banks():
+    """Verify the generic registry resolves the correct extractor for each bank."""
+    from argus.statements import get_extractor
+
+    expected = {
+        "ecb": "EcbMonetaryPolicyStatementExtractor",
+        "fed": "FedStatementExtractor",
+        "boe": "BoeStatementExtractor",
+        "boj": "BojStatementExtractor",
+        "boc": "BocStatementExtractor",
+        "snb": "SnbStatementExtractor",
+        "rba": "RbaStatementExtractor",
+        "rbnz": "RbnzStatementExtractor",
+        "riksbank": "RiksbankStatementExtractor",
+    }
+    for bank, class_name in expected.items():
+        ext = get_extractor(bank)
+        assert ext is not None, f"{bank}: extractor not registered"
+        assert ext.__class__.__name__ == class_name, f"{bank}: wrong extractor {ext.__class__.__name__}"
+
+    # Norges intentionally has no monetary_policy_statement publication type —
+    # its report (Monetary Policy Report) is the mixed-content publication.
+    assert get_extractor("norges") is None
+
+
+STATEMENT_FIXTURE_MAP = {
+    "ecb": "ecb_statement.html",
+    "fed": "fed_statement.html",
+    "boe": "boe_statement_econ.html",
+    "boj": "boj_statement.html",
+    "boc": "boc_statement.html",
+    "snb": "snb_statement.html",
+    "rba": "rba_statement.html",
+    "rbnz": "rbnz_statement.html",
+    "riksbank": "riksbank_statement.html",
+}
+
+# Each statement extractor should produce at least some facts
+STATEMENT_EXPECTED_SUBJECTS = {
+    "ecb": {"monetary_policy"},
+    "fed": {"monetary_policy"},
+    "boe": {"monetary_policy"},
+    "boj": {"monetary_policy_decision", "policy_rate"},
+    "boc": {"monetary_policy"},
+    "snb": {"monetary_policy"},
+    "rba": {"monetary_policy"},
+    "rbnz": {"monetary_policy"},
+    "riksbank": {"monetary_policy"},
+}
+
+
+def _normalized_statement_fixture(bank: str, name: str):
+    from argus.documents import Normalizer
+    from argus.models import Document, DocumentStatus
+    return Normalizer().parse(
+        Document(
+            publication_id=f"pub-{bank}-stmt",
+            url=f"https://example.com/{bank}/{name}",
+            kind="html",
+            status=DocumentStatus.FETCHED,
+            local_path=str(FIXTURES / name),
+        )
+    )
+
+
+def _statement_publication(bank: str, pub_id: str = None) -> Publication:
+    return Publication(
+        central_bank=bank,
+        title="Monetary policy statement",
+        url=f"https://example.com/{bank}/statement",
+        source_id=f"{bank}-statement",
+        source_url=f"https://example.com/{bank}/feed.xml",
+        id=pub_id or f"pub-{bank}-stmt",
+    )
+
+
+def _classify_statement(store: Store, pub_id: str, bank: str) -> None:
+    store.set_classification(
+        pub_id,
+        central_bank=bank,
+        publication_type=STATEMENT_PUBLICATION_TYPE,
+        confidence=Confidence.HIGH.value,
+        method="url_pattern",
+        evidence=[],
+    )
+
+
+@pytest.mark.parametrize("bank", list(STATEMENT_FIXTURE_MAP.keys()))
+def test_extract_statement_generic_dispatch(tmp_path, bank):
+    """Test the generic extract_statement dispatch for each registered bank."""
+    store = Store(tmp_path / f"{bank}_statement.db")
+    pub = _statement_publication(bank)
+    store.upsert_publication(pub)
+    doc = _normalized_statement_fixture(bank, STATEMENT_FIXTURE_MAP[bank])
+    store.upsert_normalized_document(doc)
+    _classify_statement(store, pub.id, bank)
+
+    results = extract_statement(store, pub)
+    assert len(results) == 1, f"{bank}: expected 1 result"
+    result = results[0]
+    assert result.publication_id == pub.id
+    assert result.document_id == doc.document_id
+
+    # Verify canonical facts were produced
+    subjects = {f.subject for f in result.facts}
+    expected = STATEMENT_EXPECTED_SUBJECTS[bank]
+    assert expected.issubset(subjects), f"{bank}: missing expected subjects {expected - subjects}"
+
+    # Verify provenance is preserved
+    for fact in result.facts:
+        assert fact.extraction_version
+        assert fact.extraction_method
+        assert fact.source_location is not None
+        assert fact.source_text
+        assert fact.confidence is not None
+
+
+def test_extract_statement_batch_generic_dispatch(tmp_path):
+    """Test extract_statement_batch runs all classified statements via generic dispatch."""
+    store = Store(tmp_path / "batch_statements.db")
+    for bank in STATEMENT_FIXTURE_MAP:
+        pub = _statement_publication(bank, pub_id=f"pub-{bank}-stmt")
+        store.upsert_publication(pub)
+        doc = _normalized_statement_fixture(bank, STATEMENT_FIXTURE_MAP[bank])
+        store.upsert_normalized_document(doc)
+        _classify_statement(store, pub.id, bank)
+
+    results = extract_statement_batch(store)
+    assert len(results) == len(STATEMENT_FIXTURE_MAP)
+
+    for bank in STATEMENT_FIXTURE_MAP:
+        facts = store.get_facts(publication_id=f"pub-{bank}-stmt")
+        assert facts, f"{bank}: no facts persisted"
+        subjects = {f.subject for f in facts}
+        expected = STATEMENT_EXPECTED_SUBJECTS[bank]
+        assert expected.issubset(subjects), f"{bank}: missing expected subjects {expected - subjects}"

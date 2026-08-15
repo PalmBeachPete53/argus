@@ -228,23 +228,45 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4.
 - **Critères de validation** : aucun fait absent n'est inventé ; chaque taux
   extrait est lié à sa provenance.
-- **Statut** : `COMPLETE` — extracteur `EcbDecisionExtractor` (v5.2.0). Implémenté :
-  policy rates (3 taux), rate changes (signe conservé en bps), decision date,
-  effective date, decision wording (`monetary_policy_decision/statement`,
-  verbatim), asset purchases / balance-sheet decisions (APP/PEPP/TLTRO,
-  `asset_purchase/decision`, identité du programme conservée), forward guidance
-  (`policy_guidance/statement`, verbatim, non interprété). **Non présent dans
-  les décisions ECB** : vote (jamais fabriqué — les votes relèvent des Minutes,
-  Phase 8) et risk assessment (relève du Monetary Policy Statement, Phase 6).
-  Frontière Phase 5/6 mise en œuvre et testée. 6 fixtures, golden tests
-  (valeurs exactes, provenance verbatim, aucun fait inventé), extraction
-  déterministe et persistance idempotente vérifiées ; `docs/EXTRACTORS.md`
-  documente la couverture réelle. Durcissement : gating strict par
-  classification (la table `classifications` est la source de vérité unique ;
-  une classification absente, non-décision ou la seule cache dénormalisée
-  `publication_type` refusent l'extraction) et persistance idempotente
-  résultats vides compris (une ré-extraction vide efface les faits périmés du
-  document).
+- **Statut** : `COMPLETE` — **9 banques implémentées et enregistrées dans le
+  dispatch générique** :
+  - ECB (`EcbDecisionExtractor` v5.2.0) — 3 taux (main_refinancing,
+    marginal_lending, deposit_facility), rate changes (signe conservé en bps),
+    decision date, effective date, decision wording, asset purchases (APP/PEPP/TLTRO),
+    forward guidance
+  - Fed (`FedDecisionExtractor` v5.3.0) — federal funds target range (RANGE),
+    rate changes, decision date, decision wording, forward guidance
+  - BoE (`BoeDecisionExtractor` v5.4.0) — Bank Rate, rate changes (pp→bps),
+    decision date, decision wording, forward guidance
+  - BoC (`BocDecisionExtractor` v5.6.0) — policy interest rate / overnight rate target,
+    rate changes, decision date, decision wording, forward guidance
+  - SNB (`SnbDecisionExtractor` v5.5.0) — SNB policy rate, rate changes,
+    decision date, decision wording, forward guidance
+  - RBA (`RbaDecisionExtractor` v5.7.0) — cash rate target, rate changes,
+    decision date, decision wording, forward guidance
+  - RBNZ (`RbnzDecisionExtractor` v5.8.0) — Official Cash Rate (OCR), rate
+    changes, decision date, decision wording, forward guidance
+  - Riksbank (`RiksbankDecisionExtractor` v5.10.0) — policy rate, rate changes
+    (pp→bps), decision date, decision wording, forward guidance
+  - Norges (`NorgesDecisionExtractor` v5.9.0) — policy rate, rate changes
+    (pp→bps), decision date, decision wording, forward guidance
+  
+  **BoJ** : **intentionnellement sans extracteur Decision** — la Banque du
+  Japon fusionne décision et statement dans une seule publication
+  `monetary_policy_statement` (voir Phase 6 / BoJ Statement extractor).
+  
+  **Non présent dans les décisions ECB** : vote (jamais fabriqué — les votes
+  relèvent des Minutes, Phase 8) et risk assessment (relève du Monetary Policy
+  Statement, Phase 6). Frontière Phase 5/6 mise en œuvre et testée. 6 fixtures
+  ECB + 1 fixture par autre banque, golden tests (valeurs exactes, provenance
+  verbatim, aucun fait inventé), extraction déterministe et persistance
+  idempotente vérifiées ; `docs/EXTRACTORS.md` documente la couverture réelle.
+  Durcissement : gating strict par classification (la table `classifications`
+  est la source de vérité unique ; une classification absente, non-décision ou
+  la seule cache dénormalisée `publication_type` refusent l'extraction) et
+  persistance idempotente résultats vides compris (une ré-extraction vide
+  efface les faits périmés du document). Tests de dispatch générique ajoutés
+  pour toutes les 9 banques.
 
 ## Phase 6 — Monetary Policy Statement
 
@@ -255,30 +277,56 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Dépendances** : Phase 4 (et Phase 5 pour la cohérence du wording).
 - **Critères de validation** : chaque extrait est relié à un passage précis du
   document normalisé.
-- **Statut** : `COMPLETE` — extracteur `EcbMonetaryPolicyStatementExtractor`
-  (v6.0.0, `src/argus/statements/`). Implémenté : justification de la décision
-  (`monetary_policy/rationale`, verbatim), orientation future
-  (`policy_guidance/statement`, verbatim, jamais interprétée), inflation /
-  core inflation / inflation expectations, croissance (`growth` qualitatif,
-  `gdp` quantitatif), marché du travail (`labour_market` / `unemployment` /
-  `wages`), conditions financières, évaluation des risques
+- **Statut** : `COMPLETE` — **9 banques implémentées et enregistrées dans le
+  dispatch générique** :
+  - ECB (`EcbMonetaryPolicyStatementExtractor` v6.0.0) — justification,
+    forward guidance, inflation/core/expectations, croissance (growth/gdp),
+    marché du travail, conditions financières, risques
+  - Fed (`FedStatementExtractor` v6.1.0) — monetary policy, forward guidance,
+    inflation, growth, labour market
+  - BoE (`BoeStatementExtractor` v6.1.0) — monetary policy, forward guidance,
+    inflation, growth
+  - BoJ (`BojStatementExtractor` v6.1.0) — **fusionne décision + statement** :
+    decision date, policy target (uncollateralized overnight call rate),
+    decision wording + vote sentence, forward guidance, price/growth/risk assessment
+  - BoC (`BocStatementExtractor` v6.1.0) — monetary policy, forward guidance,
+    inflation, growth
+  - SNB (`SnbStatementExtractor` v6.1.0) — monetary policy, forward guidance,
+    inflation, growth
+  - RBA (`RbaStatementExtractor` v6.1.0) — monetary policy, forward guidance,
+    inflation, growth
+  - RBNZ (`RbnzStatementExtractor` v6.1.0) — monetary policy, forward guidance,
+    inflation, growth
+  - Riksbank (`RiksbankStatementExtractor` v6.1.0) — monetary policy, forward
+    guidance, inflation, growth
+  
+  **Norges** : pas de `monetary_policy_statement` — la publication de type
+  rapport (Monetary Policy Report) est le contenu mixte (voir Phase 10 / Norges
+  Report extractor).
+  
+  Implémenté par banque : justification de la décision (`monetary_policy/rationale`,
+  verbatim), orientation future (`policy_guidance/statement`, verbatim, jamais
+  interprétée), inflation / core inflation / inflation expectations, croissance
+  (`growth` qualitatif, `gdp` quantitatif), marché du travail (`labour_market` /
+  `unemployment` / `wages`), conditions financières, évaluation des risques
   (`risk` / `inflation_risk` / `growth_risk`, orientations catégoriques
   upside/downside/balanced ou texte verbatim quand aucune orientation n'est
   énoncée), valeurs quantitatives avec période de référence (`FactPeriod`).
   Routage déterministe par titre de section avec repli content-first étroit
-  (guidance > risque > justification). 5 fixtures, golden tests (valeurs
-  exactes, périodes, provenance verbatim, aucun fait inventé), extraction
-  déterministe, persistance idempotente, gating par classification et
-  coexistence Phase 5/6 vérifiées ; `docs/EXTRACTORS.md` documente la
-  couverture réelle. Durcissement : gating strict par classification (la table
-  `classifications` est la source de vérité unique ; une classification absente,
-  non-statement ou la seule cache dénormalisée `publication_type` refusent
-  l'extraction, et un refus ne supprime jamais les faits déjà persistés) et
-  persistance idempotente résultats vides compris (une ré-extraction vide efface
-  les faits périmés du document, sans toucher aux autres documents ni aux autres
-  publications). La frontière avec la Phase 5 (décision, taux) et avec la
-  Phase 12 (analyse des changements de formulation, seulement préservés
-  verbatim) est mise en œuvre et testée.
+  (guidance > risque > justification). 5 fixtures ECB + 1 fixture par autre
+  banque, golden tests (valeurs exactes, périodes, provenance verbatim, aucun
+  fait inventé), extraction déterministe, persistance idempotente, gating par
+  classification et coexistence Phase 5/6 vérifiées ; `docs/EXTRACTORS.md`
+  documente la couverture réelle. Durcissement : gating strict par
+  classification (la table `classifications` est la source de vérité unique ;
+  une classification absente, non-statement ou la seule cache dénormalisée
+  `publication_type` refusent l'extraction, et un refus ne supprime jamais les
+  faits déjà persistés) et persistance idempotente résultats vides compris
+  (une ré-extraction vide efface les faits périmés du document, sans toucher
+  aux autres documents ni aux autres publications). La frontière avec la Phase 5
+  (décision, taux) et avec la Phase 12 (analyse des changements de formulation,
+  seulement préservés verbatim) est mise en œuvre et testée. Tests de dispatch
+  générique ajoutés pour toutes les 9 banques.
 
 ## Phase 7 — Press Conferences
 

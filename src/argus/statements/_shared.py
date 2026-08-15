@@ -139,6 +139,7 @@ class BankStatementExtractor(StatementExtractor):
             return result
 
         date_fact = self._date_fact(result, document)
+        date_index = -1
         if date_fact is not None:
             fact, date_index = date_fact
             result.add(fact)

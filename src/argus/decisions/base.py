@@ -142,3 +142,31 @@ _EXTRACTORS: dict[str, DecisionExtractor] = {
 
 def get_extractor(bank: str) -> DecisionExtractor | None:
     return _EXTRACTORS.get(bank)
+
+
+# Register all implemented Decision extractors (bank-specific parsers).
+# BoJ is intentionally NOT registered here — its decision content is fused
+# into the "monetary_policy_statement" publication type (see boj.py Statement
+# extractor and classification/bank_rules.py). BoJ has no separate
+# "monetary_policy_decision" publication in the taxonomy.
+from .fed import FedDecisionExtractor  # noqa: E402
+from .boe import BoeDecisionExtractor  # noqa: E402
+from .boc import BocDecisionExtractor  # noqa: E402
+from .snb import SnbDecisionExtractor  # noqa: E402
+from .rba import RbaDecisionExtractor  # noqa: E402
+from .rbnz import RbnzDecisionExtractor  # noqa: E402
+from .riksbank import RiksbankDecisionExtractor  # noqa: E402
+from .norges import NorgesDecisionExtractor  # noqa: E402
+
+for _extractor in (
+    FedDecisionExtractor,
+    BoeDecisionExtractor,
+    BocDecisionExtractor,
+    SnbDecisionExtractor,
+    RbaDecisionExtractor,
+    RbnzDecisionExtractor,
+    RiksbankDecisionExtractor,
+    NorgesDecisionExtractor,
+):
+    if _extractor.bank not in _EXTRACTORS:
+        _EXTRACTORS[_extractor.bank] = _extractor()

@@ -12,6 +12,7 @@ empty-result persistence, and Phase 5/6/7 coexistence.
 
 from __future__ import annotations
 
+import pytest
 from pathlib import Path
 
 from argus.classification.base import Confidence
@@ -938,3 +939,118 @@ def test_other_extractors_do_not_overlap_with_minutes(tmp_path):
     assert not any(f.predicate == "date" for f in persisted)
     assert all(f.extraction_version == EcbMinutesExtractor.extraction_version for f in persisted)
     assert all(f.identity_qualifier.startswith("minutes:") for f in persisted)
+
+
+# ---------------------------------------------------------------------------
+# generic dispatch integration tests (Phase 4 hardening)
+# ---------------------------------------------------------------------------
+
+
+def test_get_minutes_extractor_resolves_registered_banks():
+    """Verify the generic registry resolves the correct extractor for each bank."""
+    from argus.minutes import get_extractor
+
+    expected = {
+        "ecb": "EcbMinutesExtractor",
+        "fed": "FedMinutesExtractor",
+    }
+    for bank, class_name in expected.items():
+        ext = get_extractor(bank)
+        assert ext is not None, f"{bank}: extractor not registered"
+        assert ext.__class__.__name__ == class_name, f"{bank}: wrong extractor {ext.__class__.__name__}"
+
+    # Other banks with minutes publication type but no extractor yet (representative pattern)
+    for bank in ("boe", "boj", "norges", "riksbank"):
+        assert get_extractor(bank) is None, f"{bank}: should not have extractor yet"
+
+
+MINUTES_FIXTURE_MAP = {
+    "ecb": "ecb_minutes.html",
+    "fed": "fed_minutes.html",
+}
+
+
+def _normalized_minutes_fixture(bank: str, name: str):
+    from argus.documents import Normalizer
+    from argus.models import Document, DocumentStatus
+    return Normalizer().parse(
+        Document(
+            publication_id=f"pub-{bank}-minutes",
+            url=f"https://example.com/{bank}/{name}",
+            kind="html",
+            status=DocumentStatus.FETCHED,
+            local_path=str(FIXTURES / name),
+        )
+    )
+
+
+def _minutes_publication(bank: str, pub_id: str = None) -> Publication:
+    return Publication(
+        central_bank=bank,
+        title="Minutes of the monetary policy meeting",
+        url=f"https://example.com/{bank}/minutes",
+        source_id=f"{bank}-minutes",
+        source_url=f"https://example.com/{bank}/feed.xml",
+        id=pub_id or f"pub-{bank}-minutes",
+    )
+
+
+def _classify_minutes(store: Store, pub_id: str, bank: str, pub_type: str = "meeting_account") -> None:
+    store.set_classification(
+        pub_id,
+        central_bank=bank,
+        publication_type=pub_type,
+        confidence=Confidence.HIGH.value,
+        method="url_pattern",
+        evidence=[],
+    )
+
+
+@pytest.mark.parametrize("bank", list(MINUTES_FIXTURE_MAP.keys()))
+def test_extract_minutes_generic_dispatch(tmp_path, bank):
+    """Test the generic extract_minutes dispatch for each registered bank."""
+    store = Store(tmp_path / f"{bank}_minutes.db")
+    pub = _minutes_publication(bank)
+    store.upsert_publication(pub)
+    doc = _normalized_minutes_fixture(bank, MINUTES_FIXTURE_MAP[bank])
+    store.upsert_normalized_document(doc)
+    pub_type = "meeting_account" if bank == "ecb" else "minutes"
+    _classify_minutes(store, pub.id, bank, pub_type)
+
+    results = extract_minutes(store, pub)
+    assert len(results) == 1, f"{bank}: expected 1 result"
+    result = results[0]
+    assert result.publication_id == pub.id
+    assert result.document_id == doc.document_id
+
+    # Verify some facts were produced
+    assert len(result.facts) > 0, f"{bank}: no facts extracted"
+
+    # Verify provenance is preserved
+    for fact in result.facts:
+        assert fact.extraction_version
+        assert fact.extraction_method
+        assert fact.source_location is not None
+        assert fact.source_text
+        assert fact.confidence is not None
+        assert fact.identity_qualifier.startswith("minutes:")
+
+
+def test_extract_minutes_batch_generic_dispatch(tmp_path):
+    """Test extract_minutes_batch runs all classified minutes via generic dispatch."""
+    store = Store(tmp_path / "batch_minutes.db")
+    for bank in MINUTES_FIXTURE_MAP:
+        pub = _minutes_publication(bank, pub_id=f"pub-{bank}-minutes")
+        store.upsert_publication(pub)
+        doc = _normalized_minutes_fixture(bank, MINUTES_FIXTURE_MAP[bank])
+        store.upsert_normalized_document(doc)
+        pub_type = "meeting_account" if bank == "ecb" else "minutes"
+        _classify_minutes(store, pub.id, bank, pub_type)
+
+    results = extract_minutes_batch(store)
+    assert len(results) == len(MINUTES_FIXTURE_MAP)
+
+    for bank in MINUTES_FIXTURE_MAP:
+        facts = store.get_facts(publication_id=f"pub-{bank}-minutes")
+        assert facts, f"{bank}: no facts persisted"
+        assert all(f.identity_qualifier.startswith("minutes:") for f in facts)

@@ -3,6 +3,7 @@ local HTML fixture and the existing Store (vertical slice)."""
 
 from __future__ import annotations
 
+import pytest
 from pathlib import Path
 
 from argus.classification.base import Confidence
@@ -678,3 +679,153 @@ def test_empty_result_persistence_is_idempotent(tmp_path):
     extract_decision(store, pub, extractor=zero)
     extract_decision(store, pub, extractor=zero)
     assert store.get_facts(publication_id="pub-ecb-1") == []
+
+
+# ---------------------------------------------------------------------------
+# generic dispatch integration tests (Phase 4 hardening)
+# ---------------------------------------------------------------------------
+
+
+def test_get_extractor_resolves_all_registered_banks():
+    """Verify the generic registry resolves the correct extractor for each bank."""
+    from argus.decisions import get_extractor
+
+    expected = {
+        "ecb": "EcbDecisionExtractor",
+        "fed": "FedDecisionExtractor",
+        "boe": "BoeDecisionExtractor",
+        "boc": "BocDecisionExtractor",
+        "snb": "SnbDecisionExtractor",
+        "rba": "RbaDecisionExtractor",
+        "rbnz": "RbnzDecisionExtractor",
+        "riksbank": "RiksbankDecisionExtractor",
+        "norges": "NorgesDecisionExtractor",
+    }
+    for bank, class_name in expected.items():
+        ext = get_extractor(bank)
+        assert ext is not None, f"{bank}: extractor not registered"
+        assert ext.__class__.__name__ == class_name, f"{bank}: wrong extractor {ext.__class__.__name__}"
+
+    # BoJ intentionally has no separate decision publication type — its decision
+    # content is fused into monetary_policy_statement (see boj.py Statement extractor).
+    assert get_extractor("boj") is None
+
+
+def _normalized_fixture(bank: str, name: str):
+    from argus.documents import Normalizer
+    from argus.models import Document, DocumentStatus
+    return Normalizer().parse(
+        Document(
+            publication_id=f"pub-{bank}-1",
+            url=f"https://example.com/{bank}/{name}",
+            kind="html",
+            status=DocumentStatus.FETCHED,
+            local_path=str(FIXTURES / name),
+        )
+    )
+
+
+def _publication(bank: str, pub_id: str = None) -> Publication:
+    return Publication(
+        central_bank=bank,
+        title="Monetary policy decision",
+        url=f"https://example.com/{bank}/decision",
+        source_id=f"{bank}-decision",
+        source_url=f"https://example.com/{bank}/feed.xml",
+        id=pub_id or f"pub-{bank}-1",
+    )
+
+
+def _classify_decision(store: Store, pub_id: str, bank: str) -> None:
+    store.set_classification(
+        pub_id,
+        central_bank=bank,
+        publication_type=DECISION_PUBLICATION_TYPE,
+        confidence=Confidence.HIGH.value,
+        method="url_pattern",
+        evidence=[],
+    )
+
+
+FIXTURE_MAP = {
+    "ecb": "ecb_decision.html",
+    "fed": "fed_decision.html",
+    "boe": "boe_decision.html",
+    "boc": "boc_decision.html",
+    "snb": "snb_decision.html",
+    "rba": "rba_decision.html",
+    "rbnz": "rbnz_decision.html",
+    "riksbank": "riksbank_decision.html",
+    "norges": "norges_decision.html",
+}
+
+EXPECTED_SUBJECTS = {
+    "ecb": {"deposit_facility_rate", "main_refinancing_rate", "marginal_lending_rate"},
+    "fed": {"policy_rate"},
+    "boe": {"bank_rate"},
+    "boc": {"policy_rate"},
+    "snb": {"policy_rate"},
+    "rba": {"cash_rate"},
+    "rbnz": {"official_cash_rate"},
+    "riksbank": {"policy_rate"},
+    "norges": {"policy_rate"},
+}
+
+
+@pytest.mark.parametrize("bank", list(FIXTURE_MAP.keys()))
+def test_extract_decision_generic_dispatch(tmp_path, bank):
+    """Test the generic extract_decision dispatch for each registered bank."""
+    store = Store(tmp_path / f"{bank}_decision.db")
+    pub = _publication(bank)
+    store.upsert_publication(pub)
+    doc = _normalized_fixture(bank, FIXTURE_MAP[bank])
+    store.upsert_normalized_document(doc)
+    _classify_decision(store, pub.id, bank)
+
+    # Use the generic dispatch (no explicit extractor passed)
+    results = extract_decision(store, pub)
+    assert len(results) == 1, f"{bank}: expected 1 result"
+    result = results[0]
+    assert result.publication_id == pub.id
+    assert result.document_id == doc.document_id
+
+    # Verify canonical facts were produced
+    subjects = {f.subject for f in result.facts}
+    assert EXPECTED_SUBJECTS[bank].issubset(subjects), f"{bank}: missing expected subjects {EXPECTED_SUBJECTS[bank] - subjects}"
+
+    # Verify decision date fact exists
+    date_facts = [f for f in result.facts if f.subject == "monetary_policy_decision" and f.predicate == "date"]
+    assert len(date_facts) == 1, f"{bank}: missing decision date"
+
+    # Verify rate level fact exists for the bank's policy instrument
+    rate_subject = next(iter(EXPECTED_SUBJECTS[bank]))
+    level_facts = [f for f in result.facts if f.subject == rate_subject and f.predicate == "value"]
+    assert len(level_facts) >= 1, f"{bank}: missing rate level for {rate_subject}"
+
+    # Verify provenance is preserved
+    for fact in result.facts:
+        assert fact.extraction_version
+        assert fact.extraction_method
+        assert fact.source_location is not None
+        assert fact.source_text
+        assert fact.confidence is not None
+
+
+def test_extract_decision_batch_generic_dispatch(tmp_path):
+    """Test extract_decision_batch runs all classified decisions via generic dispatch."""
+    store = Store(tmp_path / "batch_decisions.db")
+    for bank in FIXTURE_MAP:
+        pub = _publication(bank, pub_id=f"pub-{bank}-1")
+        store.upsert_publication(pub)
+        doc = _normalized_fixture(bank, FIXTURE_MAP[bank])
+        store.upsert_normalized_document(doc)
+        _classify_decision(store, pub.id, bank)
+
+    results = extract_decision_batch(store)
+    assert len(results) == len(FIXTURE_MAP)
+
+    for bank in FIXTURE_MAP:
+        facts = store.get_facts(publication_id=f"pub-{bank}-1")
+        assert facts, f"{bank}: no facts persisted"
+        subjects = {f.subject for f in facts}
+        assert EXPECTED_SUBJECTS[bank].issubset(subjects), f"{bank}: missing expected subjects"
