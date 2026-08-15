@@ -4,6 +4,17 @@ Document directeur de l'évolution du projet Argus. Chaque phase doit être
 validée avant de commencer la suivante (voir [Règle de développement](#règle-de-développement)).
 Les statuts sont : `NOT STARTED`, `IN PROGRESS`, `COMPLETE`, `BLOCKED`.
 
+> **Réorganisation Phase 4 (consolidation).** Les anciennes Phases 5–11
+> (extracteurs spécialisés) ont été **consolidées sous la Phase 4 — Fact
+> Extraction** en sous-phases `4.1`–`4.7`. Les anciennes Phases 0–2 deviennent
+> `1`–`3` (Foundation, Source Discovery, Document Pipeline) et la Phase 3
+> (classification) devient un **prérequis** de la Phase 4. Les phases
+> analytiques ultérieures conservent leur numérotation (`12`–`17`) ;
+> **la Phase 16 (Historical Validation) reste `DEFERRED`.** Aucun contenu
+> historique n'a été supprimé : chaque sous-phase 4.y conserve les versions
+> d'extracteurs, la couverture et les correctifs déjà livrés. Les anciens
+> numéros sont indiqués entre parenthèses `(ex-Phase N)`.
+
 ---
 
 ## Vision
@@ -99,7 +110,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
 
 ---
 
-## Phase 0 — Architecture & Spécification
+## Phase 1 — Foundation (ex-Phase 0 — Architecture & Spécification)
 
 - **Objectif** : définir les concepts fondamentaux avant d'implémenter les
   couches dépendantes.
@@ -115,7 +126,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Statut** : `COMPLETE` (phase de formalisation/documentation ; finalisée par
   la création de ce document).
 
-## Phase 1 — Source Registry & Collection
+## Phase 2 — Source Discovery (ex-Phase 1 — Source Registry & Collection)
 
 - **Objectif** : répondre à « Quelles sont les sources officielles et comment
   récupérer automatiquement leurs publications ? ».
@@ -128,13 +139,13 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Livrables** : `src/argus/registry.py`, `discovery/`, `adapters/` (10
   banques), `collector.py`, `fetcher.py`, `http.py`, `robots.py` ; tables
   `sources`, `publications`, `documents`, `collect_errors`.
-- **Dépendances** : Phase 0.
+- **Dépendances** : Phase 1.
 - **Critères de validation** : ajouter une banque requiert principalement une
   configuration/adaptation déclarative, non une réécriture du cœur. Tests de
   discovery (RSS, sitemap, HTML), fetch, idempotence, registry.
 - **Statut** : `COMPLETE`.
 
-## Phase 2 — Document Normalization
+## Phase 3 — Document Pipeline (ex-Phase 2 — Document Normalization)
 
 - **Objectif** : transformer `Raw Document` → `NormalizedDocument` sans
   interprétation économique.
@@ -148,16 +159,53 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Livrables** : `src/argus/documents/` (parsers html/pdf/docx/spreadsheet/
   txt), `normalizer.py` ; tables `normalized_documents`, `document_sections`,
   `document_tables`.
-- **Dépendances** : Phase 1.
+- **Dépendances** : Phase 2.
 - **Critères de validation** : réexécutabilité hors-ligne ; l'identité d'un
   document normalisé (`document_id`, SHA-256) est exclusivement produite par le
   `Normalizer`. Tests de parsers et de normalisation.
 - **Statut** : `COMPLETE`.
 
-## Phase 3 — Publication Classification
+---
+
+## Phase 4 — Fact Extraction (ex-Phases 3–11, consolidées)
+
+**Objectif** : transformer les publications officielles normalisées en
+**Facts canoniques** traçables, famille par famille.
+
+```
+Official publication
+    ↓
+Discovery
+    ↓
+Classification
+    ↓
+Extractor dispatch
+    ↓
+Canonical Facts
+    ↓
+Provenance / validation
+```
+
+La **classification/reachability est un prérequis** de l'extraction : une
+publication doit être classifiée dans sa famille canonique avant que
+l'extracteur correspondant puisse être dispatché. Le travail Phase 4.x mené a
+établi que les familles de publications pertinentes peuvent effectivement
+atteindre les extracteurs appropriés sur les 10 banques initiales.
+
+La couche d'extraction est **strictement descriptive** :
+- pas de classification hawkish/dovish ;
+- pas d'inférence de stance ;
+- pas de calcul de surprise ;
+- pas de logique Forex/trading ;
+- pas d'interprétation sémantique dépendante d'un LLM dans la couche cœur.
+
+Ces interprétations relèvent des couches analytiques ultérieures (Phases 12+),
+si/when planifiées.
+
+### Prérequis — Publication Classification (ex-Phase 3)
 
 - **Objectif** : déterminer le type d'une publication.
-- **Taxonomie initiale** : `monetary_policy_decision`,
+- **Taxonomie** : `monetary_policy_decision`,
   `monetary_policy_statement`, `press_conference`, `minutes`,
   `meeting_account`, `economic_projections`, `monetary_policy_report`,
   `speech`, `interview`, `other`, `unknown`.
@@ -168,7 +216,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Livrables** : `src/argus/classification/` (`classifier.py`, `rules.py`,
   `bank_rules.py`, `base.py`) ; table `classifications` comme source de
   vérité ; cache dénormalisé `publications.publication_type`.
-- **Dépendances** : Phases 1 et 2.
+- **Dépendances** : Phases 2 et 3.
 - **Critères de validation** : chaque classification est traçable par son
   evidence ; les classifications live issues de `Source.publication_types`
   priment sur les hints périmés. Tests de classification et de CLI
@@ -192,7 +240,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
   `tests/test_classification_snb_summaries.py` ; Phase 16 reste `DEFERRED`.
 - **Statut** : `COMPLETE`.
 
-## Phase 4 — Fact Model
+### Modèle Fact (ex-Phase 4)
 
 - **Objectif** : définir précisément ce qu'est un « Fact » dans Argus avant de
   développer les extracteurs spécialisés.
@@ -200,7 +248,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
   projections, dates, périodes de référence, évaluations qualitatives, risques,
   forward guidance, déclarations, changements de formulation. Chaque fait doit
   conserver sa provenance exacte.
-- **Modèle conceptuel cible** :
+- **Modèle conceptuel** :
   ```
   Fact
   ├── subject
@@ -221,7 +269,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
   vocabulaire canonique (subject/predicate/ValueKind), stratégie de provenance
   (`FactLocation`), identité déterministe (`fact_id`), contrat d'extraction
   (`ExtractionResult`) ; document de référence `docs/DATA_MODEL.md`.
-- **Dépendances** : Phases 2 et 3.
+- **Dépendances** : Phases 3 et 4 (classification).
 - **Critères de validation** : tout fait est remontable à la publication
   officielle ; aucune donnée n'est inventée (provenance requise).
 - **Statut** : `COMPLETE` — modèle `Fact`, persistance idempotente
@@ -229,11 +277,57 @@ L'architecture doit rester extensible à d'autres banques centrales.
   valeurs typées (`FactValue`), périodes (`FactPeriod`), temporalité multiple
   (`effective_date` vs `period` vs dates de publication/réunion), provenance
   (`source_text`, `source_location`), méthode/version d'extraction et
-  confidence implémentés et testés. Aucun extracteur spécialisé n'a été
-  implémenté. (Le champ `Publication.publication_type` reste un cache de
-  classification, distinct du modèle `Fact`.)
+  confidence implémentés et testés. (Le champ `Publication.publication_type`
+  reste un cache de classification, distinct du modèle `Fact`.)
 
-## Phase 5 — Monetary Policy Decision
+### Phase 4.x — Classification / reachability multi-banques
+
+**Statut** : `COMPLETE`.
+
+Le travail Phase 4.x multi-banques a établi la **reachability** réelle des
+familles de publications vers leurs extracteurs sur les 10 banques initiales.
+Famille **Statement** après le correctif :
+
+- **ECB** — COVERED (publication de statement séparée, extracteur atteignable)
+- **BoJ** — COVERED (publication fusionnée Decision+Statement,
+  `monetary_policy_statement`, extracteur atteignable)
+- **Fed** — REPRESENTED par la publication fusionnée Decision+Statement
+- **SNB** — REPRESENTED par le Monetary Policy Assessment fusionné
+- **BoE** — REPRESENTED par la publication Summary-and-Minutes (decision)
+- **BoC** — REPRESENTED par la publication FAD (decision)
+- **RBA** — REPRESENTED par le Statement on Monetary Policy (famille report)
+- **RBNZ** — REPRESENTED par le Monetary Policy Statement (famille report)
+- **Riksbank** — REPRESENTED par la décision de policy-rate
+- **Norges** — N/A
+
+**Correctif de reachability Statement BoJ (Phase 4.x)** : le « Statement on
+Monetary Policy » (publication fusionnée Decision+Statement, canoniquement
+`monetary_policy_statement`) est publié sous
+`/en/mopo/mpmdeci/mpr_<year>/k<date>.pdf`. L'ancienne forme
+`statement_on_monetary_policy/...` ne matche plus l'URL réelle ; la règle
+générique `monetary_policy_report` (titre `statement on monetary policy`,
+URL `mpr[_-]\d{4}`) et la règle `economic_projections` (`mpr_\d{4}`)
+entraient en collision → `unknown`. Correctif minimal déterministe : la
+règle générique `monetary_policy_report` exclut désormais BoJ
+(`exclude_banks=("boj",)`), la règle boj `monetary_policy_statement` gagne
+le pattern URL `mpr_\d{4}/k`, et le pattern périmé `mpr_\d{4}` est retiré de
+la règle boj `economic_projections` (l'Outlook réel est sous
+`/mopo/outlook/gor<date>.pdf`, jamais `mpr_<year>`). Le Statement réel se
+classe `monetary_policy_statement` **via son URL uniquement** (aucune
+dépendance au titre) et `BojStatementExtractor` est dispatché ; l'Outlook
+reste `economic_projections`, les Minutes et le Summary of Opinions restent
+inchangés. Fed/SNB/BoE/BoC restent **intentionnellement représentés** par
+`monetary_policy_decision` (document unique fusionné décision+statement,
+tests de classification existants le verrouillent) — pas de vraie absence de
+couverture, pas de nouveau family. Tests `test_boj_statement_*` ajoutés.
+
+**Validation Phase 4.x** : 1420 tests verts, 3 runs `pytest` consécutifs,
+`compileall` propre, grep sémantique interdit propre, gaps précédemment fermés
+toujours verts, **Phase 16 reste `DEFERRED`.**
+
+---
+
+### Phase 4.1 — Monetary Policy Decisions (ex-Phase 5)
 
 - **Objectif** : premier extracteur spécialisé.
 - **Périmètre** : `MonetaryPolicyDecision` → `DecisionExtractor` → `Facts` ;
@@ -242,7 +336,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
   assessment. Les différences entre banques doivent être gérées sans supposer
   que toutes publient les mêmes informations.
 - **Livrables** : extracteur + règles par banque, tests, documentation.
-- **Dépendances** : Phase 4.
+- **Dépendances** : Phase 4 (modèle Fact).
 - **Critères de validation** : aucun fait absent n'est inventé ; chaque taux
   extrait est lié à sa provenance.
 - **Statut** : `COMPLETE` — **9 banques implémentées et enregistrées dans le
@@ -267,31 +361,31 @@ L'architecture doit rester extensible à d'autres banques centrales.
     (pp→bps), decision date, decision wording, forward guidance
   - Norges (`NorgesDecisionExtractor` v5.9.0) — policy rate, rate changes
     (pp→bps), decision date, decision wording, forward guidance
-  
+
   **BoJ** : **intentionnellement sans extracteur Decision** — la Banque du
   Japon fusionne décision et statement dans une seule publication
-  `monetary_policy_statement` (voir Phase 6 / BoJ Statement extractor).
-  
-  **Non présent dans les décisions ECB** : vote (jamais fabriqué — les votes
-  relèvent des Minutes, Phase 8) et risk assessment (relève du Monetary Policy
-  Statement, Phase 6). Frontière Phase 5/6 mise en œuvre et testée. 6 fixtures
-  ECB + 1 fixture par autre banque, golden tests (valeurs exactes, provenance
-  verbatim, aucun fait inventé), extraction déterministe et persistance
-  idempotente vérifiées ; `docs/EXTRACTORS.md` documente la couverture réelle.
-  Durcissement : gating strict par classification (la table `classifications`
-  est la source de vérité unique ; une classification absente, non-décision ou
-  la seule cache dénormalisée `publication_type` refusent l'extraction) et
-  persistance idempotente résultats vides compris (une ré-extraction vide
-  efface les faits périmés du document). Tests de dispatch générique ajoutés
-  pour toutes les 9 banques.
+  `monetary_policy_statement` (voir Phase 4.2 / BoJ Statement extractor).
 
-## Phase 6 — Monetary Policy Statement
+  **Non présent dans les décisions ECB** : vote (jamais fabriqué — les votes
+  relèvent des Minutes, Phase 4.4) et risk assessment (relève du Monetary
+  Policy Statement, Phase 4.2). Frontière Phase 4.1/4.2 mise en œuvre et
+  testée. 6 fixtures ECB + 1 fixture par autre banque, golden tests (valeurs
+  exactes, provenance verbatim, aucun fait inventé), extraction déterministe
+  et persistance idempotente vérifiées ; `docs/EXTRACTORS.md` documente la
+  couverture réelle. Durcissement : gating strict par classification (la table
+  `classifications` est la source de vérité unique ; une classification absente,
+  non-décision ou la seule cache dénormalisée `publication_type` refusent
+  l'extraction) et persistance idempotente résultats vides compris (une
+  ré-extraction vide efface les faits périmés du document). Tests de dispatch
+  générique ajoutés pour toutes les 9 banques.
+
+### Phase 4.2 — Monetary Policy Statements (ex-Phase 6)
 
 - **Objectif** : extraire justification de la décision, inflation, croissance,
   emploi, risques, conditions financières, orientation future, changements de
   formulation.
 - **Livrables** : extracteur, tests, documentation.
-- **Dépendances** : Phase 4 (et Phase 5 pour la cohérence du wording).
+- **Dépendances** : Phase 4 (modèle Fact, et Phase 4.1 pour la cohérence du wording).
 - **Critères de validation** : chaque extrait est relié à un passage précis du
   document normalisé.
 - **Statut** : `COMPLETE` — **9 banques implémentées et enregistrées dans le
@@ -316,11 +410,17 @@ L'architecture doit rester extensible à d'autres banques centrales.
     inflation, growth
   - Riksbank (`RiksbankStatementExtractor` v6.1.0) — monetary policy, forward
     guidance, inflation, growth
-  
+
   **Norges** : pas de `monetary_policy_statement` — la publication de type
-  rapport (Monetary Policy Report) est le contenu mixte (voir Phase 10 / Norges
-  Report extractor).
-  
+  rapport (Monetary Policy Report) est le contenu mixte (voir Phase 4.6 /
+  Norges Report extractor).
+
+  **Reachability (Phase 4.x)** : le Statement réel de chaque banque est
+  désormais correctement classifié et dispatché (voir la matrice Phase 4.x) :
+  ECB et BoJ → `monetary_policy_statement` ; Fed/SNB/BoE/BoC/RBA/RBNZ/Riksbank
+  → `monetary_policy_decision` (fusion intentionnelle) ; Norges → N/A. Le
+  correctif BoJ est documenté dans la section Phase 4.x ci-dessus.
+
   Implémenté par banque : justification de la décision (`monetary_policy/rationale`,
   verbatim), orientation future (`policy_guidance/statement`, verbatim, jamais
   interprétée), inflation / core inflation / inflation expectations, croissance
@@ -333,26 +433,26 @@ L'architecture doit rester extensible à d'autres banques centrales.
   (guidance > risque > justification). 5 fixtures ECB + 1 fixture par autre
   banque, golden tests (valeurs exactes, périodes, provenance verbatim, aucun
   fait inventé), extraction déterministe, persistance idempotente, gating par
-  classification et coexistence Phase 5/6 vérifiées ; `docs/EXTRACTORS.md`
+  classification et coexistence Phase 4.1/4.2 vérifiées ; `docs/EXTRACTORS.md`
   documente la couverture réelle. Durcissement : gating strict par
   classification (la table `classifications` est la source de vérité unique ;
   une classification absente, non-statement ou la seule cache dénormalisée
   `publication_type` refusent l'extraction, et un refus ne supprime jamais les
   faits déjà persistés) et persistance idempotente résultats vides compris
   (une ré-extraction vide efface les faits périmés du document, sans toucher
-  aux autres documents ni aux autres publications). La frontière avec la Phase 5
-  (décision, taux) et avec la Phase 12 (analyse des changements de formulation,
-  seulement préservés verbatim) est mise en œuvre et testée. Tests de dispatch
-  générique ajoutés pour toutes les 9 banques.
+  aux autres documents ni aux autres publications). La frontière avec la
+  Phase 4.1 (décision, taux) et avec la Phase 12 (analyse des changements de
+  formulation, seulement préservés verbatim) est mise en œuvre et testée.
+  Tests de dispatch générique ajoutés pour toutes les 9 banques.
 
-## Phase 7 — Press Conferences
+### Phase 4.3 — Press Conferences (ex-Phase 7)
 
 - **Objectif** : structurer opening statement, questions de journalistes,
   réponses des banquiers centraux.
 - **Périmètre** : la provenance doit permettre de distinguer une décision
   officielle d'une déclaration individuelle.
 - **Livrables** : extracteur, tests, documentation.
-- **Dépendances** : Phase 4.
+- **Dépendances** : Phase 4 (modèle Fact).
 - **Critères de validation** : un propos individuel n'est jamais assimilé à une
   décision collective.
 - **Statut** : `COMPLETE` — extracteur `EcbPressConferenceExtractor` (v7.0.0,
@@ -371,28 +471,28 @@ L'architecture doit rester extensible à d'autres banques centrales.
   classification (`press_conference`), persistance idempotente. 7 fixtures,
   golden tests (valeurs exactes, provenance verbatim, attribution locuteur,
   aucun fait inventé), extraction déterministe, persistance idempotente, gating
-  par classification et coexistence Phases 5/6/7 vérifiées ;
+  par classification et coexistence Phase 4.1/4.2/4.3 vérifiées ;
   `docs/EXTRACTORS.md` documente la couverture réelle.
 
-**Extension multi-banque (Phase 4.x)** — extracteur Fed
-`FedPressConferenceExtractor` (v7.1.0, `src/argus/press_conferences/fed.py`, +
-`_shared.py` structurel), enregistré pour le dispatch générique. Les
-transcriptions FOMC (`/FOMCpresconf<date>.pdf`, `/press-?conference/`) étaient
-classées `unknown` : règle TypeRule `press_conference` ajoutée (URL/titre).
-Transcription Fed en dialogue par tours (labels ALL-CAPS) : premier tour Fed
-= remarks (collectif, `speaker=None`), ensuite réponses individuelles
-(`answer:{turn}:{n}`, locuteur verbatim, e.g. `CHAIRMAN WARSH`), tout label non
-Fed (journalistes, `MR./MS.`) = frontière de tour jamais exploitée. Mêmes sujets,
-gating, valeurs (avec `GDP_NEAR_MISS`) et boundary que Phase 7 ; pas de
-Phase 5/6/12/13/14/15 sémantique. 1 fixture + tests synthétiques
+**Extension multi-banque** — extracteur Fed `FedPressConferenceExtractor`
+(v7.1.0, `src/argus/press_conferences/fed.py`, + `_shared.py` structurel),
+enregistré pour le dispatch générique. Les transcriptions FOMC
+(`/FOMCpresconf<date>.pdf`, `/press-?conference/`) étaient classées `unknown` :
+règle TypeRule `press_conference` ajoutée (URL/titre). Transcription Fed en
+dialogue par tours (labels ALL-CAPS) : premier tour Fed = remarks (collectif,
+`speaker=None`), ensuite réponses individuelles (`answer:{turn}:{n}`, locuteur
+verbatim, e.g. `CHAIRMAN WARSH`), tout label non Fed (journalistes, `MR./MS.`)
+= frontière de tour jamais exploitée. Mêmes sujets, gating, valeurs (avec
+`GDP_NEAR_MISS`) et boundary que Phase 4.3 ; pas de sémantique
+Phase 4.1/4.2/12/13/14/15. 1 fixture + tests synthétiques
 (`tests/test_press_conferences_fed.py`, 33 tests) ; la Phase 16 reste
 `DEFERRED`.
 
-**Extension multi-banque (Phase 4.x)** — extracteur BoE
-`BoEPressConferenceExtractor` (v7.2.0, `src/argus/press_conferences/boe.py`),
-enregistré pour le dispatch générique (`get_extractor("boe")`). Les
-transcriptions MPR (`mpr-press-conference-transcript-<mois>-<année>.pdf`) n'ont
-**pas** de règle URL/titre : la classification passe par la source déclarée
+**Extension multi-banque** — extracteur BoE `BoEPressConferenceExtractor`
+(v7.2.0, `src/argus/press_conferences/boe.py`), enregistré pour le dispatch
+générique (`get_extractor("boe")`). Les transcriptions MPR
+(`mpr-press-conference-transcript-<mois>-<année>.pdf`) n'ont **pas** de règle
+URL/titre : la classification passe par la source déclarée
 `boe_mpc_press_conference` (`types=("press_conference",)`, hint
 `METHOD_SOURCE_TYPE_HINT`, HIGH). Transcription en dialogue par tours (labels
 nommés en capitales : `Andrew Bailey`, `Clare Lombardelli`, `Dave Ramsden`) :
@@ -406,20 +506,20 @@ franchissant une page de section est accumulé (provenance sur texte complet
 normalisé en blanc). Vocabulaire BoE (membres MPC, guidance `there will be a
 decision` / `will form the judgment`, composé politique Bank Rate/MPC, CPI,
 QT/term premia) ; le `_VALUE_GATE` partagé accepte désormais les qualificatifs
-d'approximation (`was about 0.1%`). Mêmes sujets, gating et boundary que Phase
-7 ; pas de Phase 5/6/12/13/14/15 sémantique. 1 fixture + tests synthétiques
-(`tests/test_press_conferences_boe.py`, 36 tests) ; vérification live de bout
-en bout sur la transcription réelle de juillet 2026 (discovery → fetch →
-normalize → classify → extract → persist, 27 faits, 0 warning) ; la Phase 16
-reste `DEFERRED`.
+d'approximation (`was about 0.1%`). Mêmes sujets, gating et boundary que
+Phase 4.3 ; pas de sémantique Phase 4.1/4.2/12/13/14/15. 1 fixture + tests
+synthétiques (`tests/test_press_conferences_boe.py`, 36 tests) ; vérification
+live de bout en bout sur la transcription réelle de juillet 2026 (discovery →
+fetch → normalize → classify → extract → persist, 27 faits, 0 warning) ; la
+Phase 16 reste `DEFERRED`.
 
-## Phase 8 — Minutes / Meeting Accounts
+### Phase 4.4 — Minutes / Meeting Accounts (ex-Phase 8)
 
 - **Objectif** : extraire opinions, divergences, risques, arguments,
   préférences de politique monétaire, discussions économiques, éventuels
   dissents.
 - **Livrables** : extracteur, tests, documentation.
-- **Dépendances** : Phase 4.
+- **Dépendances** : Phase 4 (modèle Fact).
 - **Critères de validation** : les positions individuelles et les dissents sont
   distingués et tracés.
 - **Statut** : `COMPLETE` — extracteur `EcbMinutesExtractor` (v8.0.0,
@@ -434,7 +534,7 @@ reste `DEFERRED`.
   « Copyright notice » ne sont jamais lus comme les headings contrôlés, et
   jamais comme ECONOMIC), classification content-first par phrase (guidance >
   policy > risk > financial > inflation > labour > growth, mêmes ancres que la
-  Phase 7), discussion économique fidèle (phrases de thème sans contenu —
+  Phase 4.3), discussion économique fidèle (phrases de thème sans contenu —
   « The discussion focused on … », « Members discussed the possibility … » —
   supprimées ; le contenu explicite « Members noted that … » est extrait),
   **attribution tracée sans identité inventée** (`identity_qualifier`
@@ -449,10 +549,10 @@ reste `DEFERRED`.
   routage IGNORE (identité exacte, near-misses, familles de titre, déterminisme
   catégoriel), extraction
   déterministe, persistance idempotente, gating par classification et
-  coexistence Phases 5/6/7 vérifiées ; `docs/EXTRACTORS.md` documente la
+  coexistence Phase 4.1/4.2/4.3 vérifiées ; `docs/EXTRACTORS.md` documente la
   couverture réelle.
 
-### Phase 8.x — Extension multi-banques des Minutes
+#### Extension multi-banques des Minutes
 
 - **Statut** : `COMPLETE` — la famille `minutes` / `meeting_account` est étendue
   de 1 à **6 banques** : ECB (Meeting Account, conservé) auxquelles s'ajoutent
@@ -475,27 +575,26 @@ reste `DEFERRED`.
   sans identité inventée (précédence `dissent` > `one_member` >
   `some_members` > `most_members` > `members` > `committee` > `collective`) ;
   valeurs supportées par la source uniquement, forecasts sans période ignorés,
-  aucune décision/statement/press-conference subject (Phases 5/6/7), aucun
-  hawkish/dovish.
+  aucune décision/statement/press-conference subject (Phase 4.1/4.2/4.3),
+  aucun hawkish/dovish.
 - 5 fixtures (`boe_minutes_full.html`, `boj_minutes.html`,
   `norges_minutes.html`, `rba_minutes.html`, `riksbank_minutes.html`), tests
-  de contrat / dispatch
-  générique / attribution / provenance / limites / déterminisme (répétition +
-  indépendance d'ordre) / immutabilité / gating (refus + persistance idempotente
-  résultats vides compris) / intégration (publication → classification →
-  extracteur → faits → persistance → récupération) dans
-  `tests/test_minutes_multibank.py`.
+  de contrat / dispatch générique / attribution / provenance / limites /
+  déterminisme (répétition + indépendance d'ordre) / immutabilité / gating
+  (refus + persistance idempotente résultats vides compris) / intégration
+  (publication → classification → extracteur → faits → persistance →
+  récupération) dans `tests/test_minutes_multibank.py`.
 - 58+ tests verts et déterministes, `compileall` propre.
   **Phase 16 (validation historique) reste `DEFERRED`.**
 
-## Phase 9 — Economic Projections
+### Phase 4.5 — Economic Projections (ex-Phase 9)
 
 - **Objectif** : extraire les projections quantitatives et leurs révisions
   (GDP, inflation, core inflation, unemployment, autres variables publiées).
 - **Périmètre** : conserver période, valeur, publication, projection
   précédente, révision.
 - **Livrables** : extracteur, tests, documentation.
-- **Dépendances** : Phase 4.
+- **Dépendances** : Phase 4 (modèle Fact).
 - **Critères de validation** : les révisions sont calculées entre publications
   comparables et proviennent de la provenance.
 - **Statut** : `COMPLETE` — extracteur `EcbProjectionsExtractor` (v9.0.0,
@@ -526,16 +625,16 @@ reste `DEFERRED`.
   variable/année, provenance verbatim table/ligne/colonne, unités, révisions
   explicites vs non calculées, aucun fait inventé), extraction déterministe,
   persistance idempotente (résultats vides compris), gating par classification
-  et coexistence Phases 5/6/7/8 vérifiées ; `docs/EXTRACTORS.md` documente la
+  et coexistence Phase 4.1–4.4 vérifiées ; `docs/EXTRACTORS.md` documente la
   couverture réelle.
 
-## Phase 10 — Monetary Policy Reports
+### Phase 4.6 — Monetary Policy Reports (ex-Phase 10)
 
 - **Objectif** : extraire les informations de contexte : economic outlook,
   inflation drivers, growth outlook, labour market, financial conditions,
   risks, policy rationale.
 - **Livrables** : extracteur, tests, documentation.
-- **Dépendances** : Phase 4.
+- **Dépendances** : Phase 4 (modèle Fact).
 - **Critères de validation** : les affirmations contextuelles sont reliées à
   leur source.
 - **Statut** : `COMPLETE` — extracteur `EcbReportsExtractor` (v10.0.0,
@@ -593,10 +692,10 @@ reste `DEFERRED`.
   fait inventé), tests near-miss (titres et contenu, matching IGNORE exact),
   extraction déterministe,
   persistance idempotente, gating par
-  classification et coexistence Phases 5/6/7/8/9 vérifiées ;
+  classification et coexistence Phase 4.1–4.5 vérifiées ;
   `docs/EXTRACTORS.md` documente la couverture réelle.
 
-### Phase 4.x — Extension multi-banques des Reports
+#### Extension multi-banques des Reports
 
 - **Statut** : `COMPLETE` — la famille `monetary_policy_report` est étendue de
   2 à **7 banques** : ECB (Economic Bulletin, conservé) et Norges (Monetary
@@ -618,8 +717,8 @@ reste `DEFERRED`.
   `url_pattern`. Vocabulaire propre : **CPIF** (mesure cible → `inflation`),
   inflation sous-jacente / CPIF hors énergie (→ `core_inflation`), Executive
   Board comme instance de décision. Le récit de la décision reste verbatim
-  `monetary_policy/statement` et n'est jamais « tarifé » (frontière Phase 5) ;
-  la section `forecast tables` n'est jamais extraite (frontière Phase 9) ; les
+  `monetary_policy/statement` et n'est jamais « tarifé » (frontière Phase 4.1) ;
+  la section `forecast tables` n'est jamais extraite (frontière Phase 4.5) ; les
   tirets décoratifs des titres (`—` `–` `-` `−`) sont normalisés. Fixture
   `riksbank_report.html` (15 faits, aucun warning), suite dédiée
   `tests/test_reports_riksbank.py`, contrat `docs/REPORTS.md`.
@@ -647,22 +746,22 @@ reste `DEFERRED`.
   `boc_mpr_feed` (`types=("monetary_policy_report",)`), et la source du
   calendrier exclut `/publications/mpr/` — collision de famille supprimée de
   façon déterministe (aucune dépendance à l'ordre des sources). Le MPR réel
-   se classe `monetary_policy_report` (source hint, sinon règle générique
-   `mpr[_-]\d{4}`) et `BocReportExtractor` v10.3.0 est dispatché. Fixture
-   `boc_mpr_feed.xml` (decouverte), fixture document synthétique enrichie d'une
-   phrase non-claim, suite dédiée `tests/test_reports_boc_mpr.py` (20 tests :
-   découverte, classification positive/négative/sans collision, dispatch,
-   extraction, contrat, frontières négatives, déterminisme, immutabilité,
-   persistance de bout en bout), vérification d'intégration live sur le MPR
-   officiel de juillet 2026 (découverte → fetch → normalize → classification →
-   extraction → persistance, 7 faits canoniques, provenance verbatim).
-   **Phase 16 (validation historique) reste `DEFERRED`.**
+  se classe `monetary_policy_report` (source hint, sinon règle générique
+  `mpr[_-]\d{4}`) et `BocReportExtractor` v10.3.0 est dispatché. Fixture
+  `boc_mpr_feed.xml` (decouverte), fixture document synthétique enrichie d'une
+  phrase non-claim, suite dédiée `tests/test_reports_boc_mpr.py` (20 tests :
+  découverte, classification positive/négative/sans collision, dispatch,
+  extraction, contrat, frontières négatives, déterminisme, immutabilité,
+  persistance de bout en bout), vérification d'intégration live sur le MPR
+  officiel de juillet 2026 (découverte → fetch → normalize → classification →
+  extraction → persistance, 7 faits canoniques, provenance verbatim).
+  **Phase 16 (validation historique) reste `DEFERRED`.**
 - **Correctif de classification ECB Economic Bulletin (Phase 4.x)** : le
   bulletin économique de l'ECB (`/press/economic-bulletin/html/eb<YYYYMM>.en.html`),
   publication de type Rapport pour la zone euro, était découvert via
   `ecb_publications_rss` mais classé `unknown` (aucune règle URL/titre ne
   mappait `economic-bulletin`) — `EcbReportsExtractor` (implémentation de
-  référence Phase 10) n'était jamais dispatché. La règle banque-spécifique
+  référence Phase 4.6) n'était jamais dispatché. La règle banque-spécifique
   `monetary_policy_report` (`url=economic-bulletin`, `title=economic bulletin`)
   est ajoutée dans `bank_rules.py` ; les bulletins réels se classent
   `monetary_policy_report` (url_pattern) et `EcbReportsExtractor` est dispatché.
@@ -678,37 +777,16 @@ reste `DEFERRED`.
   persistance ; l'extraction live est conservative (0 fait : la page HTML réelle
   est un écran JS et les PDF liés ont des titres de section non contrôlés —
   `UNKNOWN ≠ ECONOMIC`, aucun fait inventé). Ceci n'est PAS une validation
-   historique Phase 16. **Phase 16 (validation historique) reste `DEFERRED`.**
-- **Correctif de reachability Statement BoJ (Phase 4.x)** : le « Statement on
-  Monetary Policy » (publication fusionnée Decision+Statement, canoniquement
-  `monetary_policy_statement`) est désormais publié sous
-  `/en/mopo/mpmdeci/mpr_<year>/k<date>.pdf`. L'ancienne forme
-  `statement_on_monetary_policy/...` ne matche plus l'URL réelle ; la règle
-  générique `monetary_policy_report` (titre `statement on monetary policy`,
-  URL `mpr[_-]\d{4}`) et la règle `economic_projections` (`mpr_\d{4}`)
-  entraient en collision → `unknown`. Correctif minimal déterministe : la
-  règle générique `monetary_policy_report` exclut désormais BoJ
-  (`exclude_banks=("boj",)`), la règle boj `monetary_policy_statement` gagne
-  le pattern URL `mpr_\d{4}/k`, et le pattern périmé `mpr_\d{4}` est retiré de
-  la règle boj `economic_projections` (l'Outlook réel est sous
-  `/mopo/outlook/gor<date>.pdf`, jamais `mpr_<year>`). Le Statement réel se
-  classe `monetary_policy_statement` **via son URL uniquement** (aucune
-  dépendance au titre) et `BojStatementExtractor` est dispatché ; l'Outlook
-  reste `economic_projections`, les Minutes et le Summary of Opinions restent
-  inchangés. Fed/SNB/BoE/BoC restent **intentionnellement représentés** par
-  `monetary_policy_decision` (document unique fusionné décision+statement,
-  tests de classification existants le verrouillent) — pas de vraie absence de
-  couverture, pas de nouveau family. Tests `test_boj_statement_*` ajoutés.
-  **Phase 16 (validation historique) reste `DEFERRED`.**
+  historique Phase 16. **Phase 16 (validation historique) reste `DEFERRED`.**
 
-## Phase 11 — Speeches & Interviews
+### Phase 4.7 — Speeches & Interviews (ex-Phase 11)
 
 - **Objectif** : conserver speaker, role, date, event, audience, topic,
   statement.
 - **Périmètre** : les communications individuelles ne doivent pas être
   assimilées à des décisions collectives.
 - **Livrables** : extracteur, tests, documentation.
-- **Dépendances** : Phase 4.
+- **Dépendances** : Phase 4 (modèle Fact).
 - **Critères de validation** : la nature individuelle est toujours conservée
   dans la provenance.
 - **Statut** : `COMPLETE` — **Speeches** implémentées et validées
@@ -725,19 +803,21 @@ reste `DEFERRED`.
   explicite uniquement, parts/ratios jamais convertis, forecasts sans période
   ignorés), orientations de risque catégoriques uniquement quand explicites,
   déduplication intra-exécution, provenance verbatim avec `speaker` et
-  qualificateurs `speech:{subject}:{ordinal}`, aucun sujet des phases 5–10.
+  qualificateurs `speech:{subject}:{ordinal}`, aucun sujet des Phase 4.1–4.6.
   **Durcissement final validé** : gate qualitatif (assertion explicite requise,
   platitudes rejetées), ancres génériques remplacées ou supprimées (credit
   contextuel, demand qualifié, production sectorielle, output nu,
   recovery/recession/slowdown/expansion retirés), fixture adversariale et
   matrice de faux positifs, 513 tests verts et déterministes.
   **Interviews** (`interview`) : hors périmètre, publication type distincte.
-  **Extension multi-banques (Phase 4.x — Speech family)** : ECB conservé comme
+  **Extension multi-banques (Speech family)** : ECB conservé comme
   implémentation de référence ; ajout des extracteurs Fed, BoE, BoJ, SNB, BoC,
   RBA, RBNZ, Norges, Riksbank partageant les mécanismes structurels
   `_shared.py` / `_pipeline.py` (`SpeechExtractorBase`) — vocabulaire, ancres et
   règles de classification propres à chaque banque, source officielle vérifiée
-  (`COVERAGE_SOURCE`). Aucun changement de numérotation de phase.
+  (`COVERAGE_SOURCE`).
+
+---
 
 ## Phase 12 — Temporal / Cross-Publication Analysis
 
@@ -747,7 +827,7 @@ reste `DEFERRED`.
   assessment balanced → upside ; guidance : ancienne formulation → nouvelle
   formulation.
 - **Livrables** : analyseur de changements, tests, documentation.
-- **Dépendances** : Phases 4–11 (historique de faits disponible).
+- **Dépendances** : Phase 4 (faits extraits par les sous-phases 4.1–4.7).
 - **Critères de validation** : chaque changement identifié est rattaché aux deux
   faits sources.
 - **Statut** : `COMPLETE`.
@@ -805,7 +885,7 @@ reste `DEFERRED`.
   provenance exhaustive par type, `source_text` verbatim, observation
   incomparable sans pont, unités, `effective_date`, frontière de type,
   qualificateur, période, chaînage F1→F4, identité directionnelle, immuabilité,
-  avertissements, persistance et coexistence Phases 5–11. **Suite complète :
+  avertissements, persistance et coexistence Phase 4.1–4.7. **Suite complète :
   685 tests verts et déterministes.**
 
 ## Phase 13 — Policy Reaction Function
@@ -907,7 +987,7 @@ reste `DEFERRED`.
   de duplication, provenance complète, reproductibilité, stabilité des
   classifications et des extractions.
 - **Livrables** : jeu de validation historique, tests, documentation.
-- **Dépendances** : Phases 4–15.
+- **Dépendances** : Phase 4 (extraction), Phases 12–15.
 - **Critères de validation** : aucun look-ahead ; résultats reproductibles.
 - **Statut** : `DEFERRED`.
 
@@ -975,10 +1055,10 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   n'impose pas de moteur spécifique ; une migration de stockage, si elle
   devait advenir, doit préserver les invariants (provenance, idempotence,
   auditabilité).
-- **Mécanismes de discovery** : Phase 1 — les mécanismes implémentés couvrent
+- **Mécanismes de discovery** : Phase 2 — les mécanismes implémentés couvrent
   RSS, sitemap/sitemap index et HTML archives avec pagination ; les APIs
   officielles et calendriers ne sont pas encore mobilisés pour toutes les
-  banques. Cela reste du périmètre Phase 1 sans réouverture d'architecture.
+  banques. Cela reste du périmètre Phase 2 sans réouverture d'architecture.
 - **Vocabulaire** : « state » (Phase 14) est maintenant implémenté
   (`src/argus/states/`, `docs/MONETARY_POLICY_STATE.md`) : il consomme les
   types de valeur explicites déjà définis dès la Phase 4 (`value.kind`,
@@ -986,16 +1066,16 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   dimensions cible non structurées par les données (`stance`, `direction`,
   `rate_expectation`, `labour_risk`, `confidence`) restent des gaps
   documentés, jamais inventés.
-- **Extensibilité** : l'architecture cible et la Phase 1 sont alignées sur
+- **Extensibilité** : l'architecture cible et la Phase 2 sont alignées sur
   l'exigence « configuration déclarative » ; aucune banque initiale ne
   nécessite un codage particulier du cœur, vérifié pour les 10 banques du
   périmètre.
 
 ## Current Position
 
-- Argus est à la fin de la **Phase 11 (Speeches)** — marquée `COMPLETE`
-  (durcissement final validé) ; **Interviews** hors périmètre.
-- Les phases 0 à 10 sont marquées `COMPLETE` après vérification du repository
+- Argus est à la fin de la **Phase 4 — Fact Extraction** — marquée `COMPLETE`
+  (sous-phases 4.1–4.7) ; **Interviews** hors périmètre.
+- Les phases 1 à 4 sont marquées `COMPLETE` après vérification du repository
   (adapters, discovery, collector/fetcher, normalization, classification,
   modèle `Fact`, extracteurs ECB `EcbDecisionExtractor` v5.2.0,
   `EcbMonetaryPolicyStatementExtractor` v6.0.0,
@@ -1004,18 +1084,26 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   hardening final validé : matching exact des titres économiques **et**
   ignorés, ancres de contenu contextuelles, 440 tests verts et
   déterministes —, tables SQLite correspondantes, tests).
-- **Phase 11 (Speeches)** : `EcbSpeechExtractor` v11.0.0 (`src/argus/speeches/`)
-  validé — gate `speech`, speaker explicite, routage exact conservateur
-  (titre économique / non-économique / inconnu strict), précision sur rappel,
-  **durcissement** (gate qualitatif : assertion explicite requise, platitudes
-  rejetées ; ancres génériques remplacées ou supprimées), 513 tests verts et
-  déterministes.
-- **Extension multi-banques Speeches (Phase 4.x)** : ECB conservé comme
+- **Phase 4.7 (Speeches, ex-Phase 11)** : `EcbSpeechExtractor` v11.0.0
+  (`src/argus/speeches/`) validé — gate `speech`, speaker explicite, routage
+  exact conservateur (titre économique / non-économique / inconnu strict),
+  précision sur rappel, **durcissement** (gate qualitatif : assertion explicite
+  requise, platitudes rejetées ; ancres génériques remplacées ou supprimées),
+  513 tests verts et déterministes.
+- **Extension multi-banques Speeches** : ECB conservé comme
   référence ; **Fed, BoE, BoJ, SNB, BoC, RBA, RBNZ, Norges, Riksbank** ajoutés
   (`src/argus/speeches/{fed,boe,boj,snb,boc,rba,rbnz,norges,riksbank}.py`),
   partageant `_shared.py` + `_pipeline.py` (`SpeechExtractorBase`),
   vocabulaire/ancres/classification propres à chaque banque (`COVERAGE_SOURCE`),
-  fixtures + tests multi-banques. 1232 tests verts au total.
+  fixtures + tests multi-banques.
+- **Phase 4.x — Classification / reachability multi-banques** :
+  `COMPLETE` — la reachability réelle des familles de publications vers leurs
+  extracteurs est établie sur les 10 banques (famille Statement : ECB et BoJ
+  COVERED ; Fed/SNB/BoE/BoC/RBA/RBNZ/Riksbank REPRESENTED ; Norges N/A).
+  Correctifs inclus : SNB discussion summaries → `minutes` (document-only),
+  BoC MPR → `monetary_policy_report`, ECB Economic Bulletin →
+  `monetary_policy_report`, BoJ Statement → `monetary_policy_statement` (URL
+  `mpr_\d{4}/k`). **1420 tests verts et déterministes.**
 - **Phase 12 (Temporal / Cross-Publication Analysis)** : `src/argus/changes/`
   validé (**durcissement profond**) — `FactChangeAnalyzer` pur et déterministe,
   trois types de changement, matching exact (jamais de comparateur flou/LLM),
@@ -1024,26 +1112,25 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   observation incomparable, provenance exhaustive aux deux faits sources,
   `fact_changes` persistée de façon idempotente, reconstruisible et isolée par
   banque, aucun contenu économique ; 100 tests dédiés.
-- **PRE-PHASE-13 HARDENING** (Phases 6–12, avant Phase 13) : durcissement de
+- **PRE-PHASE-13 HARDENING** (Phase 4.1–4.7, avant Phase 13) : durcissement de
   précision des extracteurs existants, sans Phase 13 — ancres de risque des
-  Phases 6/7/8 alignées sur la norme contrôlée des Phases 10/11 (plus de
-  `\brisk` nu : « risky », « risk-free », « riskiness » ne sont jamais des
-  ancres) ; routage des titres des Phases 6/7/8 converti en **identité exacte
-  sur titre nettoyé** (fini le sous-chaîne : « Non-economic developments » ne
-  mappe plus `economic`, « Risk management » ne mappe plus `risk`,
-  « Introductory note » / « Questions and answers on monetary policy » ne
-  mappent plus les titres connus) ; marqueurs Q&A Phase 7 bornés au format
-  labellisé « Question : » / « Answer : » (une phrase naturelle « Question
-  marks remain … » n'est jamais un marqueur) ; ancrage `gdp` Phase 10 protégé
-  des near-misses « GDP deflator », « GDP per capita », « per capita GDP » ;
-  gates de refus Phases 7–11 testés (un refus ne supprime jamais les faits
-  d'une extraction antérieure autorisée) ; surface API Phase 12 complétée
-  (`persist=False`, `limit`, `delete_changes_for_document` /
-  `delete_changes_for_publication`, `created_at` préservé, deltas CURRENCY /
-  DATE, entrée vide) ; attributions minutes `one_member` / `voted against`
-  testées. **674 tests verts et déterministes** (documenté dans
-  `docs/CHANGES.md`).
-- **PHASE 8 CORRECTIVE** (avant Phase 13) : routage IGNORE des Minutes rendu
+  Phase 4.1/4.2/4.3/4.4 alignées sur la norme contrôlée des Phase 4.6/4.7 (plus
+  de `\brisk` nu : « risky », « risk-free », « riskiness » ne sont jamais des
+  ancres) ; routage des titres converti en **identité exacte sur titre nettoyé**
+  (fini le sous-chaîne : « Non-economic developments » ne mappe plus
+  `economic`, « Risk management » ne mappe plus `risk`, « Introductory note » /
+  « Questions and answers on monetary policy » ne mappent plus les titres
+  connus) ; marqueurs Q&A bornés au format labellisé « Question : » /
+  « Answer : » (une phrase naturelle « Question marks remain … » n'est jamais
+  un marqueur) ; ancrage `gdp` protégé des near-misses « GDP deflator », « GDP
+  per capita », « per capita GDP » ; gates de refus testés (un refus ne
+  supprime jamais les faits d'une extraction antérieure autorisée) ; surface
+  API Phase 12 complétée (`persist=False`, `limit`,
+  `delete_changes_for_document` / `delete_changes_for_publication`, `created_at`
+  préservé, deltas CURRENCY / DATE, entrée vide) ; attributions minutes
+  `one_member` / `voted against` testées. **674 tests verts et déterministes**
+  (documenté dans `docs/CHANGES.md`).
+- **PHASE 4.4 CORRECTIVE** (avant Phase 13) : routage IGNORE des Minutes rendu
   explicite — les headings non économiques connus sont routés par **identité
   exacte** sur le titre nettoyé (`_IGNORE_HEADINGS`) plus les **familles de
   titre** « Account of the monetary policy meeting … » et « Minutes of … »
@@ -1055,15 +1142,15 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   économiques contrôlés restent intacts (testé : identité exacte IGNORE,
   near-misses, familles, déterminisme catégoriel). **680 tests verts et
   déterministes**.
-- **PHASES 9–12 — DERNIER PASS DE DURCISSEMENT** (avant Phase 13) : la garde
-  near-miss GDP des discours (Phase 11) est alignée sur les rapports
-  (Phase 10) — « GDP deflator », « GDP per capita » et « per capita GDP » ne
+- **PHASES 4.5–12 — DERNIER PASS DE DURCISSEMENT** (avant Phase 13) : la garde
+  near-miss GDP des discours (Phase 4.7) est alignée sur les rapports
+  (Phase 4.6) — « GDP deflator », « GDP per capita » et « per capita GDP » ne
   sont jamais des ancres de croissance et ne fuient jamais en valeur `gdp`,
   même dans une phrase qui mentionne par ailleurs la croissance ; la matrice
-  de gating Phase 9 est complétée par la variante explicite `unknown`
+  de gating Phase 4.5 est complétée par la variante explicite `unknown`
   (UNKNOWN ≠ ECONOMIC : une classification `unknown` refuse l'extraction même
   avec un cache `economic_projections`, et un refus ne supprime jamais les
-  faits d'une extraction antérieure autorisée) ; audits Phases 9–12 vérifiés
+  faits d'une extraction antérieure autorisée) ; audits vérifiés
   (gating A–E, tables/unités, near-misses variables, déterminisme,
   routage par identité exacte, ancres de contenu, gate de valeur, attribution
   orateur explicite, dédup intra-run, clé de matching Phase 12 exacte,
@@ -1197,8 +1284,9 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 
 Fonctionnalités qui ne doivent pas être implémentées prématurément :
 
-- Extracteurs spécialisés (Phases 5–11) qui ne s'appuient pas sur le modèle
-  `Fact`, la provenance et le contrat `ExtractionResult` définis en Phase 4.
+- Extracteurs spécialisés (Phase 4, sous-phases 4.1–4.7) qui ne s'appuient pas
+  sur le modèle `Fact`, la provenance et le contrat `ExtractionResult` définis
+  en Phase 4.
 - Analyse temporelle, fonction de réaction, état de politique monétaire et
   fondamentaux Forex avant les Phases 12–15.
 - **Couche de trading / signaux** (Phase 17) tant que le cœur (collecte,
