@@ -27,7 +27,8 @@ Argus extracts **observable factual claims** from official central-bank
 speeches / remarks / addresses / keynote addresses. Each bank has its own
 speech publication; each bank's extractor is **bank-specific** (heading
 vocabulary, terminology, section layout, speaker/role conventions), sharing
-only genuinely **structural** mechanics via `src/argus/speeches/_shared.py`.
+only genuinely **structural** mechanics via
+`src/argus/speeches/_shared.py` and `src/argus/speeches/_pipeline.py`.
 
 A speech extractor may capture, only when the source states it explicitly:
 

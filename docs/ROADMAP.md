@@ -426,7 +426,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
   extracteur → faits → persistance → récupération) dans
   `tests/test_minutes_multibank.py`.
 - 47 nouveaux tests verts et déterministes, `compileall` propre.
-  **Phase 16 (validation historique) reste `NOT STARTED`.**
+  **Phase 16 (validation historique) reste `DEFERRED`.**
 
 ## Phase 9 — Economic Projections
 
@@ -772,7 +772,7 @@ L'architecture doit rester extensible à d'autres banques centrales.
 - **Livrables** : jeu de validation historique, tests, documentation.
 - **Dépendances** : Phases 4–15.
 - **Critères de validation** : aucun look-ahead ; résultats reproductibles.
-- **Statut** : `NOT STARTED`.
+- **Statut** : `DEFERRED`.
 
 ## Phase 17 — Trading / Signal Layer
 
@@ -1054,7 +1054,7 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   gap documenté, jamais contourné**) ; 89 tests dédiés — **suite complète :
   916 tests verts et déterministes.**
 - **Prochaine phase autorisée : Phase 16 — Historical Validation** (statut
-  `NOT STARTED`).
+  `DEFERRED`).
 
 ## Out of Scope
 
