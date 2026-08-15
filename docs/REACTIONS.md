@@ -128,7 +128,10 @@ relationship (no warning — they are irrelevant, not errors).
    `condition_observed_at ≤ policy_observed_at`. A condition observed *after*
    the policy response can never explain it. A condition change whose current
    publication is missing or undated is skipped with a warning.
-3. **Reaction window.** The lag
+3. **Central bank is a change property.** A change without a `central_bank` is
+   skipped with `unplaced_change:<change_id>` — the publication's bank is never
+   used to place it.
+4. **Reaction window.** The lag
    `policy_observed_at − condition_observed_at` must be within a documented
    window: `0 ≤ lag_days ≤ max_lag_days`. The default `max_lag_days` is a
    documented constant (`180` days, ≈ six months, roughly spanning the ECB's
@@ -136,9 +139,9 @@ relationship (no warning — they are irrelevant, not errors).
    machine-learned, and not hidden: it is an explicit parameter of the analyzer
    and each reaction records both the exact `lag_days` and the `max_lag_days`
    that matched it.
-4. **Same-time boundary.** `lag_days == 0` is allowed (the condition was known
+5. **Same-time boundary.** `lag_days == 0` is allowed (the condition was known
    by the policy observation date) and tested explicitly.
-5. **Pairing.** Every eligible `(condition change, policy change)` pair within
+6. **Pairing.** Every eligible `(condition change, policy change)` pair within
    the window of the same central bank produces **one** `PolicyReaction`.
    Multiple conditions before one response and multiple responses after one
    condition are therefore both represented (each as its own reaction).
@@ -146,9 +149,11 @@ relationship (no warning — they are irrelevant, not errors).
 ## Bank isolation
 
 A reaction is never produced across central banks. The pairing groups changes
-by `central_bank` (from the `FactChange`, which is never invented). A change
-without a central bank is skipped with a warning. ECB observations never
-participate in a reaction for the Fed.
+by `central_bank`, which is a property of the `FactChange` — it is **never
+resolved or invented from the publication** (no `Publication.central_bank`
+fallback). A change without a `central_bank` is skipped with an
+`unplaced_change:<change_id>` warning. ECB observations never participate in a
+reaction for the Fed.
 
 ## Deterministic identity
 
@@ -220,9 +225,9 @@ version is persisted with every reaction.
 
 | warning | meaning |
 |---|---|
-| `missing_publication:<id>` | change's current-side publication is missing |
+| `missing_publication:<id>` | change's current-side publication is missing — `<id>` is the `change_id` when the change has no `current_publication_id`, else the missing publication id |
 | `undated_publication:<id>` | current-side publication has no `meeting_date`/`publication_date` |
-| `unplaced_change:<id>` | change has no central bank (never invented) |
+| `unplaced_change:<id>` | change has no `central_bank` (never resolved from the publication, never invented) |
 
 Changes whose subject is neither condition nor reaction are ignored silently
 (they are not errors).

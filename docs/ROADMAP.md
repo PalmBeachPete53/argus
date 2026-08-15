@@ -780,12 +780,17 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   `publication_date`, **no-look-ahead** (`condition_observed_at ≤
   policy_observed_at`), fenêtre `0 ≤ lag_days ≤ max_lag_days` (constante
   documentée `DEFAULT_MAX_LAG_DAYS = 180`, paramètre explicite jamais ajusté
-  sur données) ; identité déterministe `reaction_id` = SHA-256(central_bank,
+  sur données) ; **isolation stricte par `central_bank`** — propriété du
+  `FactChange`, jamais résolue depuis la publication (un changement sans
+  `central_bank` est ignoré : `unplaced_change:<change_id>`) ; identité
+  déterministe `reaction_id` = SHA-256(central_bank,
   condition_change_id, policy_change_id) ; pairement exhaustif (toute paire
   éligible même banque → exactement une réaction) ; provenance verbatim
   dénormalisée des deux côtés jusqu'aux `FactChange`/`Fact`/publications ;
-  avertissements observabilité (`missing_publication`, `undated_publication`,
-  `unplaced_change`) ; table `policy_reactions` persistée de façon idempotente
+  avertissements observabilité (`missing_publication:<id>` — `change_id` si le
+  changement n'a pas de `current_publication_id`, sinon id de publication ;
+  `undated_publication`, `unplaced_change`) ; table `policy_reactions` persistée
+  de façon idempotente
   (`rebuild_reactions` par banque, vide-efface, `created_at` préservé, delete
   par document/publication/banque) ; aucune mutation de `Fact`/`FactChange`,
   aucun hawkish/dovish, aucun signal trading/forex, aucun LLM/flou/sémantique,

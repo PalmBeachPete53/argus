@@ -258,8 +258,11 @@ by a policy-side change (reaction vocabulary: policy_rate,
 main_refinancing_rate, deposit_facility_rate, marginal_lending_rate,
 policy_guidance, asset_purchase, risk, inflation_risk, growth_risk). The
 observation time of each change is the temporal reference of its current-side
-publication (`meeting_date`, else `publication_date`). Pairing is per central
-bank, requires **no look-ahead** (`condition_observed_at ≤ policy_observed_at`)
+publication (`meeting_date`, else `publication_date`). The `central_bank` used
+to group changes is a property of the `FactChange`, never resolved from the
+publication (a change without one is skipped with `unplaced_change`). Pairing is
+per central bank, requires **no look-ahead** (`condition_observed_at ≤
+policy_observed_at`)
 and a lag within the documented window (`DEFAULT_MAX_LAG_DAYS = 180`); every
 eligible pair yields exactly one `PolicyReaction`. A reaction is never a Fact,
 never causal, and carries no stance/trading interpretation. It is derived data:

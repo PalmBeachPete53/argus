@@ -554,12 +554,26 @@ class TestProvenance:
         assert reaction.central_bank == "ecb"
         assert reaction.max_lag_days == DEFAULT_MAX_LAG_DAYS
 
-    def test_publication_bank_fallback(self):
+    def test_bank_comes_from_change_never_publication(self):
+        # a change whose central_bank is absent is never placed from the
+        # publication: no fallback, no reaction, unplaced_change warning.
         cond = mk_change("c1", "inflation", cur_pub="P2", bank=None)
         pol = mk_change("p1", "policy_rate", cur_pub="P2", bank=None)
         pubs = {"P1": mk_pub("P1", datetime(2026, 1, 15)), "P2": mk_pub("P2", datetime(2026, 3, 15))}
-        reaction = run([cond, pol], pubs).reactions[0]
-        assert reaction.central_bank == "ecb"  # from Publication.central_bank
+        res = run([cond, pol], pubs)
+        assert res.reactions == []
+        assert any(w.startswith("unplaced_change:c1") for w in res.warnings)
+        assert any(w.startswith("unplaced_change:p1") for w in res.warnings)
+
+    def test_publication_bank_does_not_place_change(self):
+        # even though the publication carries central_bank="ecb", a change
+        # without a central_bank is ignored (never resolved from the publication).
+        cond = mk_change("c1", "inflation", cur_pub="P2", bank=None)
+        pol = mk_change("p1", "policy_rate", cur_pub="P2", bank="ecb")
+        pubs = {"P1": mk_pub("P1", datetime(2026, 1, 15)), "P2": mk_pub("P2", datetime(2026, 3, 15))}
+        res = run([cond, pol], pubs)
+        assert res.reactions == []
+        assert any(w.startswith("unplaced_change:c1") for w in res.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -573,6 +587,17 @@ class TestWarnings:
         res = run([cond, pol], pubs)
         assert res.reactions == []
         assert any(w.startswith("missing_publication:PX") for w in res.warnings)
+
+    def test_no_current_publication_warns_with_change_id(self):
+        # a change without any current_publication_id is referenced by its
+        # change_id, never as missing_publication:None.
+        cond = mk_change("c1", "inflation", cur_pub="")
+        pol = mk_change("p1", "policy_rate", cur_pub="P2")
+        pubs = {"P1": mk_pub("P1", datetime(2026, 1, 15)), "P2": mk_pub("P2", datetime(2026, 3, 15))}
+        res = run([cond, pol], pubs)
+        assert res.reactions == []
+        assert any(w.startswith("missing_publication:c1") for w in res.warnings)
+        assert not any(w == "missing_publication:None" for w in res.warnings)
 
     def test_undated_publication_warns(self):
         cond = mk_change("c1", "inflation", cur_pub="P2")
@@ -595,7 +620,21 @@ class TestWarnings:
         }
         res = run([cond, pol], pubs)
         assert res.reactions == []
-        assert any(w.startswith("unplaced_change") for w in res.warnings)
+        assert any(w.startswith("unplaced_change:c1") for w in res.warnings)
+        assert any(w.startswith("unplaced_change:p1") for w in res.warnings)
+
+    def test_unplaced_change_warns_even_when_publication_has_bank(self):
+        # the publication's central_bank never places a change: a change without
+        # its own central_bank is unplaced regardless.
+        cond = mk_change("c1", "inflation", cur_pub="P2", bank=None)
+        pol = mk_change("p1", "policy_rate", cur_pub="P2", bank=None)
+        pubs = {
+            "P1": mk_pub("P1", datetime(2026, 1, 15)),
+            "P2": mk_pub("P2", datetime(2026, 3, 15)),
+        }
+        res = run([cond, pol], pubs)
+        assert res.reactions == []
+        assert any(w.startswith("unplaced_change:c1") for w in res.warnings)
 
 
 # ---------------------------------------------------------------------------

@@ -17,8 +17,10 @@ Relationship rules (documented in ``docs/REACTIONS.md``):
    ``condition_observed_at <= policy_observed_at``.
 4. **Window**: the lag ``policy_observed_at - condition_observed_at`` must be
    ``0 <= lag_days <= max_lag_days`` (documented default 180 days).
-5. **Bank isolation**: pairing is per ``central_bank``; a change without a
-   central bank is skipped with a warning.
+5. **Bank isolation**: pairing is per ``central_bank``. The bank is a property
+   of the ``FactChange`` and is **never** resolved from the publication: a
+   change without a ``central_bank`` is skipped with an
+   ``unplaced_change:<change_id>`` warning (never invented).
 6. Each eligible ``(condition change, policy change)`` pair produces exactly
    one ``PolicyReaction``.
 
@@ -118,7 +120,7 @@ class PolicyReactionAnalyzer:
         warnings: list[str],
     ) -> _Entry | None:
         if not change.current_publication_id:
-            warnings.append(f"missing_publication:{change.current_publication_id}")
+            warnings.append(f"missing_publication:{change.change_id or change.resolve_id()}")
             return None
         pub = pubs.get(change.current_publication_id)
         if pub is None:
@@ -128,7 +130,7 @@ class PolicyReactionAnalyzer:
         if observed_at is None:
             warnings.append(f"undated_publication:{pub.id}")
             return None
-        bank = change.central_bank or pub.central_bank
+        bank = change.central_bank
         if not bank:
             warnings.append(f"unplaced_change:{change.change_id or change.resolve_id()}")
             return None
