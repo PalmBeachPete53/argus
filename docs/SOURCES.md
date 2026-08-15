@@ -57,12 +57,21 @@ explicitly excluded.
   (3, html, `types=("minutes",)`), `snb_decision_archive` (4, allow_future).
 
 ### Bank of Canada (`boc` · bankofcanada.ca)
-- WordPress site: content-type feeds (`content_type/press-releases/feed/`, RDF/RSS1.0),
+- WordPress site: content-type feeds (`content_type/press-releases/feed/`,
+  `content_type/announcements/feed/`, `content_type/mpr/feed/`, RDF/RSS1.0),
   `/sitemap.xml`, `/page/N/` pagination. REST API is auth-locked (401).
 - FAD press releases: `/2026/07/fad-press-release-2026-07-15/`; fixed announcement
   dates are published in advance on the key-interest-rate page.
+- Monetary Policy Report (MPR): quarterly publication at
+  `/publications/mpr/mpr-<YYYY>-<MM>-<DD>/`, with a landing page (HTML) and a
+  full-report PDF linked from it. The dedicated MPR feed
+  (`content_type/mpr/feed/`) carries the canonical MPR publication pages
+  directly and is registered as `boc_mpr_feed`, typed
+  `monetary_policy_report`.
 - Adapter sources: `boc_press_releases_rss` (1), `boc_announcements_rss` (2),
-  `boc_fad_archive` (5), `boc_key_interest_rate_schedule` (7, allow_future).
+  `boc_mpr_feed` (3), `boc_fad_archive` (5), `boc_key_interest_rate_schedule`
+  (7, allow_future; excludes `/publications/mpr/` so the decision-typed
+  schedule never swallows MPR publications).
 
 ### Reserve Bank of Australia (`rba` · rba.gov.au)
 - Rich RSS set (media releases, SMP, speeches, …), RSS-CB 1.2 with `dc:date`.

@@ -637,6 +637,26 @@ reste `DEFERRED`.
   **Extension Riksbank** : 25 nouveaux tests dédiés
   (`tests/test_reports_riksbank.py`), dispatch générique mis à jour (7 banques).
   **Phase 16 (validation historique) reste `DEFERRED`.**
+- **Correctif de coverage BoC MPR (Phase 4.x)** : le Monetary Policy Report de
+  la Banque du Canada était découvrable seulement indirectement via la page
+  `key-interest-rate` (`boc_key_interest_rate_schedule`, typée
+  `monetary_policy_decision`) — le hint de source Tier‑1 faisait classer le MPR
+  `monetary_policy_decision`, et `BocReportExtractor` (gate sur
+  `monetary_policy_report`) n'était jamais dispatché. Le flux officiel MPR
+  (`/content_type/mpr/feed/`, RDF/RSS 1.0) est enregistré comme
+  `boc_mpr_feed` (`types=("monetary_policy_report",)`), et la source du
+  calendrier exclut `/publications/mpr/` — collision de famille supprimée de
+  façon déterministe (aucune dépendance à l'ordre des sources). Le MPR réel
+  se classe `monetary_policy_report` (source hint, sinon règle générique
+  `mpr[_-]\d{4}`) et `BocReportExtractor` v10.3.0 est dispatché. Fixture
+  `boc_mpr_feed.xml` (decouverte), fixture document synthétique enrichie d'une
+  phrase non-claim, suite dédiée `tests/test_reports_boc_mpr.py` (20 tests :
+  découverte, classification positive/négative/sans collision, dispatch,
+  extraction, contrat, frontières négatives, déterminisme, immutabilité,
+  persistance de bout en bout), vérification d'intégration live sur le MPR
+  officiel de juillet 2026 (découverte → fetch → normalize → classification →
+  extraction → persistance, 7 faits canoniques, provenance verbatim).
+  **Phase 16 (validation historique) reste `DEFERRED`.**
 
 ## Phase 11 — Speeches & Interviews
 

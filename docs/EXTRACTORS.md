@@ -1758,7 +1758,23 @@ include `executive summary`, `growth in canada and abroad`,
 `monetary policy`, `risks`. Supports inflation, GDP, unemployment, wages,
 financial conditions, monetary-policy statement, forward guidance and risk
 orientations. Fixture: `tests/fixtures/documents/boc_report.html` (12 facts,
-no warnings).
+no warnings; includes a non-claim sentence that yields no fact).
+
+**Discovery & classification (Phase 4.x — coverage closed).** The BoC MPR is
+published quarterly at `/publications/mpr/mpr-<date>/` (HTML landing page plus
+full-report PDF). The dedicated official MPR feed
+`/content_type/mpr/feed/` (RDF/RSS 1.0) is registered as `boc_mpr_feed`
+(`src/argus/adapters/boc.py`), typed `monetary_policy_report`, so the canonical
+MPR publication pages are discovered directly with a Tier‑1 source type-hint.
+The decision-typed `boc_key_interest_rate_schedule` source excludes
+`/publications/mpr/`, so the MPR can never be swallowed by the
+`monetary_policy_decision` hint. Classification resolves the MPR to
+`monetary_policy_report` via the source hint (and, without it, via the generic
+`mpr[_-]\d{4}` report URL rule); the FAD policy-rate press release remains
+`monetary_policy_decision`. `get_extractor("boc")` dispatches
+`BocReportExtractor`. See `tests/test_reports_boc_mpr.py` (discovery,
+classification, no-collision, dispatch, extraction, contract, negative
+boundaries, determinism, immutability, end-to-end persistence).
 
 ### RBA — `RbaReportExtractor` (v10.4.0)
 

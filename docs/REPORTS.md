@@ -122,6 +122,25 @@ Fed, BoJ and SNB are documented `not applicable` / represented by another
 family (see `docs/EXTRACTORS.md`); the shared generic dispatch
 (`get_extractor(bank)`) resolves only the banks above.
 
+### BoC — `BocReportExtractor` (v10.3.0)
+
+Publication: the Bank of Canada quarterly **Monetary Policy Report** at
+`/publications/mpr/mpr-<date>/`. Discovery is the dedicated official MPR feed
+`boc_mpr_feed` (`/content_type/mpr/feed/`, RDF/RSS 1.0) typed
+`monetary_policy_report`; the decision-typed `boc_key_interest_rate_schedule`
+source excludes `/publications/mpr/`, so the MPR is never classified
+`monetary_policy_decision`. The official MPR publication classifies
+`monetary_policy_report` (Tier‑1 source hint; without a hint, the generic
+`mpr[_-]\d{4}` report URL rule), and `get_extractor("boc")` dispatches
+`BocReportExtractor`. Mined sections include `executive summary`,
+`growth in canada and abroad`, `the outlook for inflation`, `the labour
+market`, `financial conditions`, `monetary policy`, `risks`. A live
+integration check on the July 2026 MPR produced 7 canonical Facts (growth,
+inflation, risk, inflation_risk) with verbatim provenance, `extraction_version
+10.3.0`. Synthetic fixture `tests/fixtures/documents/boc_report.html` (12
+facts, no warnings; includes a non-claim sentence yielding no fact); dedicated
+suite `tests/test_reports_boc_mpr.py`.
+
 ### Riksbank — `RiksbankReportExtractor` (v10.6.0)
 
 Publication: the Riksbank quarterly **Monetary Policy Report**. Its
@@ -140,7 +159,8 @@ on the exact dash. The decision narrative stays verbatim
 ## 6. Validation
 
 Each bank's suite (`tests/test_reports.py`, `tests/test_reports_multibank.py`,
-`tests/test_reports_riksbank.py`) verifies: golden facts with provenance,
+`tests/test_reports_riksbank.py`, `tests/test_reports_boc_mpr.py`) verifies:
+golden facts with provenance,
 contract fields, conservative routing (known headings mined, known
 non-economic and **unknown** headings ignored), dash/numbering normalization,
 the value gate, categorical risk orientations only when explicit, no

@@ -20,6 +20,14 @@ class BoCAdapter(BankAdapter):
                 "https://www.bankofcanada.ca/content_type/announcements/feed/",
                 priority=2,
             ),
+            rss_source(
+                "boc_mpr_feed",
+                "boc",
+                "BoC Monetary Policy Report RSS",
+                "https://www.bankofcanada.ca/content_type/mpr/feed/",
+                priority=3,
+                types=("monetary_policy_report",),
+            ),
             html_source(
                 "boc_fad_archive",
                 "boc",
@@ -44,6 +52,7 @@ class BoCAdapter(BankAdapter):
                 priority=7,
                 types=("monetary_policy_decision", "policy_interest_rate"),
                 include=(r"2025|2026|2027",),
+                exclude=(r"/publications/mpr/",),
                 scope_prefixes=("https://www.bankofcanada.ca/",),
                 allow_future=True,
             ),
