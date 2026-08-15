@@ -328,6 +328,121 @@ CREATE INDEX IF NOT EXISTS idx_policy_states_observed_at
     ON monetary_policy_states(observed_at);
 CREATE INDEX IF NOT EXISTS idx_policy_states_publication
     ON monetary_policy_states(publication_id);
+
+CREATE TABLE IF NOT EXISTS forex_fundamentals (
+    -- Phase 15 — derived, dated forex fundamentals. Each row is ONE fundamental
+    -- dimension of ONE economy (currency) established by ONE source
+    -- observation: a MonetaryPolicyState (Phase 14, source_kind
+    -- 'monetary_state') or a Fact (Phase 4, source_kind 'fact'). `currency` is
+    -- the ISO code of the economy (CentralBank.currency, canonical). The
+    -- dimension is the currency-independent lineage `lineage_key` (subject,
+    -- predicate, value_kind, canonical period, qualifier, publication_type);
+    -- `dimension_key` is that lineage scoped to the currency. `fundamental_id`
+    -- is a deterministic SHA-256 over (currency, source_kind, source_id), so
+    -- re-running the analysis updates the row instead of duplicating it.
+    -- `synthesized` is a constant 1 (never a Fact, never inferred, never a
+    -- stance/forecast/fair value/trading signal). Provenance is denormalized
+    -- from the source up to its publication / document.
+    fundamental_id TEXT PRIMARY KEY,
+    currency TEXT,
+    synthesized INTEGER NOT NULL DEFAULT 1,
+    source_kind TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    central_bank TEXT,
+    dimension_key TEXT NOT NULL,
+    lineage_key TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    value_kind TEXT,
+    qualifier TEXT,
+    period_kind TEXT,
+    period_value TEXT,
+    period_label TEXT,
+    publication_type TEXT NOT NULL,
+    value_json TEXT,
+    observed_at TEXT,
+    publication_id TEXT NOT NULL,
+    document_id TEXT NOT NULL,
+    effective_date TEXT,
+    source_text TEXT,
+    analysis_version TEXT,
+    analyzed_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_forex_fundamentals_currency
+    ON forex_fundamentals(currency);
+CREATE INDEX IF NOT EXISTS idx_forex_fundamentals_source
+    ON forex_fundamentals(source_kind, source_id);
+CREATE INDEX IF NOT EXISTS idx_forex_fundamentals_lineage
+    ON forex_fundamentals(lineage_key);
+CREATE INDEX IF NOT EXISTS idx_forex_fundamentals_observed_at
+    ON forex_fundamentals(observed_at);
+CREATE INDEX IF NOT EXISTS idx_forex_fundamentals_publication
+    ON forex_fundamentals(publication_id);
+
+CREATE TABLE IF NOT EXISTS forex_differentials (
+    -- Phase 15 — derived, dated forex differentials. Each row is ONE
+    -- arithmetic comparison of two fundamentals of two different economies on
+    -- an explicitly declared shared dimension (`dimension_key` = the
+    -- currency-independent lineage). The pair is ordered (base_currency /
+    -- quote_currency) and the convention is never silently inverted. The quote
+    -- observation is the latest of the lineage with observed_at <=
+    -- base_observed_at (no look-ahead). `differential_id` is a deterministic
+    -- SHA-256 over (base_currency, quote_currency, subject, predicate,
+    -- base_source_id, quote_source_id). `synthesized` is a constant 1. Both
+    -- sides carry full denormalized provenance; `value` is the arithmetic
+    -- difference base_value - quote_value in the same unit/kind.
+    differential_id TEXT PRIMARY KEY,
+    base_currency TEXT,
+    quote_currency TEXT,
+    synthesized INTEGER NOT NULL DEFAULT 1,
+    dimension_key TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    value_kind TEXT,
+    qualifier TEXT,
+    period_kind TEXT,
+    period_value TEXT,
+    period_label TEXT,
+    publication_type TEXT NOT NULL,
+    base_fundamental_id TEXT NOT NULL,
+    base_source_kind TEXT NOT NULL,
+    base_source_id TEXT NOT NULL,
+    base_central_bank TEXT,
+    base_value_json TEXT,
+    base_observed_at TEXT,
+    base_publication_id TEXT,
+    base_document_id TEXT,
+    base_effective_date TEXT,
+    base_source_text TEXT,
+    quote_fundamental_id TEXT NOT NULL,
+    quote_source_kind TEXT NOT NULL,
+    quote_source_id TEXT NOT NULL,
+    quote_central_bank TEXT,
+    quote_value_json TEXT,
+    quote_observed_at TEXT,
+    quote_publication_id TEXT,
+    quote_document_id TEXT,
+    quote_effective_date TEXT,
+    quote_source_text TEXT,
+    value_json TEXT,
+    formulation TEXT,
+    analysis_version TEXT,
+    analyzed_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_forex_differentials_base
+    ON forex_differentials(base_currency);
+CREATE INDEX IF NOT EXISTS idx_forex_differentials_quote
+    ON forex_differentials(quote_currency);
+CREATE INDEX IF NOT EXISTS idx_forex_differentials_lineage
+    ON forex_differentials(dimension_key);
+CREATE INDEX IF NOT EXISTS idx_forex_differentials_observed_at
+    ON forex_differentials(base_observed_at);
+CREATE INDEX IF NOT EXISTS idx_forex_differentials_publication
+    ON forex_differentials(base_publication_id, quote_publication_id);
 """
 
 
@@ -2304,6 +2419,770 @@ class Store:
             document_id=row["document_id"],
             effective_date=from_iso(row["effective_date"]),
             source_text=row["source_text"],
+            analysis_version=row["analysis_version"],
+            analyzed_at=from_iso(row["analyzed_at"]),
+        )
+    # ------------------------------------------------------------------
+    # Phase 15 — forex fundamentals
+    # ------------------------------------------------------------------
+    def save_forex_fundamental(self, fundamental) -> None:
+        """Persist one ``ForexFundamental``, upserting by its deterministic id.
+
+        Idempotent: re-saving the same fundamental overwrites the row in place,
+        preserving ``created_at``.
+        """
+        from .forex.base import ForexFundamental
+
+        if not isinstance(fundamental, ForexFundamental):
+            raise TypeError(
+                f"expected ForexFundamental, got {type(fundamental).__name__}"
+            )
+        fundamental_id = fundamental.resolve_id()
+        now_iso = iso(now_utc())
+        existing = self._conn.execute(
+            "SELECT created_at FROM forex_fundamentals WHERE fundamental_id = ?",
+            (fundamental_id,),
+        ).fetchone()
+        created_at = existing["created_at"] if existing else now_iso
+        self._conn.execute(
+            """
+            INSERT INTO forex_fundamentals
+                (fundamental_id, currency, synthesized, source_kind, source_id,
+                 central_bank, dimension_key, lineage_key, subject, predicate,
+                 value_kind, qualifier, period_kind, period_value, period_label,
+                 publication_type, value_json, observed_at, publication_id,
+                 document_id, effective_date, source_text, analysis_version,
+                 analyzed_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(fundamental_id) DO UPDATE SET
+                currency=excluded.currency,
+                synthesized=excluded.synthesized,
+                source_kind=excluded.source_kind,
+                source_id=excluded.source_id,
+                central_bank=excluded.central_bank,
+                dimension_key=excluded.dimension_key,
+                lineage_key=excluded.lineage_key,
+                subject=excluded.subject,
+                predicate=excluded.predicate,
+                value_kind=excluded.value_kind,
+                qualifier=excluded.qualifier,
+                period_kind=excluded.period_kind,
+                period_value=excluded.period_value,
+                period_label=excluded.period_label,
+                publication_type=excluded.publication_type,
+                value_json=excluded.value_json,
+                observed_at=excluded.observed_at,
+                publication_id=excluded.publication_id,
+                document_id=excluded.document_id,
+                effective_date=excluded.effective_date,
+                source_text=excluded.source_text,
+                analysis_version=excluded.analysis_version,
+                analyzed_at=excluded.analyzed_at,
+                updated_at=excluded.updated_at
+            """,
+            (
+                fundamental_id,
+                fundamental.currency,
+                1 if fundamental.synthesized else 0,
+                fundamental.source_kind,
+                fundamental.source_id,
+                fundamental.central_bank,
+                fundamental.dimension_key,
+                fundamental.lineage_key,
+                fundamental.subject,
+                fundamental.predicate,
+                fundamental.value_kind,
+                fundamental.qualifier,
+                fundamental.period.kind.value if fundamental.period else None,
+                fundamental.period.value if fundamental.period else None,
+                fundamental.period.label if fundamental.period else None,
+                fundamental.publication_type,
+                json.dumps(fundamental.value.to_dict()) if fundamental.value else None,
+                iso(fundamental.observed_at),
+                fundamental.publication_id,
+                fundamental.document_id,
+                iso(fundamental.effective_date),
+                fundamental.source_text,
+                fundamental.analysis_version,
+                iso(fundamental.analyzed_at),
+                created_at,
+                now_iso,
+            ),
+        )
+        self._conn.commit()
+
+    def save_forex_fundamentals(self, fundamentals) -> int:
+        """Persist a list of ``ForexFundamental`` (or a
+        ``ForexFundamentalResult``). Returns count."""
+        if hasattr(fundamentals, "fundamentals"):
+            fundamentals = fundamentals.fundamentals
+        count = 0
+        for fundamental in fundamentals:
+            self.save_forex_fundamental(fundamental)
+            count += 1
+        return count
+
+    def get_forex_fundamental(self, fundamental_id: str):
+        row = self._conn.execute(
+            "SELECT * FROM forex_fundamentals WHERE fundamental_id = ?",
+            (fundamental_id,),
+        ).fetchone()
+        return self._fundamental_from_row(row) if row else None
+
+    def get_forex_fundamentals(
+        self,
+        *,
+        currency: str | tuple[str, ...] | None = None,
+        source_kind: str | None = None,
+        source_id: str | None = None,
+        subject: str | None = None,
+        predicate: str | None = None,
+        publication_id: str | None = None,
+        limit: int | None = None,
+    ) -> list:
+        query = "SELECT * FROM forex_fundamentals"
+        clauses: list[str] = []
+        params: list = []
+        if currency is not None:
+            currencies = (currency,) if isinstance(currency, str) else tuple(currency)
+            if currencies:
+                clauses.append(f"currency IN ({','.join('?' * len(currencies))})")
+                params.extend(currencies)
+        if source_kind is not None:
+            clauses.append("source_kind = ?")
+            params.append(source_kind)
+        if source_id is not None:
+            clauses.append("source_id = ?")
+            params.append(source_id)
+        if subject is not None:
+            clauses.append("subject = ?")
+            params.append(subject)
+        if predicate is not None:
+            clauses.append("predicate = ?")
+            params.append(predicate)
+        if publication_id is not None:
+            clauses.append("publication_id = ?")
+            params.append(publication_id)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY subject, observed_at, fundamental_id"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._fundamental_from_row(r) for r in rows]
+
+    def get_fundamentals_as_of(self, currency: str, as_of=None) -> list:
+        """Return the latest fundamental per lineage with ``observed_at ≤
+        as_of`` (the "fundamentals at a date" view, no look-ahead).
+        ``as_of=None`` means no upper bound. ``observed_at`` is the temporal
+        reference of the source publication (meeting_date else
+        publication_date); ``effective_date`` and ``period`` are never used as
+        observation times."""
+        if as_of is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM forex_fundamentals "
+                "WHERE currency = ? AND observed_at <= ?",
+                (currency, iso(as_of)),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM forex_fundamentals WHERE currency = ?",
+                (currency,),
+            ).fetchall()
+        latest: dict[str, tuple] = {}
+        for row in rows:
+            key = row["lineage_key"]
+            if key not in latest:
+                latest[key] = row
+                continue
+            current, candidate = latest[key], row
+            if candidate["observed_at"] > current["observed_at"]:
+                latest[key] = candidate
+            elif candidate["observed_at"] == current["observed_at"] and candidate["fundamental_id"] < current["fundamental_id"]:
+                latest[key] = candidate
+        return [
+            self._fundamental_from_row(r)
+            for r in sorted(latest.values(), key=lambda r: r["fundamental_id"])
+        ]
+
+    def delete_forex_fundamentals(self, *, currency: str | None = None) -> int:
+        """Delete every fundamental of a currency (or of the whole store)."""
+        if currency is not None:
+            cursor = self._conn.execute(
+                "DELETE FROM forex_fundamentals WHERE currency = ?", (currency,)
+            )
+        else:
+            cursor = self._conn.execute("DELETE FROM forex_fundamentals")
+        self._conn.commit()
+        return cursor.rowcount
+
+    def delete_forex_fundamentals_for_document(self, document_id: str) -> int:
+        """Delete every fundamental established from a document."""
+        cursor = self._conn.execute(
+            "DELETE FROM forex_fundamentals WHERE document_id = ?", (document_id,)
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def delete_forex_fundamentals_for_publication(self, publication_id: str) -> int:
+        """Delete every fundamental established from a publication."""
+        cursor = self._conn.execute(
+            "DELETE FROM forex_fundamentals WHERE publication_id = ?",
+            (publication_id,),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def rebuild_forex_fundamentals(
+        self, fundamentals, *, currency: str | None = None
+    ) -> int:
+        """Replace a currency's (or the store's) fundamentals with ``states`` in
+        one transaction.
+
+        ``fundamentals`` is a list of ``ForexFundamental`` or a
+        ``ForexFundamentalResult``. ``forex_fundamentals`` is derived data: the
+        currency scope is fully recomputed each time, so re-analysis is
+        idempotent, an empty result clears the scope, and no stale fundamental
+        survives the observation it summarizes.
+        """
+        from .forex.base import ForexFundamental
+
+        if hasattr(fundamentals, "fundamentals"):
+            fundamentals = fundamentals.fundamentals
+        try:
+            if currency is not None:
+                self._conn.execute(
+                    "DELETE FROM forex_fundamentals WHERE currency = ?", (currency,)
+                )
+            else:
+                self._conn.execute("DELETE FROM forex_fundamentals")
+            count = 0
+            for fundamental in fundamentals:
+                if not isinstance(fundamental, ForexFundamental):
+                    raise TypeError(
+                        f"expected ForexFundamental, got {type(fundamental).__name__}"
+                    )
+                if currency is not None and fundamental.currency != currency:
+                    continue
+                fundamental_id = fundamental.resolve_id()
+                now_iso = iso(now_utc())
+                self._conn.execute(
+                    """
+                    INSERT INTO forex_fundamentals
+                        (fundamental_id, currency, synthesized, source_kind,
+                         source_id, central_bank, dimension_key, lineage_key,
+                         subject, predicate, value_kind, qualifier, period_kind,
+                         period_value, period_label, publication_type, value_json,
+                         observed_at, publication_id, document_id, effective_date,
+                         source_text, analysis_version, analyzed_at, created_at,
+                         updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        fundamental_id,
+                        fundamental.currency,
+                        1 if fundamental.synthesized else 0,
+                        fundamental.source_kind,
+                        fundamental.source_id,
+                        fundamental.central_bank,
+                        fundamental.dimension_key,
+                        fundamental.lineage_key,
+                        fundamental.subject,
+                        fundamental.predicate,
+                        fundamental.value_kind,
+                        fundamental.qualifier,
+                        fundamental.period.kind.value if fundamental.period else None,
+                        fundamental.period.value if fundamental.period else None,
+                        fundamental.period.label if fundamental.period else None,
+                        fundamental.publication_type,
+                        json.dumps(fundamental.value.to_dict()) if fundamental.value else None,
+                        iso(fundamental.observed_at),
+                        fundamental.publication_id,
+                        fundamental.document_id,
+                        iso(fundamental.effective_date),
+                        fundamental.source_text,
+                        fundamental.analysis_version,
+                        iso(fundamental.analyzed_at),
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                count += 1
+            self._conn.commit()
+            return count
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    @staticmethod
+    def _fundamental_from_row(row: sqlite3.Row):
+        from .facts.base import FactPeriod, FactValue
+        from .forex.base import ForexFundamental
+
+        return ForexFundamental(
+            fundamental_id=row["fundamental_id"],
+            currency=row["currency"],
+            synthesized=bool(row["synthesized"]),
+            source_kind=row["source_kind"],
+            source_id=row["source_id"],
+            central_bank=row["central_bank"],
+            dimension_key=row["dimension_key"],
+            lineage_key=row["lineage_key"],
+            subject=row["subject"],
+            predicate=row["predicate"],
+            value_kind=row["value_kind"],
+            qualifier=row["qualifier"] or "",
+            period=(
+                FactPeriod(
+                    kind=row["period_kind"],
+                    value=row["period_value"],
+                    label=row["period_label"],
+                )
+                if row["period_kind"]
+                else None
+            ),
+            publication_type=row["publication_type"],
+            value=(
+                FactValue.from_dict(json.loads(row["value_json"]))
+                if row["value_json"]
+                else None
+            ),
+            observed_at=from_iso(row["observed_at"]),
+            publication_id=row["publication_id"],
+            document_id=row["document_id"],
+            effective_date=from_iso(row["effective_date"]),
+            source_text=row["source_text"],
+            analysis_version=row["analysis_version"],
+            analyzed_at=from_iso(row["analyzed_at"]),
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 15 — forex differentials
+    # ------------------------------------------------------------------
+    def save_forex_differential(self, differential) -> None:
+        """Persist one ``ForexDifferential``, upserting by its deterministic id.
+
+        Idempotent: re-saving the same differential overwrites the row in
+        place, preserving ``created_at``.
+        """
+        from .forex.base import ForexDifferential
+
+        if not isinstance(differential, ForexDifferential):
+            raise TypeError(
+                f"expected ForexDifferential, got {type(differential).__name__}"
+            )
+        differential_id = differential.resolve_id()
+        now_iso = iso(now_utc())
+        existing = self._conn.execute(
+            "SELECT created_at FROM forex_differentials WHERE differential_id = ?",
+            (differential_id,),
+        ).fetchone()
+        created_at = existing["created_at"] if existing else now_iso
+        self._conn.execute(
+            """
+            INSERT INTO forex_differentials
+                (differential_id, base_currency, quote_currency, synthesized,
+                 dimension_key, subject, predicate, value_kind, qualifier,
+                 period_kind, period_value, period_label, publication_type,
+                 base_fundamental_id, base_source_kind, base_source_id,
+                 base_central_bank, base_value_json, base_observed_at,
+                 base_publication_id, base_document_id, base_effective_date,
+                 base_source_text, quote_fundamental_id, quote_source_kind,
+                 quote_source_id, quote_central_bank, quote_value_json,
+                 quote_observed_at, quote_publication_id, quote_document_id,
+                 quote_effective_date, quote_source_text, value_json,
+                 formulation, analysis_version, analyzed_at, created_at,
+                 updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(differential_id) DO UPDATE SET
+                base_currency=excluded.base_currency,
+                quote_currency=excluded.quote_currency,
+                synthesized=excluded.synthesized,
+                dimension_key=excluded.dimension_key,
+                subject=excluded.subject,
+                predicate=excluded.predicate,
+                value_kind=excluded.value_kind,
+                qualifier=excluded.qualifier,
+                period_kind=excluded.period_kind,
+                period_value=excluded.period_value,
+                period_label=excluded.period_label,
+                publication_type=excluded.publication_type,
+                base_fundamental_id=excluded.base_fundamental_id,
+                base_source_kind=excluded.base_source_kind,
+                base_source_id=excluded.base_source_id,
+                base_central_bank=excluded.base_central_bank,
+                base_value_json=excluded.base_value_json,
+                base_observed_at=excluded.base_observed_at,
+                base_publication_id=excluded.base_publication_id,
+                base_document_id=excluded.base_document_id,
+                base_effective_date=excluded.base_effective_date,
+                base_source_text=excluded.base_source_text,
+                quote_fundamental_id=excluded.quote_fundamental_id,
+                quote_source_kind=excluded.quote_source_kind,
+                quote_source_id=excluded.quote_source_id,
+                quote_central_bank=excluded.quote_central_bank,
+                quote_value_json=excluded.quote_value_json,
+                quote_observed_at=excluded.quote_observed_at,
+                quote_publication_id=excluded.quote_publication_id,
+                quote_document_id=excluded.quote_document_id,
+                quote_effective_date=excluded.quote_effective_date,
+                quote_source_text=excluded.quote_source_text,
+                value_json=excluded.value_json,
+                formulation=excluded.formulation,
+                analysis_version=excluded.analysis_version,
+                analyzed_at=excluded.analyzed_at,
+                updated_at=excluded.updated_at
+            """,
+            (
+                differential_id,
+                differential.base_currency,
+                differential.quote_currency,
+                1 if differential.synthesized else 0,
+                differential.dimension_key,
+                differential.subject,
+                differential.predicate,
+                differential.value_kind,
+                differential.qualifier,
+                differential.period.kind.value if differential.period else None,
+                differential.period.value if differential.period else None,
+                differential.period.label if differential.period else None,
+                differential.publication_type,
+                differential.base_fundamental_id,
+                differential.base_source_kind,
+                differential.base_source_id,
+                differential.base_central_bank,
+                json.dumps(differential.base_value.to_dict()) if differential.base_value else None,
+                iso(differential.base_observed_at),
+                differential.base_publication_id,
+                differential.base_document_id,
+                iso(differential.base_effective_date),
+                differential.base_source_text,
+                differential.quote_fundamental_id,
+                differential.quote_source_kind,
+                differential.quote_source_id,
+                differential.quote_central_bank,
+                json.dumps(differential.quote_value.to_dict()) if differential.quote_value else None,
+                iso(differential.quote_observed_at),
+                differential.quote_publication_id,
+                differential.quote_document_id,
+                iso(differential.quote_effective_date),
+                differential.quote_source_text,
+                json.dumps(differential.value.to_dict()) if differential.value else None,
+                differential.formulation,
+                differential.analysis_version,
+                iso(differential.analyzed_at),
+                created_at,
+                now_iso,
+            ),
+        )
+        self._conn.commit()
+
+    def save_forex_differentials(self, differentials) -> int:
+        """Persist a list of ``ForexDifferential`` (or a
+        ``ForexFundamentalResult``). Returns count."""
+        if hasattr(differentials, "differentials"):
+            differentials = differentials.differentials
+        count = 0
+        for differential in differentials:
+            self.save_forex_differential(differential)
+            count += 1
+        return count
+
+    def get_forex_differential(self, differential_id: str):
+        row = self._conn.execute(
+            "SELECT * FROM forex_differentials WHERE differential_id = ?",
+            (differential_id,),
+        ).fetchone()
+        return self._differential_from_row(row) if row else None
+
+    def get_forex_differentials(
+        self,
+        *,
+        base_currency: str | None = None,
+        quote_currency: str | None = None,
+        subject: str | None = None,
+        predicate: str | None = None,
+        limit: int | None = None,
+    ) -> list:
+        query = "SELECT * FROM forex_differentials"
+        clauses: list[str] = []
+        params: list = []
+        if base_currency is not None:
+            clauses.append("base_currency = ?")
+            params.append(base_currency)
+        if quote_currency is not None:
+            clauses.append("quote_currency = ?")
+            params.append(quote_currency)
+        if subject is not None:
+            clauses.append("subject = ?")
+            params.append(subject)
+        if predicate is not None:
+            clauses.append("predicate = ?")
+            params.append(predicate)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY subject, base_observed_at, differential_id"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._differential_from_row(r) for r in rows]
+
+    def get_differential_as_of(
+        self,
+        base_currency: str,
+        quote_currency: str,
+        subject: str,
+        as_of=None,
+    ) -> list:
+        """Return the latest differential per lineage with ``base_observed_at ≤
+        as_of`` for the given ordered pair and subject (the "differential at a
+        date" view, no look-ahead). ``as_of=None`` means no upper bound. The
+        differential timeline is base-anchored (``base_observed_at``)."""
+        if as_of is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM forex_differentials "
+                "WHERE base_currency = ? AND quote_currency = ? AND subject = ? "
+                "AND base_observed_at <= ?",
+                (base_currency, quote_currency, subject, iso(as_of)),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM forex_differentials "
+                "WHERE base_currency = ? AND quote_currency = ? AND subject = ?",
+                (base_currency, quote_currency, subject),
+            ).fetchall()
+        latest: dict[str, tuple] = {}
+        for row in rows:
+            key = row["dimension_key"]
+            if key not in latest:
+                latest[key] = row
+                continue
+            current, candidate = latest[key], row
+            if candidate["base_observed_at"] > current["base_observed_at"]:
+                latest[key] = candidate
+            elif candidate["base_observed_at"] == current["base_observed_at"] and candidate["differential_id"] < current["differential_id"]:
+                latest[key] = candidate
+        return [
+            self._differential_from_row(r)
+            for r in sorted(latest.values(), key=lambda r: r["differential_id"])
+        ]
+
+    def delete_forex_differentials(
+        self, *, base_currency: str | None = None, quote_currency: str | None = None
+    ) -> int:
+        """Delete every differential of a base currency (and/or a quote
+        currency), or of the whole store."""
+        if base_currency is not None and quote_currency is not None:
+            cursor = self._conn.execute(
+                "DELETE FROM forex_differentials "
+                "WHERE base_currency = ? AND quote_currency = ?",
+                (base_currency, quote_currency),
+            )
+        elif base_currency is not None:
+            cursor = self._conn.execute(
+                "DELETE FROM forex_differentials WHERE base_currency = ?",
+                (base_currency,),
+            )
+        elif quote_currency is not None:
+            cursor = self._conn.execute(
+                "DELETE FROM forex_differentials WHERE quote_currency = ?",
+                (quote_currency,),
+            )
+        else:
+            cursor = self._conn.execute("DELETE FROM forex_differentials")
+        self._conn.commit()
+        return cursor.rowcount
+
+    def delete_forex_differentials_for_document(self, document_id: str) -> int:
+        """Delete every differential established from a document (either side)."""
+        cursor = self._conn.execute(
+            "DELETE FROM forex_differentials "
+            "WHERE base_document_id = ? OR quote_document_id = ?",
+            (document_id, document_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def delete_forex_differentials_for_publication(self, publication_id: str) -> int:
+        """Delete every differential established from a publication (either
+        side)."""
+        cursor = self._conn.execute(
+            "DELETE FROM forex_differentials "
+            "WHERE base_publication_id = ? OR quote_publication_id = ?",
+            (publication_id, publication_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def rebuild_forex_differentials(
+        self, differentials, *, currencies: tuple[str, ...] | None = None
+    ) -> int:
+        """Replace the differentials involving the given currencies (or the
+        store's) with ``differentials`` in one transaction.
+
+        ``differentials`` is a list of ``ForexDifferential`` or a
+        ``ForexFundamentalResult``. ``forex_differentials`` is derived data:
+        the scope is fully recomputed each time, so re-analysis is idempotent,
+        an empty result clears the scope, and no stale differential survives
+        the observations it summarizes.
+        """
+        from .forex.base import ForexDifferential
+
+        if hasattr(differentials, "differentials"):
+            differentials = differentials.differentials
+        try:
+            if currencies is not None:
+                placeholders = ",".join("?" * len(currencies))
+                self._conn.execute(
+                    "DELETE FROM forex_differentials "
+                    "WHERE base_currency IN ({0}) OR quote_currency IN ({0})".format(
+                        placeholders
+                    ),
+                    tuple(currencies) * 2,
+                )
+            else:
+                self._conn.execute("DELETE FROM forex_differentials")
+            count = 0
+            for differential in differentials:
+                if not isinstance(differential, ForexDifferential):
+                    raise TypeError(
+                        f"expected ForexDifferential, got {type(differential).__name__}"
+                    )
+                if currencies is not None and not (
+                    differential.base_currency in currencies
+                    or differential.quote_currency in currencies
+                ):
+                    continue
+                differential_id = differential.resolve_id()
+                now_iso = iso(now_utc())
+                self._conn.execute(
+                    """
+                    INSERT INTO forex_differentials
+                        (differential_id, base_currency, quote_currency,
+                         synthesized, dimension_key, subject, predicate,
+                         value_kind, qualifier, period_kind, period_value,
+                         period_label, publication_type, base_fundamental_id,
+                         base_source_kind, base_source_id, base_central_bank,
+                         base_value_json, base_observed_at, base_publication_id,
+                         base_document_id, base_effective_date, base_source_text,
+                         quote_fundamental_id, quote_source_kind, quote_source_id,
+                         quote_central_bank, quote_value_json, quote_observed_at,
+                         quote_publication_id, quote_document_id,
+                         quote_effective_date, quote_source_text, value_json,
+                         formulation, analysis_version, analyzed_at, created_at,
+                         updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        differential_id,
+                        differential.base_currency,
+                        differential.quote_currency,
+                        1 if differential.synthesized else 0,
+                        differential.dimension_key,
+                        differential.subject,
+                        differential.predicate,
+                        differential.value_kind,
+                        differential.qualifier,
+                        differential.period.kind.value if differential.period else None,
+                        differential.period.value if differential.period else None,
+                        differential.period.label if differential.period else None,
+                        differential.publication_type,
+                        differential.base_fundamental_id,
+                        differential.base_source_kind,
+                        differential.base_source_id,
+                        differential.base_central_bank,
+                        json.dumps(differential.base_value.to_dict()) if differential.base_value else None,
+                        iso(differential.base_observed_at),
+                        differential.base_publication_id,
+                        differential.base_document_id,
+                        iso(differential.base_effective_date),
+                        differential.base_source_text,
+                        differential.quote_fundamental_id,
+                        differential.quote_source_kind,
+                        differential.quote_source_id,
+                        differential.quote_central_bank,
+                        json.dumps(differential.quote_value.to_dict()) if differential.quote_value else None,
+                        iso(differential.quote_observed_at),
+                        differential.quote_publication_id,
+                        differential.quote_document_id,
+                        iso(differential.quote_effective_date),
+                        differential.quote_source_text,
+                        json.dumps(differential.value.to_dict()) if differential.value else None,
+                        differential.formulation,
+                        differential.analysis_version,
+                        iso(differential.analyzed_at),
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                count += 1
+            self._conn.commit()
+            return count
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    @staticmethod
+    def _differential_from_row(row: sqlite3.Row):
+        from .facts.base import FactPeriod, FactValue
+        from .forex.base import ForexDifferential
+
+        return ForexDifferential(
+            differential_id=row["differential_id"],
+            base_currency=row["base_currency"],
+            quote_currency=row["quote_currency"],
+            synthesized=bool(row["synthesized"]),
+            dimension_key=row["dimension_key"],
+            subject=row["subject"],
+            predicate=row["predicate"],
+            value_kind=row["value_kind"],
+            qualifier=row["qualifier"] or "",
+            period=(
+                FactPeriod(
+                    kind=row["period_kind"],
+                    value=row["period_value"],
+                    label=row["period_label"],
+                )
+                if row["period_kind"]
+                else None
+            ),
+            publication_type=row["publication_type"],
+            base_fundamental_id=row["base_fundamental_id"],
+            base_source_kind=row["base_source_kind"],
+            base_source_id=row["base_source_id"],
+            base_central_bank=row["base_central_bank"],
+            base_value=(
+                FactValue.from_dict(json.loads(row["base_value_json"]))
+                if row["base_value_json"]
+                else None
+            ),
+            base_observed_at=from_iso(row["base_observed_at"]),
+            base_publication_id=row["base_publication_id"],
+            base_document_id=row["base_document_id"],
+            base_effective_date=from_iso(row["base_effective_date"]),
+            base_source_text=row["base_source_text"],
+            quote_fundamental_id=row["quote_fundamental_id"],
+            quote_source_kind=row["quote_source_kind"],
+            quote_source_id=row["quote_source_id"],
+            quote_central_bank=row["quote_central_bank"],
+            quote_value=(
+                FactValue.from_dict(json.loads(row["quote_value_json"]))
+                if row["quote_value_json"]
+                else None
+            ),
+            quote_observed_at=from_iso(row["quote_observed_at"]),
+            quote_publication_id=row["quote_publication_id"],
+            quote_document_id=row["quote_document_id"],
+            quote_effective_date=from_iso(row["quote_effective_date"]),
+            quote_source_text=row["quote_source_text"],
+            value=(
+                FactValue.from_dict(json.loads(row["value_json"]))
+                if row["value_json"]
+                else None
+            ),
+            formulation=row["formulation"],
             analysis_version=row["analysis_version"],
             analyzed_at=from_iso(row["analyzed_at"]),
         )

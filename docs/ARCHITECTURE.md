@@ -140,6 +140,22 @@ documents are re-tried on later runs up to a per-document retry budget.
   `FactChange`, verbatim — never invented or converted), observed_at
   (meeting_date, else publication_date; `effective_date` kept separate),
   denormalized current-side provenance, analysis_version
+- `ForexFundamental` (Phase 15) — fundamental_id (deterministic SHA-256 over
+  currency + source_kind + source_id), synthesized (constant `True`), one
+  fundamental dimension of one economy (currency, resolved from the canonical
+  `CentralBank.currency` mapping), one source observation (a Phase 14
+  `MonetaryPolicyState` — monetary dimensions — or a Phase 4 `Fact` — macro
+  dimensions), the observed level copied verbatim, observed_at, currency-scoped
+  `dimension_key` + currency-independent `lineage_key`, denormalized
+  provenance, analysis_version
+- `ForexDifferential` (Phase 15) — differential_id (deterministic SHA-256 over
+  base_currency + quote_currency + subject + predicate + base_source_id +
+  quote_source_id), synthesized (constant `True`), an ordered same-dimension
+  pair (base/quote convention never silently inverted), the arithmetic
+  difference `base_value - quote_value` (same unit/kind, no conversion),
+  full denormalized provenance on **both** sides, base-anchored quote
+  (latest with `observed_at ≤ base_observed_at`, no look-ahead),
+  purely descriptive formulation, analysis_version
 
 ## Phase 2A — Normalization (`documents/`)
 
@@ -299,6 +315,45 @@ change is simply absent). It is derived data: `monetary_policy_states` is
 rebuilt idempotently per bank (`rebuild_policy_states`), empty results clear
 the scope, and source `Fact`s / `FactChange`s are never modified. See
 `docs/MONETARY_POLICY_STATE.md`.
+
+## Phase 15 — Forex Fundamentals (`forex/`)
+
+`ForexFundamentalsAnalyzer` synthesizes a **derived, dated, cross-economy**
+layer from two existing sources only: Phase 14 `MonetaryPolicyState` entries
+(monetary dimensions: `MONETARY_SUBJECTS`, Phase 14's reaction vocabulary) and
+Phase 4 `Fact`s (macro dimensions: `MACRO_SUBJECTS`, Phase 13's condition
+vocabulary). Each eligible source observation yields exactly one
+`ForexFundamental`: one fundamental dimension of one economy, whose currency is
+resolved from the canonical `CentralBank.currency` mapping (an economy is a
+currency; a bank absent from the mapping is skipped with `unknown_currency`).
+The observed level is copied verbatim — rates are never reconstructed from
+documents, never reduced to a single rate, never invented, never converted.
+The observation time is the temporal reference of the source publication
+(`meeting_date`, else `publication_date`); `effective_date` and `period` are
+never observation times. Macro facts with `predicate` in
+`FUNDAMENTAL_EXCLUDED_PREDICATES = {"projection", "change", "date"}` are out of
+scope (an expectation, a delta and a date are not levels).
+
+`ForexDifferential`s compare two fundamentals of **two different economies** on
+the **same** currency-independent lineage (subject, predicate, value_kind,
+canonical period, qualifier, publication_type), anchored on the base
+observation: the quote is the latest observation of that lineage with
+`observed_at ≤ base_observed_at` (no look-ahead). The value is the **arithmetic
+difference** `base_value − quote_value` in the same unit/kind — no conversion,
+no interpretation; text/qualitative/date/boolean/range dimensions are observed
+but by nature not differentiable (documented property); a unit mismatch is an
+`incomparable_differential` warning; a base observation with no eligible quote
+is a `missing_side` warning. Both orientations (A−B and B−A) are generated
+with distinct identities and the convention is never silently inverted.
+Instruments are never merged (ECB `deposit_facility_rate` vs Fed `policy_rate`
+are different lineages → no comparison). `synthesized` is a constant `True`:
+a state synthesis and an arithmetic difference are authorized, economic/market
+interpretation is not — no hawkish/dovish, no stance, no forecast, no fair
+value, no trading signal, no ranking, no causality. The tables
+`forex_fundamentals` / `forex_differentials` are derived data, rebuilt
+idempotently per currency (rebuilds read the full dataset so differentials are
+correct; the scope limits what is persisted), empty results clear the scope,
+and sources are never modified. See `docs/FOREX_FUNDAMENTALS.md`.
 
 ## Deduplication
 

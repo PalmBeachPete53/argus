@@ -598,14 +598,55 @@ L'architecture doit rester extensible à d'autres banques centrales.
 
 ## Phase 15 — Forex Fundamentals
 
-- **Objectif** : comparer les états de politique monétaire entre banques (ex.
-  ECB vs Fed) — non sur les taux actuels seuls, mais sur les trajectoires et
-  anticipations de politique monétaire.
-- **Livrables** : module de comparaison inter-banques, tests, documentation.
-- **Dépendances** : Phase 14.
-- **Critères de validation** : la comparaison utilise les états historisés et
-  leurs trajectoires.
-- **Statut** : `NOT STARTED`.
+- **Objectif** : transformer les états monétaires (Phase 14) et les observations
+  macro (Facts, Phase 4) en une couche de **fondamentaux Forex structurés,
+  comparables, traçables**, avec différentiels inter-économies **descriptifs,
+  déterministes, explicables, temporels, traçables** — jamais trading/signal/
+  forecast/fair value/conviction.
+- **Dimensions** : `FUNDAMENTAL_SUBJECTS = MACRO_SUBJECTS (Phase 13 condition)
+  ∪ MONETARY_SUBJECTS (Phase 14 state)`. Une dimension = lineage indépendant de
+  la devise : subject, predicate, value_kind, période canonique, qualifier,
+  publication_type. Prédicats exclus (macro) : `projection`, `change`, `date`.
+- **Sources** : les fondamentaux monétaires viennent des `MonetaryPolicyState`
+  (Phase 14) — jamais reconstruits depuis les documents — et les fondamentaux
+  macro des `Fact` (Phase 4) — modèle latest-known-observation. La devise est
+  résolue via la relation canonique `CentralBank.currency` (une économie = une
+  devise ; `unknown_currency` sinon).
+- **Temporel** : `observed_at` = référence temporelle de la publication source
+  (`meeting_date` sinon `publication_date`) ; `effective_date`/`period` jamais
+  des temps d'observation ; aucun look-ahead (`get_fundamentals_as_of`,
+  `get_differential_as_of`).
+- **Différentiels** : même lineage, deux économies, ordonnés (base/quote, jamais
+  inversés silencieusement), ancrés sur l'observation base (quote = dernière
+  observation ≤ `base_observed_at`), valeur = `base_value − quote_value`
+  (arithmétique, même unité/kind, aucune conversion). Les deux orientations
+  A−B et B−A sont générées, identités distinctes. Gate de comparabilité stricte :
+  lineage partagé, unité identique, kind numérique. Dimensions texte/
+  qualitatives observées mais non différentiables (propriété documentée) ;
+  mismatch d'unité = `incomparable_differential` ; quote manquante à l'ancre =
+  `missing_side`. **Aucun instrument fusionné** (ex. `deposit_facility_rate`
+  ECB vs `policy_rate` Fed = lineages différents → pas de comparaison).
+- **Gaps documentés** : comparaisons cross-instrument (nécessitent un mapping
+  explicite des familles d'instruments — phase future) ; dimensions macro non
+  structurées (`consumption`, `investment`, `trade`, `current_account`,
+  `productivity`, `labour_risk`, `fiscal_stance`, `yield_curves`,
+  `market_pricing`) ; pourcentages/annualisation/z-scores/rankings (aucune
+  normalisation au-delà de la différence arithmétique) ; **données réelles** :
+  seuls les extracteurs ECB produisent des faits → différentiels réels
+  ECB-vs-Fed impossibles aujourd'hui (gap documenté, pas contourné).
+- **Livrables** : `src/argus/forex/` (`base.py`, `identity.py`, `analyzer.py`),
+  tables dérivées `forex_fundamentals` + `forex_differentials` (rebuild
+  idempotent par devise, résultat vide = scope vidé, provenance complète des
+  deux côtés), `tests/test_forex_fundamentals.py` (89 tests), contrat
+  `docs/FOREX_FUNDAMENTALS.md`, documentation.
+- **Dépendances** : Phase 14 (états), Phase 4 (faits), Phase 12/13 (vocabulaires
+  canoniques), `CentralBank.currency` (adapters/registry).
+- **Critères de validation** : chaque fondamental est daté, historisé, remontable
+  à son observation source ; chaque différentiel est même-dimension,
+  arithmétique, sans look-ahead, avec provenance des deux côtés ; aucun
+  contenu interdit (hawkish/dovish, forecast, fair value, signal, conviction,
+  ranking).
+- **Statut** : `COMPLETE` (voir « Current Position »).
 
 ## Phase 16 — Historical Validation
 
@@ -836,7 +877,63 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   cible documentés (`stance`, `direction`, `rate_expectation`, `labour_risk`,
   `confidence` non structurés par les données → exclus, jamais inventés) ; 74
   tests dédiés — **suite complète : 827 tests verts et déterministes.**
-- **Prochaine phase autorisée : Phase 15 — Forex Fundamentals** (statut
+- **PHASE 15 — FOREX FUNDAMENTALS (COMPLETE)** : `src/argus/forex/` validé —
+  `ForexFundamentalsAnalyzer` pur et déterministe (v15.0.0), couche
+  **dérivée, datée et synthétisée** de fondamentaux + différentiels
+  inter-économies (`synthesized=True` constant, jamais un `Fact`, jamais une
+  interprétation) ; **dimensions = vocabulaire condition Phase 13 ∪ vocabulaire
+  réaction Phase 14** (`FUNDAMENTAL_SUBJECTS = MACRO_SUBJECTS ∪
+  MONETARY_SUBJECTS`, réutilisés des couches canoniques, jamais re-déclarés) ;
+  une dimension = lineage indépendant de la devise (subject, predicate,
+  value_kind, période canonique, qualifier, publication_type), `dimension_key`
+  scopé devise + `lineage_key` indépendant ; **sources = Phase 14
+  (`MonetaryPolicyState`, dimensions monétaires — jamais reconstruites depuis
+  les documents) + Phase 4 (`Fact`, dimensions macro — modèle
+  latest-known-observation)** ; devise résolue via la relation canonique
+  `CentralBank.currency` (`SourceRegistry`, une économie = une devise,
+  `unknown_currency:<bank>` sinon) ; règle temporelle `meeting_date` sinon
+  `publication_date`, `effective_date`/`period` jamais dates d'observation ;
+  prédicats macro exclus `FUNDAMENTAL_EXCLUDED_PREDICATES = {projection,
+  change, date}` (`out_of_scope_fact:<fact_id>`, une anticipation, une variation
+  et une date ne sont pas des niveaux) ; **différentiels : même lineage, deux
+  économies, ordonnés (base/quote, jamais inversés silencieusement), ancrés
+  base (quote = dernière observation avec `observed_at ≤ base_observed_at`,
+  no-look-ahead), valeur = `base_value − quote_value` (arithmétique, même
+  unité/kind, aucune conversion), les deux orientations A−B et B−A générées
+  avec identités distinctes** ; gate de comparabilité stricte (lineage partagé,
+  unité identique, kind numérique) — texte/qualitatif observé mais non
+  différentiable (propriété documentée, jamais un warning), mismatch d'unité =
+  `incomparable_differential`, quote manquante à l'ancre = `missing_side`,
+  dimension absente d'un côté = absence documentée ; **aucun instrument
+  fusionné** (`deposit_facility_rate` ECB vs `policy_rate` Fed = lineages
+  différents → aucune comparaison) ; identités déterministes `fundamental_id` =
+  SHA-256(currency, source_kind, source_id) et `differential_id` =
+  SHA-256(base_currency, quote_currency, subject, predicate, base_source_id,
+  quote_source_id) ; **états à une date** sans look-ahead
+  (`get_fundamentals_as_of(currency, T)`, `get_differential_as_of(pair, subject,
+  T)`) ; provenance verbatim dénormalisée des deux côtés jusqu'aux
+  `MonetaryPolicyState`/`Fact`/publications, type de publication autoritatif
+  (classifications) ; avertissements observabilité (`unknown_currency`,
+  `missing_publication`, `undated_publication`, `missing_classification`,
+  `unclassified_publication`, `unplaced_fact`, `valueless`,
+  `out_of_scope_fact`, `missing_side`, `incomparable_differential`) ; tables
+  `forex_fundamentals` + `forex_differentials` persistées de façon idempotente
+  (rebuild par devise — lecture du dataset complet pour la justesse des
+  différentiels, vide-efface, `created_at` préservé, delete par
+  devise/document/publication) ; aucune mutation de `Fact`/`FactChange`/
+  `PolicyReaction`/`MonetaryPolicyState`, aucun hawkish/dovish, aucun stance,
+  aucun forecast, aucun fair value, aucun signal trading/forex, aucun ranking,
+  aucune conviction, aucune causalité, aucun look-ahead, aucun
+  LLM/flou/sémantique, aucun paire self ; gaps documentés (comparaisons
+  cross-instrument = mapping explicite des familles d'instruments requis,
+  phase future ; dimensions macro non structurées `consumption`/`investment`/
+  `trade`/`current_account`/`productivity`/`labour_risk`/`fiscal_stance`/
+  `yield_curves`/`market_pricing` ; aucune normalisation au-delà de la
+  différence arithmétique ; **données réelles : seuls les extracteurs ECB
+  produisent des faits → différentiels réels ECB-vs-Fed impossibles aujourd'hui,
+  gap documenté, jamais contourné**) ; 89 tests dédiés — **suite complète :
+  916 tests verts et déterministes.**
+- **Prochaine phase autorisée : Phase 16 — Historical Validation** (statut
   `NOT STARTED`).
 
 ## Out of Scope
