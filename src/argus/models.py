@@ -40,6 +40,7 @@ class DiscoverySpec:
     pagination_urls: tuple[str, ...] = ()
     allow_future: bool = False
     title_from_url: bool = False
+    keep_documents: bool = False
     lookback_window_days: int | None = None
     params: dict[str, Any] = field(default_factory=dict)
 

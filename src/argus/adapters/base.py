@@ -89,6 +89,7 @@ def html_source(
     pagination_urls=(),
     allow_future=False,
     title_from_url=True,
+    keep_documents=False,
     item_selector=None,
     lookback_window_days=None,
 ) -> models.Source:
@@ -105,6 +106,7 @@ def html_source(
             pagination_urls=pagination_urls,
             allow_future=allow_future,
             title_from_url=title_from_url,
+            keep_documents=keep_documents,
             item_selector=item_selector,
             lookback_window_days=lookback_window_days,
         ),

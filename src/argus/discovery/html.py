@@ -49,7 +49,7 @@ class HTMLDiscovery(DiscoveryStrategy):
                 if (
                     not stripped
                     or stripped.startswith(SKIP_FRAGMENT_PREFIXES)
-                    or stripped.lower().endswith(DOCUMENT_EXTENSIONS)
+                    or (not self.spec.keep_documents and stripped.lower().endswith(DOCUMENT_EXTENSIONS))
                 ):
                     continue
                 url = absolutize(page_url, stripped)

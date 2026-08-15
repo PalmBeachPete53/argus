@@ -133,6 +133,26 @@ def test_ecb_sitemap_fallback(fixture_bytes):
     assert all("careers" not in p.url for p in publications)
 
 
+def test_boe_press_conference_html_discovery(fixture_bytes):
+    adapter = BoEAdapter()
+    source = next(s for s in adapter.sources if s.id == "boe_mpc_press_conference")
+    assert source.discovery.kind == "html"
+    assert source.discovery.keep_documents is True
+    assert source.publication_types == ("press_conference",)
+    html = fixture_bytes("boe_mpr_issue.html")
+    routes = {source.discovery.url: response(html, url=source.discovery.url)}
+    for page in source.discovery.pagination_urls:
+        routes[page] = response(html, url=page)
+    publications = create(source, make_client(FakeSession(routes))).discover()
+    assert len(publications) == 1
+    pub = publications[0]
+    assert pub.central_bank == "boe"
+    assert pub.source_id == source.id
+    assert pub.url == "https://www.bankofengland.co.uk/-/media/boe/files/monetary-policy-report/2026/july/mpr-press-conference-transcript-july-2026.pdf"
+    assert "press-conference-slides" not in pub.url
+    assert "press_conference" in pub.extra["type_hint"]
+
+
 def test_all_adapters_are_exported():
     assert len(ALL_ADAPTERS) == 10
     assert {a.bank.id for a in ALL_ADAPTERS} == {
