@@ -553,18 +553,30 @@ Phase 5/6/12/13/14/15 sémantique. 1 fixture + tests synthétiques
 ### Phase 4.x — Extension multi-banques des Reports
 
 - **Statut** : `COMPLETE` — la famille `monetary_policy_report` est étendue de
-  2 à **6 banques** : ECB (Economic Bulletin, conservé) et Norges (Monetary
+  2 à **7 banques** : ECB (Economic Bulletin, conservé) et Norges (Monetary
   Policy Report + contenu mixte, conservé), auxquelles s'ajoutent **BoE**
   (`BoeReportExtractor` v10.2.0), **BoC** (`BocReportExtractor` v10.3.0),
-  **RBA** (`RbaReportExtractor` v10.4.0, Statement on Monetary Policy) et
-  **RBNZ** (`RbnzReportExtractor` v10.5.0, Monetary Policy Statement) — les
-  quatre banques déjà **classifiées** `monetary_policy_report` sans extracteur.
+  **RBA** (`RbaReportExtractor` v10.4.0, Statement on Monetary Policy),
+  **RBNZ** (`RbnzReportExtractor` v10.5.0, Monetary Policy Statement) et
+  **Riksbank** (`RiksbankReportExtractor` v10.6.0 — voir bullet dédié ci-dessous) —
+  les cinq banques déjà **classifiées** `monetary_policy_report` sans extracteur.
 - Extracteurs **banque-spécifiques** partageant uniquement des helpers
   **structurels** (`src/argus/reports/_shared.py` : normalisation des titres,
   découpage des phrases, gate de valeur explicite, émission déterministe avec
   processus/déduplication) ; aucune sémantique banque-spécifique dans le code
-  partagé. Pas de symétrie artificielle : Fed, BoJ, SNB et Riksbank restent
+  partagé. Pas de symétrie artificielle : Fed, BoJ et SNB restent
   `not applicable` / représentés par une autre famille (raisons documentées).
+- **Extension Riksbank** : `RiksbankReportExtractor` v10.6.0
+  (`src/argus/reports/riksbank.py`, dispatch générique enregistré) — la banque
+  est déjà classifiée `monetary_policy_report` par la règle générique
+  `url_pattern`. Vocabulaire propre : **CPIF** (mesure cible → `inflation`),
+  inflation sous-jacente / CPIF hors énergie (→ `core_inflation`), Executive
+  Board comme instance de décision. Le récit de la décision reste verbatim
+  `monetary_policy/statement` et n'est jamais « tarifé » (frontière Phase 5) ;
+  la section `forecast tables` n'est jamais extraite (frontière Phase 9) ; les
+  tirets décoratifs des titres (`—` `–` `-` `−`) sont normalisés. Fixture
+  `riksbank_report.html` (15 faits, aucun warning), suite dédiée
+  `tests/test_reports_riksbank.py`, contrat `docs/REPORTS.md`.
 - Contract Fact canonique respecté : banque, sujet, prédicat, valeur, kind,
   unité, période, provenance publication/document, `speaker`/`effective_date`
   `None`, qualificateur `report:{subject}:{ordinal}`. Valeurs supportées par la
@@ -576,6 +588,8 @@ Phase 5/6/12/13/14/15 sémantique. 1 fixture + tests synthétiques
   intégration (publication → classification → extracteur → faits →
   persistance → récupération) dans `tests/test_reports_multibank.py`.
 - 67 nouveaux tests verts et déterministes (957 → 1024), `compileall` propre.
+  **Extension Riksbank** : 25 nouveaux tests dédiés
+  (`tests/test_reports_riksbank.py`), dispatch générique mis à jour (7 banques).
   **Phase 16 (validation historique) reste `DEFERRED`.**
 
 ## Phase 11 — Speeches & Interviews

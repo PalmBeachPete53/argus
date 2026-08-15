@@ -146,6 +146,7 @@ from .boe import BoeReportExtractor  # noqa: E402
 from .boc import BocReportExtractor  # noqa: E402
 from .rba import RbaReportExtractor  # noqa: E402
 from .rbnz import RbnzReportExtractor  # noqa: E402
+from .riksbank import RiksbankReportExtractor  # noqa: E402
 
 _EXTRACTORS: dict[str, ReportsExtractor] = {
     EcbReportsExtractor.bank: EcbReportsExtractor(),
@@ -153,6 +154,7 @@ _EXTRACTORS: dict[str, ReportsExtractor] = {
     BocReportExtractor.bank: BocReportExtractor(),
     RbaReportExtractor.bank: RbaReportExtractor(),
     RbnzReportExtractor.bank: RbnzReportExtractor(),
+    RiksbankReportExtractor.bank: RiksbankReportExtractor(),
 }
 
 

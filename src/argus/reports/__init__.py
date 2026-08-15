@@ -34,6 +34,7 @@ from .boe import BoeReportExtractor
 from .boc import BocReportExtractor
 from .rba import RbaReportExtractor
 from .rbnz import RbnzReportExtractor
+from .riksbank import RiksbankReportExtractor
 
 __all__ = [
     "REPORT_PUBLICATION_TYPES",
@@ -44,6 +45,7 @@ __all__ = [
     "BocReportExtractor",
     "RbaReportExtractor",
     "RbnzReportExtractor",
+    "RiksbankReportExtractor",
     "SUBJECT_POLICY_RATE_PROJECTION",
     "EXTRACTION_VERSION",
     "SUBJECT_INFLATION",

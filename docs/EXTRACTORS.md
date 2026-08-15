@@ -1560,11 +1560,13 @@ faces:
   publications) — the report never re-prices it; the full projection tables
   stay Phase 9; hawkish/dovish interpretation is never produced.
 
-## Multi-bank Report extractors — BoE, BoC, RBA, RBNZ
+## Multi-bank Report extractors — BoE, BoC, RBA, RBNZ, Riksbank
 
 The Report family is a **publication type** (`monetary_policy_report`), not a
-Fact. The four banks below were already **classified** as
-`monetary_policy_report` in `src/argus/classification/bank_rules.py` but had no
+Fact. The five banks below are already **classified** as
+`monetary_policy_report` (BoE, BoC, RBA, RBNZ via
+`src/argus/classification/bank_rules.py`; Riksbank via the generic
+`url_pattern` rule in `src/argus/classification/rules.py`) but had no
 extractor; they are now implemented, registered for generic dispatch and
 covered by fixtures. Each extractor is **bank-specific** (heading vocabulary,
 section structure, policy terminology), sharing only the **structural** helpers
@@ -1637,9 +1639,28 @@ statement, forward guidance and risk orientations. The structured OCR-path /
 projection tables stay Phase 9. Fixture:
 `tests/fixtures/documents/rbnz_report.html` (11 facts, no warnings).
 
+### Riksbank — `RiksbankReportExtractor` (v10.6.0)
+
+Publication: the Riksbank quarterly **Monetary Policy Report**. Mined sections
+include `summary`, `monetary policy in sweden — the riksbank's strategy`,
+`the economic outlook for the coming years`, `the labour market`, `inflation`,
+`financial conditions`, `monetary policy analysis`, `uncertainty, risks and
+alternative scenarios`. Distinctive vocabulary: the **CPIF** (the Riksbank's
+target inflation measure → `inflation`), underlying inflation / CPIF excluding
+energy (→ `core_inflation`), the Executive Board as decision body. The MPR's
+narrative of the latest decision ("The Executive Board decided to cut the
+policy rate by 0.25 percentage points to 2.5 per cent") is kept **verbatim** as
+`monetary_policy/statement` and **never priced** (Phase 5 boundary); the
+`forecast tables` section is never mined (Phase 9 boundary). Section-title dash
+glyphs (`—` `–` `-` `−`) are normalized so heading identity never depends on
+the dash glyph. Fixture:
+`tests/fixtures/documents/riksbank_report.html` (15 facts, no warnings); see
+`tests/test_reports_riksbank.py`.
+
 See `tests/test_reports_multibank.py` for the contract, dispatch, provenance,
 boundary, determinism, immutability and end-to-end integration coverage of
-these four extractors.
+these extractors, and `tests/test_reports_riksbank.py` for the Riksbank
+specifics (see also `docs/REPORTS.md`).
 # Type-Specific Extractors — Phase 11 (Speeches / Remarks / Address)
 
 ## Pipeline
@@ -2010,7 +2031,7 @@ hardening pass (commit 96e81de → hardened). The key distinction is:
 | RBA | implemented | implemented | not applicable | not applicable | implemented (Statement on Monetary Policy) | ⚠️ (fixtures only) |
 | RBNZ | implemented | implemented | not applicable | not applicable | implemented (Monetary Policy Statement) | ⚠️ (fixtures only) |
 | Norges | implemented | not applicable | implemented (minutes) | not applicable | implemented (Monetary Policy Report + mixed) | ⚠️ (fixtures only) |
-| Riksbank | implemented | implemented | implemented (minutes) | not applicable | not applicable | ⚠️ (fixtures only) |
+| Riksbank | implemented | implemented | implemented (minutes) | not applicable | implemented (Monetary Policy Report) | ⚠️ (fixtures only) |
 
 ### BoJ Decision Coverage — Explicit Resolution
 
@@ -2070,7 +2091,7 @@ from argus.projections import get_extractor as get_projections
 assert get_projections("ecb").__class__.__name__ == "EcbProjectionsExtractor"
 assert get_projections("fed").__class__.__name__ == "FedSepExtractor"
 
-# Reports (6 banks)
+# Reports (7 banks)
 from argus.reports import get_extractor as get_reports
 assert get_reports("ecb").__class__.__name__ == "EcbReportsExtractor"
 assert get_reports("norges").__class__.__name__ == "NorgesReportExtractor"
@@ -2078,10 +2099,10 @@ assert get_reports("boe").__class__.__name__ == "BoeReportExtractor"
 assert get_reports("boc").__class__.__name__ == "BocReportExtractor"
 assert get_reports("rba").__class__.__name__ == "RbaReportExtractor"
 assert get_reports("rbnz").__class__.__name__ == "RbnzReportExtractor"
+assert get_reports("riksbank").__class__.__name__ == "RiksbankReportExtractor"
 assert get_reports("fed") is None  # not applicable
 assert get_reports("boj") is None  # represented by projections
 assert get_reports("snb") is None  # not applicable
-assert get_reports("riksbank") is None  # not applicable
 ```
 
 ### Test Results (Hardening Pass)
@@ -2093,8 +2114,9 @@ assert get_reports("riksbank") is None  # not applicable
   - Statement generic dispatch: 9 banks × 1 fixture each
   - Minutes generic dispatch: 2 banks × 1 fixture each
   - Projections generic dispatch: 2 banks × 1 fixture each
-  - Reports generic dispatch: 6 banks × 1 fixture each (Phase 4.x extension:
-    BoE, BoC, RBA, RBNZ added alongside ECB and Norges)
+  - Reports generic dispatch: 7 banks × 1 fixture each (Phase 4.x extension:
+    BoE, BoC, RBA, RBNZ added alongside ECB and Norges; Riksbank added
+    later with `tests/test_reports_riksbank.py`)
 - **No regressions**: All existing golden tests, gating tests, idempotence tests, phase coexistence tests pass
 
 ### Phase 16 Status

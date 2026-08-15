@@ -277,9 +277,9 @@ not a Fact: the pipeline is `official source → publication → classification 
 bank-specific Report extractor → canonical Facts`. Report extractors never
 produce downstream semantic Facts (no hawkish/dovish, stance, directional or
 forex interpretation) and never mutate source objects. The Report family
-currently covers ECB, Norges, BoE, BoC, RBA and RBNZ; Fed, BoJ, SNB and
-Riksbank are documented as not-applicable / represented by another family (see
-`docs/EXTRACTORS.md`).
+currently covers ECB, Norges, BoE, BoC, RBA, RBNZ and Riksbank; Fed, BoJ and
+SNB are documented as not-applicable / represented by another family (see
+`docs/EXTRACTORS.md`, `docs/REPORTS.md`).
 
 ## Phase 12 — Temporal / Cross-Publication Analysis (`changes/`)
 

@@ -30,6 +30,7 @@ from argus.reports import (
     BocReportExtractor,
     RbaReportExtractor,
     RbnzReportExtractor,
+    RiksbankReportExtractor,
 )
 from argus.store import Store
 
@@ -200,10 +201,11 @@ def test_dispatch_resolves_all_banks():
         "boc": "BocReportExtractor",
         "rba": "RbaReportExtractor",
         "rbnz": "RbnzReportExtractor",
+        "riksbank": "RiksbankReportExtractor",
     }
     for bank, cls in expected.items():
         assert get_extractor(bank).__class__.__name__ == cls
-    for bank in ("fed", "boj", "snb", "riksbank"):
+    for bank in ("fed", "boj", "snb"):
         assert get_extractor(bank) is None
 
 
