@@ -897,10 +897,10 @@ asserts, per fixture:
   empty-result persistence and the `minutes` / `meeting_account` gating),
   classification gating and Phase 5/6/7 coexistence.
 
-## Multi-bank Minutes extractors — BoE, BoJ, Norges, Riksbank
+## Multi-bank Minutes extractors — BoE, BoJ, Norges, RBA, Riksbank
 
 Minutes is a **publication type** (`minutes` / `meeting_account`), not a
-Fact. The four banks below already had authoritative `minutes` classification
+Fact. The five banks below already had authoritative `minutes` classification
 rules in `src/argus/classification/bank_rules.py` but no extractor; they are
 now implemented, registered for generic dispatch (`get_extractor` +
 `extract_minutes`), and covered by fixtures. Each extractor is
@@ -910,7 +910,7 @@ sharing only the **structural** helpers in `src/argus/minutes/_shared.py`
 deterministic attribution + provenance-carrying emission). No bank-specific
 semantics live in the shared helper.
 
-All four follow the Minutes-family rules established by the ECB extractor:
+All five follow the Minutes-family rules established by the ECB extractor:
 
 - sections are routed by **exact normalized heading** — known economic sections
   are mined content-first; the meeting masthead, known non-economic headings
@@ -956,6 +956,14 @@ financial conditions, risk assessment, monetary policy / policy rate
 discussion). Fixture: `tests/fixtures/documents/norges_minutes.html` (8 facts,
 no warnings).
 
+### RBA — `RbaMinutesExtractor`
+`src/argus/minutes/rba.py` (`extraction_version 8.6.0`). Mined sections: `the
+decision`, `considerations for monetary policy` (monetary policy / policy rate
+discussion, risk assessment), and the economic sections (`financial
+conditions`, `economic conditions` including GDP, unemployment and wages,
+inflation). Fixture: `tests/fixtures/documents/rba_minutes.html` (11 facts, no
+warnings).
+
 ### Riksbank — `RiksbankMinutesExtractor`
 `src/argus/minutes/riksbank.py` (`extraction_version 8.5.0`). Mined sections:
 `minutes of the executive board's monetary policy meeting` (economic
@@ -965,7 +973,7 @@ discussion, risk assessment). Fixture:
 
 See `tests/test_minutes_multibank.py` for the contract, dispatch, attribution,
 provenance, boundary, determinism, immutability, gating and end-to-end
-integration coverage of these four extractors.
+integration coverage of these five extractors.
 
 # Type-Specific Extractors — Phase 9 (Economic Projections)
 

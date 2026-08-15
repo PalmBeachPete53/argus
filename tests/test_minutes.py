@@ -956,6 +956,7 @@ def test_get_minutes_extractor_resolves_registered_banks():
         "boe": "BoeMinutesExtractor",
         "boj": "BojMinutesExtractor",
         "norges": "NorgesMinutesExtractor",
+        "rba": "RbaMinutesExtractor",
         "riksbank": "RiksbankMinutesExtractor",
     }
     for bank, class_name in expected.items():
@@ -970,6 +971,7 @@ MINUTES_FIXTURE_MAP = {
     "boe": "boe_minutes_full.html",
     "boj": "boj_minutes.html",
     "norges": "norges_minutes.html",
+    "rba": "rba_minutes.html",
     "riksbank": "riksbank_minutes.html",
 }
 

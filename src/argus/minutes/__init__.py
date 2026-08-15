@@ -39,6 +39,7 @@ from .fed import (
 from .boe import BoeMinutesExtractor
 from .boj import BojMinutesExtractor
 from .norges import NorgesMinutesExtractor
+from .rba import RbaMinutesExtractor
 from .riksbank import RiksbankMinutesExtractor
 
 __all__ = [
@@ -49,6 +50,7 @@ __all__ = [
     "BoeMinutesExtractor",
     "BojMinutesExtractor",
     "NorgesMinutesExtractor",
+    "RbaMinutesExtractor",
     "RiksbankMinutesExtractor",
     "ATTR_DISSENT",
     "ATTR_ONE_MEMBER",

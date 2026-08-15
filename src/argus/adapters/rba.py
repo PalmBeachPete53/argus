@@ -9,6 +9,26 @@ _RBA_INT_RATE_YEARS = (
 )
 
 
+_BOARD_MINUTES_PATH = "https://www.rba.gov.au/monetary-policy/rba-board-minutes/"
+
+# The RBA publishes each set of Board Minutes at a dated leaf under the year
+# archive; the ISO form (2015+, e.g. 2026-06-16) and the pre-2015 ddmmyyyy form
+# (e.g. 04112014) are both canonical.
+_RBA_BOARD_MINUTES_LEAF = r"rba-board-minutes/\d{4}/(?:\d{4}-\d{2}-\d{2}|\d{8})\.html"
+
+# Recent completion years are crawled page by page; the index page links to the
+# older year archives which keep the pre-2015 filename convention.
+_RBA_BOARD_MINUTES_YEARS = tuple(
+    f"{_BOARD_MINUTES_PATH}{year}/" for year in range(2026, 2005, -1)
+)
+
+# The archive root page carries a "latest Minutes" anchor whose surrounding
+# context has no date of its own (so the newest minute would inherit a stale
+# date from the page chrome). The year archives anchor every leaf with its own
+# date, so the crawl starts on the newest year instead and stays self-consistent.
+_RBA_BOARD_MINUTES_ROOT = f"{_BOARD_MINUTES_PATH}2026/"
+
+
 class RBAAdapter(BankAdapter):
     def _build(self):
         bank = CentralBank("rba", "Reserve Bank of Australia", "AUD", "rba.gov.au")
@@ -53,6 +73,17 @@ class RBAAdapter(BankAdapter):
                     r"/media-releases/mr-\d{2}-\d{2}",
                     r"/publications/smp/",
                 ),
+            ),
+            html_source(
+                "rba_board_minutes_archive",
+                "rba",
+                "RBA Board Minutes archive",
+                _RBA_BOARD_MINUTES_ROOT,
+                priority=7,
+                types=("minutes",),
+                include=(_RBA_BOARD_MINUTES_LEAF,),
+                scope_prefixes=(_BOARD_MINUTES_PATH,),
+                pagination_urls=_RBA_BOARD_MINUTES_YEARS,
             ),
         ]
         return bank, sources

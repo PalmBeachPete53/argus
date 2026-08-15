@@ -413,16 +413,17 @@ Phase 5/6/12/13/14/15 sémantique. 1 fixture + tests synthétiques
 ### Phase 8.x — Extension multi-banques des Minutes
 
 - **Statut** : `COMPLETE` — la famille `minutes` / `meeting_account` est étendue
-  de 1 à **5 banques** : ECB (Meeting Account, conservé) auxquelles s'ajoutent
+  de 1 à **6 banques** : ECB (Meeting Account, conservé) auxquelles s'ajoutent
   **BoE** (`BoeMinutesExtractor` v8.2.0), **BoJ** (`BojMinutesExtractor`
-  v8.3.0), **Norges** (`NorgesMinutesExtractor` v8.4.0) et **Riksbank**
-  (`RiksbankMinutesExtractor` v8.5.0) — les quatre banques déjà **classifiées**
+  v8.3.0), **Norges** (`NorgesMinutesExtractor` v8.4.0), **Riba**
+  (`RbaMinutesExtractor` v8.6.0) et **Riksbank**
+  (`RiksbankMinutesExtractor` v8.5.0) — les cinq banques déjà **classifiées**
   `minutes` sans extracteur.
 - Extracteurs **banque-spécifiques** partageant uniquement des helpers
   **structurels** (`src/argus/minutes/_shared.py` : normalisation des titres,
   découpage des phrases, gate de valeur explicite, attribution déterministe +
   émission avec provenance) ; aucune sémantique banque-spécifique dans le code
-  partagé. Pas de symétrie artificielle : Fed (meeting_account), SNB, BoC, RBA
+  partagé. Pas de symétrie artificielle : Fed (meeting_account), SNB, BoC
   et RBNZ restent `not applicable` / représentés par une autre famille.
 - Contract Fact canonique respecté : banque, sujet, prédicat, valeur, kind,
   unité, période, provenance publication/document, `speaker`/`effective_date`
@@ -432,14 +433,15 @@ Phase 5/6/12/13/14/15 sémantique. 1 fixture + tests synthétiques
   valeurs supportées par la source uniquement, forecasts sans période ignorés,
   aucune décision/statement/press-conference subject (Phases 5/6/7), aucun
   hawkish/dovish.
-- 4 fixtures (`boe_minutes_full.html`, `boj_minutes.html`,
-  `norges_minutes.html`, `riksbank_minutes.html`), tests de contrat / dispatch
+- 5 fixtures (`boe_minutes_full.html`, `boj_minutes.html`,
+  `norges_minutes.html`, `rba_minutes.html`, `riksbank_minutes.html`), tests
+  de contrat / dispatch
   générique / attribution / provenance / limites / déterminisme (répétition +
   indépendance d'ordre) / immutabilité / gating (refus + persistance idempotente
   résultats vides compris) / intégration (publication → classification →
   extracteur → faits → persistance → récupération) dans
   `tests/test_minutes_multibank.py`.
-- 47 nouveaux tests verts et déterministes, `compileall` propre.
+- 58+ tests verts et déterministes, `compileall` propre.
   **Phase 16 (validation historique) reste `DEFERRED`.**
 
 ## Phase 9 — Economic Projections

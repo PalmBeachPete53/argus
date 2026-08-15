@@ -1,4 +1,4 @@
-"""Phase 8.x — multi-bank Minutes extractors (BoE, BoJ, Norges, Riksbank):
+"""Phase 8.x — multi-bank Minutes extractors (BoE, BoJ, Norges, RBA, Riksbank):
 golden + contract + dispatch + integration tests.
 
 Covers: per-bank extractor identity and registration, golden facts over the new
@@ -8,8 +8,8 @@ source immutability, unknown-heading refusal, classification gating via the
 `classifications` table, idempotent persistence and empty-result persistence,
 and Phase 5/6/7 coexistence.
 
-The four banks are the second half of the minutes family: they join ECB/Fed
-(so all six minutes-classified banks have an extractor).
+The five banks are the second half of the minutes family: they join ECB/Fed
+(so all seven minutes-classified banks have an extractor).
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from argus.minutes import (
     BoeMinutesExtractor,
     BojMinutesExtractor,
     NorgesMinutesExtractor,
+    RbaMinutesExtractor,
     RiksbankMinutesExtractor,
     extract_minutes,
     extract_minutes_batch,
@@ -41,12 +42,14 @@ BANKS = {
     "boe": BoeMinutesExtractor,
     "boj": BojMinutesExtractor,
     "norges": NorgesMinutesExtractor,
+    "rba": RbaMinutesExtractor,
     "riksbank": RiksbankMinutesExtractor,
 }
 FIXTURE_FILES = {
     "boe": "boe_minutes_full.html",
     "boj": "boj_minutes.html",
     "norges": "norges_minutes.html",
+    "rba": "rba_minutes.html",
     "riksbank": "riksbank_minutes.html",
 }
 
@@ -102,6 +105,25 @@ GOLDEN = {
         ("policy_guidance", "statement", "text",
          "The Committee stood ready to adjust the policy rate if necessary.", None, "committee"),
         ("inflation_risk", "assessment", "categorical", "upside", None, "some_members"),
+    },
+    "rba": {
+        ("financial_conditions", "assessment", "text",
+         "Members observed that financial conditions had eased modestly since the previous meeting, and that credit spreads had narrowed.",
+         None, "members"),
+        ("gdp", "value", "percentage", 0.9, "quarter:2026-Q2", "members"),
+        ("unemployment", "value", "percentage", 4.1, "quarter:2026-Q1", "members"),
+        ("wages", "assessment", "text",
+         "Members observed that wage growth remained elevated.", None, "members"),
+        ("monetary_policy", "statement", "text",
+         "Members judged that the stance of monetary policy remained appropriate.", None, "members"),
+        ("policy_guidance", "statement", "text",
+         "The Board agreed that future decisions would depend on the incoming data.", None, "committee"),
+        ("inflation_risk", "assessment", "categorical", "upside", None, "most_members"),
+        ("growth_risk", "assessment", "categorical", "downside", None, "one_member"),
+        ("risk", "assessment", "categorical", "balanced", None, "some_members"),
+        ("inflation", "value", "percentage", 2.4, "quarter:2026-Q2", "members"),
+        ("inflation_expectations", "assessment", "text",
+         "Members noted that inflation expectations remained well anchored.", None, "members"),
     },
     "riksbank": {
         ("growth", "assessment", "text",
