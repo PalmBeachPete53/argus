@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from ..models import Document, DocumentStatus, Publication
 from .base import METHOD_UNAVAILABLE, DocumentParser, NormalizedDocument
+from .dates import extract_publication_date_from_metadata
 from .registry import ParserRegistry
 
 if TYPE_CHECKING:
@@ -98,7 +99,29 @@ class Normalizer:
         normalized = self.parse(document)
         if persist and self.store is not None:
             self.store.upsert_normalized_document(normalized)
+            self._refine_publication_date(document, normalized)
         return normalized
+
+    def _refine_publication_date(
+        self,
+        document: Document,
+        normalized: NormalizedDocument,
+    ) -> None:
+        """Establish the publication's temporal identity from the document's
+        authoritative metadata (JSON-LD / OpenGraph / ``<time>``) when the
+        publication currently has no ``publication_date``.
+
+        A crawl signal (fetch/discovery timestamp, sitemap ``lastmod``) is never
+        used here — only structured, publisher-authored document metadata.
+        """
+        if self.store is None or not normalized.ok:
+            return
+        date, source = extract_publication_date_from_metadata(normalized.metadata)
+        if date is None:
+            return
+        self.store.set_publication_date_if_missing(
+            document.publication_id, date, source=source
+        )
 
     def normalize_documents(
         self,

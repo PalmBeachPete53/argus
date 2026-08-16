@@ -543,11 +543,16 @@ class Store:
             extra = dict(existing.extra)
             for key, value in pub.extra.items():
                 extra.setdefault(key, value)
+            # A discovery that carries no date (e.g. a sitemap entry, whose
+            # ``lastmod`` is a crawl signal, not a publication date) must never
+            # blank an already-known temporal identity.
+            publication_date = pub.publication_date if pub.publication_date is not None else existing.publication_date
+            meeting_date = pub.meeting_date if pub.meeting_date is not None else existing.meeting_date
             changed = (
                 existing.title != pub.title
                 or existing.url != pub.url
-                or existing.publication_date != pub.publication_date
-                or existing.meeting_date != pub.meeting_date
+                or (pub.publication_date is not None and existing.publication_date != pub.publication_date)
+                or (pub.meeting_date is not None and existing.meeting_date != pub.meeting_date)
             )
             status = existing.status
             if status in (PublicationStatus.FETCHED, PublicationStatus.PARTIAL) and changed:
@@ -563,8 +568,8 @@ class Store:
                 """,
                 (
                     pub.title,
-                    iso(pub.publication_date),
-                    iso(pub.meeting_date),
+                    iso(publication_date),
+                    iso(meeting_date),
                     pub.url,
                     canonical,
                     pub.source_id,
@@ -704,6 +709,37 @@ class Store:
             (status.value, pub_id),
         )
         self._conn.commit()
+
+    def set_publication_date_if_missing(
+        self,
+        publication_id: str,
+        date: datetime,
+        *,
+        source: str | None = None,
+    ) -> bool:
+        """Refine a publication's temporal identity from an authoritative date
+        (e.g. structured document metadata) when it has none yet.
+
+        Only ever *adds* a date that is missing — it never overwrites an
+        existing ``publication_date`` (a crawl signal must never clobber it).
+        ``source`` is recorded in ``extra.publication_date_source`` for
+        provenance. Returns ``True`` when the date was set.
+        """
+        row = self._conn.execute(
+            "SELECT publication_date, extra_json FROM publications WHERE id=?",
+            (publication_id,),
+        ).fetchone()
+        if row is None or row["publication_date"] is not None:
+            return False
+        extra = json.loads(row["extra_json"] or "{}")
+        if source:
+            extra["publication_date_source"] = source
+        self._conn.execute(
+            "UPDATE publications SET publication_date=?, extra_json=?, updated_at=? WHERE id=?",
+            (iso(date), json.dumps(extra), iso(now_utc()), publication_id),
+        )
+        self._conn.commit()
+        return True
 
     def document_count(self, publication_id: str, status: DocumentStatus | None = None) -> int:
         if status is None:

@@ -12,6 +12,19 @@ SM = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
 
 
 class SitemapDiscovery(DiscoveryStrategy):
+    """Sitemap discovery.
+
+    A sitemap ``<lastmod>`` is, by the sitemap protocol, the date of the last
+    *modification* of the page — a CMS / crawl / re-publish signal, **not** a
+    publication date. Central-bank archives routinely re-stamp ``lastmod`` on
+    crawl, so historical pages can carry a recent crawl date. Argus therefore
+    never promotes ``lastmod`` to ``Publication.publication_date``: it is kept
+    as ``extra.sitemap_lastmod`` (discovery metadata / last-modified signal)
+    and is only used to filter the discovery window (recent-activity proxy). A
+    real publication date is established by an authoritative source (document
+    metadata, RSS) or left undated — never invented from a crawl signal.
+    """
+
     kind = "sitemap"
     max_depth = 3
     max_urls = 30000
@@ -28,14 +41,13 @@ class SitemapDiscovery(DiscoveryStrategy):
             seen_urls.add(url)
             if not self._allowed(url):
                 continue
-            date = parse_datetime(entry.get("lastmod")) if entry.get("lastmod") else None
-            if not self._in_window(date):
+            lastmod = parse_datetime(entry.get("lastmod")) if entry.get("lastmod") else None
+            if not self._in_window(lastmod):
                 continue
             publications.append(
                 self._make(
                     url=url,
                     title=title_from_url(url),
-                    publication_date=date,
                     extra={
                         "sitemap_lastmod": entry.get("lastmod"),
                         "sitemap_priority": entry.get("priority"),

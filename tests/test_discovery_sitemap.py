@@ -33,13 +33,19 @@ def test_sitemap_include_filter(fixture_bytes):
     assert all("decision-" in p.url for p in pubs)
 
 
-def test_sitemap_derive_title_and_date(fixture_bytes):
+def test_sitemap_derive_title_keeps_lastmod_as_metadata_only(fixture_bytes):
+    # A sitemap <lastmod> is a last-modification/crawl signal, never a
+    # publication date: it must not be promoted to publication_date and must
+    # remain available as discovery metadata (sitemap_lastmod).
     url = "https://x.test/sitemap-a.xml"
     source = make_source(id_="s", bank="x", kind="sitemap", url=url)
     from conftest import FakeSession
 
     session = FakeSession({url: response(fixture_bytes("sitemap_a.xml"), url=url, content_type="application/xml")})
     pubs = create(source, make_client(session)).discover()
-    dated = [p for p in pubs if p.publication_date is not None]
-    assert dated
+    assert pubs
+    assert all(p.publication_date is None for p in pubs)
     assert all(p.title for p in pubs)
+    with_lastmod = [p for p in pubs if p.extra.get("sitemap_lastmod")]
+    assert with_lastmod
+    assert any(p.extra["sitemap_lastmod"].startswith("2026-07-01") for p in pubs)

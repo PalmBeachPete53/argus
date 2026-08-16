@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from bs4 import BeautifulSoup, Tag
 
@@ -165,6 +166,12 @@ _META_KEYS = {
     "og:description",
     "og:type",
     "og:site_name",
+    "og:published_time",
+    "og:updated_time",
+    "article:published_time",
+    "article:modified_time",
+    "dcterms.created",
+    "dcterms.modified",
     "twitter:title",
     "twitter:description",
 }
@@ -197,6 +204,26 @@ def _collect_meta(soup: BeautifulSoup, metadata: dict) -> None:
             dates.append(value)
     if dates:
         metadata["dates"] = dates
+
+
+def _collect_json_ld(soup: BeautifulSoup, metadata: dict) -> None:
+    """Capture structured JSON-LD objects (e.g. ``NewsArticle.datePublished``)
+    verbatim, for provenance of authoritative document-level dates."""
+    found: list = []
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = (script.string or "").strip() or (script.get_text() or "").strip()
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(data, list):
+            found.extend(data)
+        else:
+            found.append(data)
+    if found:
+        metadata["json_ld"] = found
 
 
 def _collect_links(container: Tag, base_url: str, metadata: dict) -> None:
@@ -275,6 +302,7 @@ class HtmlParser(DocumentParser):
 
         metadata: dict = {"encoding": soup.original_encoding or "utf-8"}
         _collect_meta(soup, metadata)
+        _collect_json_ld(soup, metadata)
         _collect_links(container, document.url, metadata)
 
         warnings = []
