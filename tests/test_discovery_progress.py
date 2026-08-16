@@ -339,8 +339,8 @@ try:
     store.finish_discovery_run(run_id, status="completed")
     status = "completed"
 except DiscoveryStopped:
-    store.finish_discovery_run(run_id, status="stopped", error="stopped by user")
-    status = "stopped"
+    store.finish_discovery_run(run_id, status="cancelled", error="cancelled by user")
+    status = "cancelled"
 final = store.get_discovery_run(run_id)
 print(json.dumps({"run_id": run_id, "status": status,
                   "sources_completed": final["sources_completed"],
@@ -403,7 +403,7 @@ def test_real_campaign_advances_live_progression(tmp_path):
         while True:
             run = store.get_discovery_run(run_id)
             samples.append((run["status"], run["sources_completed"]))
-            if run["status"] in ("completed", "stopped", "failed"):
+            if run["status"] in ("completed", "cancelled", "stopped", "failed"):
                 break
             time.sleep(0.02)
     finally:
@@ -423,7 +423,7 @@ def test_real_campaign_advances_live_progression(tmp_path):
 
 
 def test_stop_keeps_last_known_partial_progression(tmp_path):
-    """Stop after two sources: the store keeps 2 / 4 with status `stopped` —
+    """Stop after two sources: the store keeps 2 / 4 with status `cancelled` —
     the GUI can never display a fabricated 100%."""
     db = tmp_path / "stop.db"
     child = _spawn_child(db, "stop")
@@ -441,7 +441,7 @@ def test_stop_keeps_last_known_partial_progression(tmp_path):
             run = store.get_discovery_run(run_id)
             if run["status"] == "running" and run["sources_completed"] == 2:
                 saw_running_2of4 = True
-            if run["status"] in ("completed", "stopped", "failed"):
+            if run["status"] in ("completed", "cancelled", "stopped", "failed"):
                 break
             time.sleep(0.02)
     finally:
@@ -450,7 +450,7 @@ def test_stop_keeps_last_known_partial_progression(tmp_path):
             child.wait()
 
     final = store.get_discovery_run(run_id)
-    assert final["status"] == "stopped"
+    assert final["status"] == "cancelled"
     assert final["sources_total"] == 4
     assert final["sources_completed"] == 2
     assert final["sources_completed"] != final["sources_total"]  # never 4 / 4

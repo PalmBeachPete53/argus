@@ -22,7 +22,7 @@ Commands (``python -m argus.gui_bridge <command>``):
   end-exclusive; ``start_date <= end_date``).
 - ``discovery-control <pause|resume|stop>`` → the real lifecycle controls:
   the campaign subprocess is frozen (SIGSTOP), resumed (SIGCONT) or asked to
-  stop (SIGTERM, the campaign records itself as ``stopped``). The PID is read
+  stop (SIGTERM, the campaign records itself as ``cancelled``). The PID is read
   from the store's `discovery_runs.pid`, never invented.
 - ``discovery-clear``  → drop the discovery report cache (the ``discovery_runs``
   and ``discovery_candidates`` tables only — pipeline data is untouched).
@@ -289,7 +289,7 @@ class DiscoveryStopped(Exception):
     """Raised inside the campaign process when a stop (SIGTERM) is requested.
 
     SIGTERM is a normal lifecycle control, never a "failed" signal — the
-    campaign finalizes itself as ``stopped`` instead of ``failed`` so the GUI
+    campaign finalizes itself as ``cancelled`` instead of ``failed`` so the GUI
     shows exactly what happened.
     """
 
@@ -322,7 +322,7 @@ STOP_GRACE_S = 2.5
 STOP_KILL_S = 2.0
 
 _ACTIVE_STATUSES = ("running", "paused")
-_TERMINAL_STATUSES = ("completed", "failed", "stopped")
+_TERMINAL_STATUSES = ("completed", "failed", "cancelled", "stopped")
 
 
 def _process_state(pid: int) -> str:
@@ -453,7 +453,7 @@ def _reconcile_run(store: Store, run: dict | None) -> dict | None:
 
     The cause is not recoverable from the Store (the process vanished without
     finalizing), so it is the honest non-explicit outcome: ``failed``. An
-    explicit user Stop records ``stopped`` at the moment it *verifies* the
+    explicit user Stop records ``cancelled`` at the moment it *verifies* the
     process is gone, and is never downgraded afterwards.
     """
     if run is None or run["status"] not in _ACTIVE_STATUSES:
@@ -471,7 +471,7 @@ def _reconcile_run(store: Store, run: dict | None) -> dict | None:
 
 def _terminate_campaign(store: Store, run: dict, pid: int) -> dict:
     """Stop a campaign and guarantee the whole process tree is really gone
-    before the Store says ``stopped``.
+    before the Store says ``cancelled``.
 
     1. un-freeze a paused campaign (SIGCONT) so its signals can be delivered;
     2. verify the recorded PID is the real discovery campaign — a live but
@@ -481,7 +481,7 @@ def _terminate_campaign(store: Store, run: dict, pid: int) -> dict:
     4. wait for real termination of the whole group (``STOP_GRACE_S``);
     5. escalate to SIGKILL on the same target if anything still lives
        (``STOP_KILL_S``);
-    6. only when every member is verified dead, write ``stopped``.
+    6. only when every member is verified dead, write ``cancelled``.
 
     The Store is never edited to hide a still-living process: if the process
     cannot be killed, the error propagates and the campaign stays active.
@@ -512,7 +512,7 @@ def _terminate_campaign(store: Store, run: dict, pid: int) -> dict:
         # Already gone (or never existed): there is nothing to signal.
         current = store.get_discovery_run(run["run_id"])
         if current and current["status"] in _ACTIVE_STATUSES:
-            store.finish_discovery_run(run["run_id"], status="stopped", error="stopped by user")
+            store.finish_discovery_run(run["run_id"], status="cancelled", error="cancelled by user")
         return store.get_discovery_run(run["run_id"])
 
     pgid = _process_group_id(pid)
@@ -555,7 +555,7 @@ def _terminate_campaign(store: Store, run: dict, pid: int) -> dict:
 
     current = store.get_discovery_run(run["run_id"])
     if current and current["status"] in _ACTIVE_STATUSES:
-        store.finish_discovery_run(run["run_id"], status="stopped", error="stopped by user")
+        store.finish_discovery_run(run["run_id"], status="cancelled", error="cancelled by user")
     return store.get_discovery_run(run["run_id"])
 
 
@@ -566,7 +566,7 @@ def _start_parent_watchdog() -> None:
     If the parent (the Rust shell) dies for any reason — normal close, system
     shutdown, even a force-quit that skips ``ExitRequested`` — the campaign is
     reparented to the init process; the watchdog then asks the campaign to stop
-    itself (SIGTERM → the campaign records ``stopped``). Daemon thread, only
+    itself (SIGTERM → the campaign records ``cancelled``). Daemon thread, only
     active while this process lives.
     """
     if not _launched_detached():
@@ -645,12 +645,12 @@ def _run_discovery_campaign(
         # run being recorded — close the window by finalizing immediately.
         store.finish_discovery_run(
             run_id,
-            status="stopped",
+            status="cancelled",
             error="launcher exited during campaign startup",
         )
         return {
             "run_id": run_id,
-            "status": "stopped",
+            "status": "cancelled",
             "error": "launcher exited during campaign startup",
             "candidates": 0,
         }
@@ -672,8 +672,8 @@ def _run_discovery_campaign(
             date_end=date_end,
         )
     except DiscoveryStopped:
-        store.finish_discovery_run(run_id, status="stopped", error="stopped by user")
-        return {"run_id": run_id, "status": "stopped", "error": "stopped by user", "candidates": 0}
+        store.finish_discovery_run(run_id, status="cancelled", error="cancelled by user")
+        return {"run_id": run_id, "status": "cancelled", "error": "cancelled by user", "candidates": 0}
     except Exception as exc:  # pragma: no cover - defensive (Core raises are logged)
         message = f"{exc.__class__.__name__}: {exc}"
         store.finish_discovery_run(run_id, status="failed", error=message)
@@ -827,7 +827,7 @@ def _cmd_discovery_control(argv: list[str]) -> int:
     - ``pause``  → SIGSTOP, then ``paused``;
     - ``resume`` → SIGCONT, then ``running``;
     - ``stop``   → SIGTERM with a real termination wait and SIGKILL escalation
-      (see :func:`_terminate_campaign`) — the Store says ``stopped`` only once
+      (see :func:`_terminate_campaign`) — the Store says ``cancelled`` only once
       the process is verified gone.
     A dead PID is never hidden: the campaign is reconciled and the command
     errors out.
@@ -888,7 +888,7 @@ def _cmd_discovery_control(argv: list[str]) -> int:
         return 1
     except RuntimeError as exc:
         # Stop could not guarantee the process is gone — the Store must NOT
-        # claim `stopped` while the process lives.
+        # claim `cancelled` while the process lives.
         print(json.dumps({"error": str(exc)}, indent=2))
         return 1
     except OSError as exc:

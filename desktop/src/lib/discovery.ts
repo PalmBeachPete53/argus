@@ -31,7 +31,7 @@ export const INVALID_RANGE_HINT = "End date must be on or after start date.";
  *
  * The result is sanitized so the UI can render it without extra guards:
  * counts are clamped to the valid range and the percentage never exceeds
- * 100 (a stopped campaign keeps its last known progression — the Core never
+ * 100 (a stopped or cancelled campaign keeps its last known progression — the Core never
  * fabricates `total / total` for interrupted work).
  */
 export interface DiscoveryProgress {

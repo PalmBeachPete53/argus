@@ -505,12 +505,12 @@ def test_discovery_status_exposes_core_source_progression(monkeypatch, tmp_path,
     store = gui_bridge.Store(tmp_path / "data" / "argus.db")
     store.start_discovery_run("prog-02", ["fed"], sources_total=4)
     store.set_discovery_progress("prog-02", completed=1, total=4)
-    store.finish_discovery_run("prog-02", status="stopped", error="stopped by user")
+    store.finish_discovery_run("prog-02", status="cancelled", error="cancelled by user")
     store.close()
     code, status = patched(["discovery-status"])
     assert code == 0
     assert status["run_id"] == "prog-02"
-    assert status["status"] == "stopped"
+    assert status["status"] == "cancelled"
     assert status["sources_total"] == 4
     assert status["sources_completed"] == 1
 
@@ -770,8 +770,8 @@ def test_discovery_run_refuses_launch_without_touching_campaign(patched, monkeyp
     assert calls == []  # discover_all was never invoked
 
 
-def test_discovery_run_stop_records_stopped_status(monkeypatch, patched):
-    """A SIGTERMped campaign records itself as ``stopped`` (never ``failed``)."""
+def test_discovery_run_stop_records_cancelled_status(monkeypatch, patched):
+    """A SIGTERMped campaign records itself as ``cancelled`` (never ``failed``)."""
 
     class _StoppedCollector:
         def __init__(self, **kwargs):
@@ -783,9 +783,9 @@ def test_discovery_run_stop_records_stopped_status(monkeypatch, patched):
     monkeypatch.setattr(gui_bridge, "CentralBankCollector", _StoppedCollector)
     code, data = patched(_RUN)
     assert code == 0
-    assert data["status"] == "stopped"
+    assert data["status"] == "cancelled"
     _, status = patched(["discovery-status"])
-    assert status["status"] == "stopped"
+    assert status["status"] == "cancelled"
     assert status["error"]
 
 
@@ -819,7 +819,7 @@ def test_discovery_control_pause_resume_stop(monkeypatch, tmp_path, patched):
 
         code, run = patched(["discovery-control", "stop"])
         assert code == 0
-        assert run["status"] == "stopped"
+        assert run["status"] == "cancelled"
         assert campaign.wait(5) is not None  # terminated
     finally:
         if campaign.poll() is None:
@@ -827,7 +827,7 @@ def test_discovery_control_pause_resume_stop(monkeypatch, tmp_path, patched):
             campaign.wait()
 
 
-def test_discovery_control_stop_of_dead_campaign_records_stopped(monkeypatch, tmp_path, patched):
+def test_discovery_control_stop_of_dead_campaign_records_cancelled(monkeypatch, tmp_path, patched):
     import subprocess
     import sys
 
@@ -843,7 +843,48 @@ def test_discovery_control_stop_of_dead_campaign_records_stopped(monkeypatch, tm
     store.close()
     code, run = patched(["discovery-control", "stop"])
     assert code == 0
-    assert run["status"] == "stopped"
+    assert run["status"] == "cancelled"
+
+
+def test_discovery_control_stop_from_paused_records_cancelled(monkeypatch, tmp_path, patched):
+    """Pause then Stop (never Resume): the store records ``cancelled`` — a
+    terminal state, never ``completed``, never still ``paused``."""
+    import os
+    import subprocess
+    import sys
+
+    if os.name == "nt":
+        import pytest
+
+        pytest.skip("POSIX signals required")
+
+    campaign = _fake_campaign()
+    try:
+        store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+        store.start_discovery_run("ctrl-paused-stop", ["fed"], pid=campaign.pid)
+        store.close()
+
+        code, run = patched(["discovery-control", "pause"])
+        assert code == 0
+        assert run["status"] == "paused"
+        assert campaign.poll() is None  # frozen, not dead
+
+        code, run = patched(["discovery-control", "stop"])
+        assert code == 0
+        assert run["status"] == "cancelled"
+        assert campaign.wait(5) is not None  # terminated
+
+        # Cancelled is terminal: a Resume can never revive it.
+        code, _ = patched(["discovery-control", "resume"])
+        assert code == 1
+
+        _, status = patched(["discovery-status"])
+        assert status["status"] == "cancelled"
+        assert status["run_id"] == "ctrl-paused-stop"
+    finally:
+        if campaign.poll() is None:
+            campaign.kill()
+            campaign.wait()
 
 
 def test_discovery_control_requires_active_campaign(monkeypatch, patched):
@@ -877,7 +918,7 @@ def test_shutdown_stops_running_campaign(monkeypatch, tmp_path, patched):
 
         code, run = patched(["discovery-control", "stop", "shutdown-running"])
         assert code == 0
-        assert run["status"] == "stopped"
+        assert run["status"] == "cancelled"
         assert run["pid"] == campaign.pid
         assert campaign.wait(5) is not None  # really gone
         assert not gui_bridge._process_alive(campaign.pid)
@@ -889,7 +930,7 @@ def test_shutdown_stops_running_campaign(monkeypatch, tmp_path, patched):
 
 def test_shutdown_stops_paused_campaign(monkeypatch, tmp_path, patched):
     """App close while paused: a SIGSTOPped process cannot process SIGTERM until
-    it is SIGCONTed — the stop must SIGCONT→SIGTERM and end `stopped`."""
+    it is SIGCONTed — the stop must SIGCONT→SIGTERM and end `cancelled`."""
     import time
 
     campaign = _fake_campaign()
@@ -908,7 +949,7 @@ def test_shutdown_stops_paused_campaign(monkeypatch, tmp_path, patched):
 
         code, run = patched(["discovery-control", "stop", "shutdown-paused"])
         assert code == 0
-        assert run["status"] == "stopped"
+        assert run["status"] == "cancelled"
         assert campaign.wait(5) is not None  # SIGCONT + SIGTERM released the frozen process
         assert not gui_bridge._process_alive(campaign.pid)
     finally:
@@ -927,19 +968,19 @@ def test_shutdown_completed_run_untouched(monkeypatch, patched):
     assert status["status"] == "completed"
 
 
-def test_shutdown_stopped_run_untouched(monkeypatch, tmp_path, patched):
+def test_shutdown_cancelled_run_untouched(monkeypatch, tmp_path, patched):
     campaign = _fake_campaign()
     try:
         store = gui_bridge.Store(tmp_path / "data" / "argus.db")
         store.start_discovery_run("shutdown-stopped", ["fed"], pid=campaign.pid)
-        store.finish_discovery_run("shutdown-stopped", status="stopped")
+        store.finish_discovery_run("shutdown-stopped", status="cancelled")
         store.close()
 
         code, data = patched(["discovery-control", "stop", "shutdown-stopped"])
         assert code == 1
         assert "no active campaign to stop" in data["error"]
         _, status = patched(["discovery-status"])
-        assert status["status"] == "stopped"
+        assert status["status"] == "cancelled"
     finally:
         if campaign.poll() is None:
             campaign.kill()
@@ -948,14 +989,14 @@ def test_shutdown_stopped_run_untouched(monkeypatch, tmp_path, patched):
 
 def test_shutdown_nonexistent_pid_records_stopped(monkeypatch, tmp_path, patched):
     """An active run whose PID never existed: the process is already absent, so
-    the shutdown finalizes `stopped` without touching anything."""
+    the shutdown finalizes `cancelled` without touching anything."""
     store = gui_bridge.Store(tmp_path / "data" / "argus.db")
     store.start_discovery_run("shutdown-nope", ["fed"], pid=999999999)
     store.close()
 
     code, run = patched(["discovery-control", "stop", "shutdown-nope"])
     assert code == 0
-    assert run["status"] == "stopped"
+    assert run["status"] == "cancelled"
     assert not gui_bridge._process_alive(999999999)
 
 
@@ -992,7 +1033,7 @@ def test_shutdown_terminates_descendants(monkeypatch, tmp_path, patched):
 
         code, run = patched(["discovery-control", "stop", "shutdown-group"])
         assert code == 0
-        assert run["status"] == "stopped"
+        assert run["status"] == "cancelled"
         assert leader.wait(5) is not None
         # the descendant must be gone too, and the group empty
         assert not gui_bridge._process_alive(child_pid)
@@ -1026,7 +1067,7 @@ def test_shutdown_launch_race_parent_gone_before_record(monkeypatch, patched):
 
 def test_shutdown_launch_race_parent_gone_after_record(monkeypatch, patched):
     """Parent disappears right after the run is recorded: the campaign
-    finalizes itself `stopped` instead of continuing as an orphan."""
+    finalizes itself `cancelled` instead of continuing as an orphan."""
     monkeypatch.setenv(gui_bridge._DETACHED_ENV, "1")
     real_getppid = gui_bridge.os.getppid
     calls = {"n": 0}
@@ -1042,16 +1083,16 @@ def test_shutdown_launch_race_parent_gone_after_record(monkeypatch, patched):
     )
     code, data = patched(_RUN)
     assert code == 0
-    assert data["status"] == "stopped"
+    assert data["status"] == "cancelled"
     assert "launcher exited during campaign startup" in data["error"]
     _, status = patched(["discovery-status"])
-    assert status["status"] == "stopped"
+    assert status["status"] == "cancelled"
 
 
 def test_parent_watchdog_stops_campaign_when_launcher_dies(tmp_path):
     """A *detached* campaign must stop itself when its launching parent dies
     (e.g. Argus force-quit that skips the exit events): the parent watchdog
-    SIGTERMs the campaign, which records ``stopped``."""
+    SIGTERMs the campaign, which records ``cancelled``."""
     import os
     import signal
     import time
@@ -1067,7 +1108,7 @@ sys.path.insert(0, {src!r})
 from argus import gui_bridge
 from argus.store import Store
 def _stop(signum, frame):
-    Store({str(db)!r}).finish_discovery_run("watch-1", status="stopped", error="launcher exited")
+    Store({str(db)!r}).finish_discovery_run("watch-1", status="cancelled", error="launcher exited")
     os._exit(0)
 signal.signal(signal.SIGTERM, _stop)
 s = Store({str(db)!r})
@@ -1098,7 +1139,7 @@ time.sleep(60)
             time.sleep(0.1)
         assert not gui_bridge._process_alive(campaign_pid), "watchdog did not stop the campaign"
         run = gui_bridge.Store(db).get_discovery_run("watch-1")
-        assert run["status"] == "stopped", run["status"]
+        assert run["status"] == "cancelled", run["status"]
         assert "launcher exited" in run["error"]
     finally:
         if launcher.poll() is None:
@@ -1306,8 +1347,8 @@ def test_discovery_status_reconciles_dead_pid(tmp_path, monkeypatch, capsys):
 
 def test_discovery_stop_kills_uncooperative_process(patched, tmp_path, monkeypatch):
     """SIGTERM alone is not enough → escalate to SIGKILL, verify real exit, and
-    only then record `stopped`. A live process must never hide behind a
-    `stopped` Store row."""
+    only then record `cancelled`. A live process must never hide behind a
+    `cancelled` Store row."""
     monkeypatch.setattr(gui_bridge, "STOP_GRACE_S", 0.3)
     monkeypatch.setattr(gui_bridge, "STOP_KILL_S", 0.5)
 
@@ -1318,12 +1359,12 @@ def test_discovery_stop_kills_uncooperative_process(patched, tmp_path, monkeypat
     try:
         code, run = patched(["discovery-control", "stop", "stub-1"])
         assert code == 0
-        assert run["status"] == "stopped"
+        assert run["status"] == "cancelled"
         assert stubborn.wait(5) is not None
         assert run["pid"] == stubborn.pid
         # no active (running/paused) campaign remains
         _, status = patched(["discovery-status"])
-        assert status["status"] == "stopped"
+        assert status["status"] == "cancelled"
         assert not gui_bridge._process_alive(stubborn.pid)
     finally:
         if stubborn.poll() is None:

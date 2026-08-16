@@ -242,7 +242,7 @@ impl Bridge {
     ///
     /// Command-level failures surface through ``run`` (the bridge exits
     /// non-zero); the parsed run may legitimately carry an ``error`` field
-    /// (e.g. ``"stopped by user"``) that is *not* a command failure.
+    /// (e.g. ``"cancelled by user"``) that is *not* a command failure.
     fn discovery_control(&self, action: &str, run_id: &str) -> Result<DiscoveryRun, String> {
         let out = self.run(&["discovery-control".into(), action.to_string(), run_id.to_string()])?;
         serde_json::from_str(&out).map_err(|err| err.to_string())
@@ -253,7 +253,7 @@ impl Bridge {
     /// Called at application exit. Reads the real campaign state; only an
     /// active (``running`` / ``paused``) campaign is stopped, targeted by its
     /// explicit ``run_id``. The bridge performs the SIGCONT→SIGTERM→(SIGKILL)
-    /// escalation and only records ``stopped`` once the process tree is
+    /// escalation and only records ``cancelled`` once the process tree is
     /// verified gone — so a successful return means no discovery process from
     /// this instance remains. Terminal campaigns are left untouched.
     fn stop_active_discovery(&self) -> Result<DiscoveryRun, String> {
@@ -356,7 +356,7 @@ struct BankSources {
 #[serde(rename_all = "snake_case")]
 struct DiscoveryRun {
     run_id: Option<String>,
-    status: String, // idle | running | paused | completed | failed | stopped
+    status: String, // idle | running | paused | completed | failed | cancelled | stopped (legacy)
     started_at: Option<String>,
     finished_at: Option<String>,
     error: Option<String>,
@@ -661,7 +661,7 @@ mod tests {
         }
         let run = bridge.discovery_status().expect("bridge must return discovery status");
         assert!(
-            matches!(run.status.as_str(), "idle" | "running" | "completed" | "failed"),
+            matches!(run.status.as_str(), "idle" | "running" | "completed" | "failed" | "cancelled" | "stopped"),
             "unexpected status: {}",
             run.status
         );

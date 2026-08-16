@@ -13,7 +13,7 @@ import type { DiscoveryRun } from "../types";
 /** Campaign states that are still alive and worth polling. */
 export const ACTIVE = new Set(["running", "paused"]);
 /** Campaign states after which polling stops (for the followed run). */
-export const TERMINAL = new Set(["completed", "stopped", "failed"]);
+export const TERMINAL = new Set(["completed", "cancelled", "stopped", "failed"]);
 
 /** One decision the poll loop applies after observing a `discovery-status`. */
 export interface PollStep {

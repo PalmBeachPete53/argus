@@ -107,7 +107,7 @@ describe("nextPollStep", () => {
     }
   });
 
-  it("keeps the real partial progression on stop (never fabricates total/total)", () => {
+  it("keeps the real partial progression on cancel (never fabricates total/total)", () => {
     const target = "new";
     const running = nextPollStep(target, false, run({
       run_id: target,
@@ -117,18 +117,31 @@ describe("nextPollStep", () => {
     }), startingDisplay(target));
     expect(running.keepPolling).toBe(true);
 
-    const stopped = nextPollStep(target, false, run({
+    const cancelled = nextPollStep(target, false, run({
+      run_id: target,
+      status: "cancelled",
+      sources_total: 4,
+      sources_completed: 2,
+    }), startingDisplay(target));
+    expect(cancelled.keepPolling).toBe(false);
+    expect(cancelled.fetchResults).toBe(true);
+    expect(cancelled.display.status).toBe("cancelled");
+    expect(cancelled.display.sources_completed).toBe(2);
+    expect(cancelled.display.sources_total).toBe(4);
+    expect(cancelled.display.sources_completed).not.toBe(cancelled.display.sources_total);
+  });
+
+  it("treats a legacy stopped run as terminal", () => {
+    const target = "new";
+    const legacy = nextPollStep(target, false, run({
       run_id: target,
       status: "stopped",
       sources_total: 4,
       sources_completed: 2,
     }), startingDisplay(target));
-    expect(stopped.keepPolling).toBe(false);
-    expect(stopped.fetchResults).toBe(true);
-    expect(stopped.display.status).toBe("stopped");
-    expect(stopped.display.sources_completed).toBe(2);
-    expect(stopped.display.sources_total).toBe(4);
-    expect(stopped.display.sources_completed).not.toBe(stopped.display.sources_total);
+    expect(legacy.keepPolling).toBe(false);
+    expect(legacy.fetchResults).toBe(true);
+    expect(legacy.display.status).toBe("stopped");
   });
 
   it("adopts an active run when observing on mount with no target", () => {

@@ -19,7 +19,7 @@ function StatusPill({ status }: { status: string }) {
  * - running → live, advances as the Core reports each source done;
  * - paused → frozen at the last Core-reported value;
  * - completed → full bar (the Core reports total / total on a normal end);
- * - stopped / failed → the *last known* progression — a Stop is never
+ * - cancelled / stopped / failed → the *last known* progression — a Stop is never
  *   transformed into 100%.
  * A zero total (no enabled sources) renders a coherent empty state instead of
  * an invalid ``0 / 0`` bar.
@@ -163,7 +163,7 @@ function ConfirmButton({
  * parallel React copy). Launching forwards the selected date window to the
  * Core; Run/Pause/Resume/Stop signal the campaign's recorded run_id/PID via
  * `discovery_control`; Clear Cache is only offered once a campaign has ended
- * (completed/stopped/failed) and goes through the bridge, which refuses it
+ * (completed/cancelled/stopped/failed) and goes through the bridge, which refuses it
  * while a campaign is active.
  */
 export default function Discovery({ discovery }: DiscoveryProps) {
@@ -193,7 +193,7 @@ export default function Discovery({ discovery }: DiscoveryProps) {
     void discovery.launch(dateFrom, exclusiveEnd(dateTo));
   };
 
-  const showResults = !active && (status.status === "completed" || status.status === "stopped");
+  const showResults = !active && (status.status === "completed" || status.status === "cancelled" || status.status === "stopped");
 
   return (
     <div className="discovery-view">
@@ -263,7 +263,7 @@ export default function Discovery({ discovery }: DiscoveryProps) {
               </button>
             ))}
           {active && (
-            <ConfirmButton label="Stop" confirmLabel="Confirm stop?" onClick={() => void discovery.stop()} />
+            <ConfirmButton label="Cancel Discovery" confirmLabel="Confirm cancel?" onClick={() => void discovery.stop()} />
           )}
         </div>
       </section>
@@ -293,7 +293,10 @@ export default function Discovery({ discovery }: DiscoveryProps) {
             <dd>{hasRun ? range : "—"}</dd>
           </div>
         </dl>
-        {hasRun && status.status !== "idle" && !starting && <CampaignProgress status={status} />}
+        {hasRun && !starting &&
+          (status.status === "running" || status.status === "paused" || status.status === "completed") && (
+          <CampaignProgress status={status} />
+        )}
         <div className="discovery-stats">
           <div className="stat-card">
             <span className="stat-value">{status.candidates.toLocaleString()}</span>
@@ -330,9 +333,14 @@ export default function Discovery({ discovery }: DiscoveryProps) {
           <p className="data-browser-muted">{status.error || "Discovery failed."}</p>
         </div>
       )}
-      {status.status === "stopped" && !active && (
+      {(status.status === "cancelled" || status.status === "stopped") && !active && (
         <div className="discovery-empty">
-          <p className="data-browser-muted">{status.error || "Discovery was stopped."}</p>
+          <p className="data-browser-muted">
+            {status.status === "cancelled" ? "Discovery cancelled" : "Discovery stopped"}
+            {status.sources_total > 0
+              ? ` · ${status.sources_completed} of ${status.sources_total} sources completed`
+              : ""}
+          </p>
         </div>
       )}
 

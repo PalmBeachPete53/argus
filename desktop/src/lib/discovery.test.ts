@@ -53,8 +53,8 @@ describe("discoveryProgress — Core-driven source progression", () => {
     expect(p.fraction).toBe(1);
   });
 
-  it("keeps the last known progression for paused / stopped / failed", () => {
-    // Exactly the Core contract: a paused or stopped campaign keeps its last
+  it("keeps the last known progression for paused / cancelled / stopped / failed", () => {
+    // Exactly the Core contract: a paused or cancelled campaign keeps its last
     // observed value (never reset, never fabricated to 100%).
     for (const completed of [0, 1, 21]) {
       expect(discoveryProgress(34, completed)).toEqual(discoveryProgress(34, completed));

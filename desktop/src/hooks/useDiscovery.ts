@@ -34,7 +34,7 @@ const LAUNCH_TIMEOUT_MS = 60_000;
  * - after launch → "starting" phase: keep polling until `run_id` appears, and
  *   never interpret the old completed run as the new campaign's end;
  * - once the run is observed → follow it (live source progression) until it
- *   reaches `completed` / `stopped` / `failed`, then fetch results once;
+ *   reaches `completed` / `cancelled` / `stopped` / `failed`, then fetch results once;
  * - on mount → observe: adopt an already-active campaign, or render the
  *   terminal/idle state a single time.
  * The real lifecycle controls (pause / resume / stop) re-read the

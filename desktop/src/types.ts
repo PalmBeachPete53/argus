@@ -47,7 +47,7 @@ export type SettingsSection = "general" | "banks";
 /** A discovery campaign lifecycle (from the Core store, read-only). */
 export interface DiscoveryRun {
   run_id: string | null;
-  status: "idle" | "running" | "paused" | "completed" | "failed" | "stopped";
+  status: "idle" | "running" | "paused" | "completed" | "failed" | "cancelled" | "stopped";
   started_at: string | null;
   finished_at: string | null;
   error: string | null;

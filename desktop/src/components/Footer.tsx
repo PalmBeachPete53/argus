@@ -16,6 +16,7 @@ export default function Footer({ status, starting = false }: FooterProps) {
   else if (status.status === "paused") text = "Discovery paused";
   else if (status.status === "completed")
     text = `Discovery completed · ${status.candidates} candidates`;
+  else if (status.status === "cancelled") text = "Discovery cancelled";
   else if (status.status === "stopped") text = "Discovery stopped";
   else if (status.status === "failed") text = "Discovery failed";
 

@@ -190,6 +190,10 @@ body {
   background: var(--muted);
 }
 
+.footer-cancelled .footer-dot {
+  background: var(--muted);
+}
+
 /* ------------------------------------------------------------------ */
 /* Shared view headers / buttons / pills                               */
 /* ------------------------------------------------------------------ */
@@ -250,6 +254,11 @@ body {
 }
 
 .pill-stopped {
+  background: var(--muted);
+  color: var(--white);
+}
+
+.pill-cancelled {
   background: var(--muted);
   color: var(--white);
 }
