@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { SettingsSection } from "../types";
 import BanksSection from "./BanksSection";
-import SourcesSection from "./SourcesSection";
 import GeneralSection from "./GeneralSection";
 
 interface SettingsModalProps {
@@ -11,7 +10,6 @@ interface SettingsModalProps {
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "general", label: "General" },
   { id: "banks", label: "Banks" },
-  { id: "sources", label: "Sources" },
 ];
 
 export default function SettingsModal({ onClose }: SettingsModalProps) {
@@ -45,7 +43,6 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           <div className="settings-content">
             {section === "general" && <GeneralSection />}
             {section === "banks" && <BanksSection />}
-            {section === "sources" && <SourcesSection />}
           </div>
         </div>
       </div>

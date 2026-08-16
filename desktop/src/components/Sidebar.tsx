@@ -7,6 +7,7 @@ interface SidebarProps {
 
 const SECTIONS: { id: DataView; label: string }[] = [
   { id: "overview", label: "Overview" },
+  { id: "sources", label: "Sources" },
   { id: "discovery", label: "Discovery" },
   { id: "files", label: "Files" },
 ];

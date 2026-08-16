@@ -3,8 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type { BankSources } from "../types";
 
 // Read-only view of the Core's SourceRegistry — never duplicated in the
-// frontend: the data comes from the bridge (`get_sources`).
-export default function SourcesSection() {
+// frontend: the data comes from the bridge (`get_sources`), so the Core stays
+// the single source of truth. Sources are the functional infrastructure used by
+// Discovery, hence their place as a main DATA page rather than a user
+// configuration panel.
+export default function Sources() {
   const [ordered, setOrdered] = useState<[string, BankSources][] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,7 +25,8 @@ export default function SourcesSection() {
 
   return (
     <div>
-      {error && <div className="modal-error">Error: {error}</div>}
+      <h1 className="view-title">Sources</h1>
+      {error && <div className="data-browser-error">Error: {error}</div>}
       {!ordered && !error && <div className="data-browser-muted">Loading…</div>}
       {ordered &&
         ordered.map(([bankId, bank]) => (

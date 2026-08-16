@@ -25,7 +25,7 @@ export interface DirListing {
 export type SectionId = "data";
 
 /** Sub-views of the DATA section. */
-export type DataView = "overview" | "discovery" | "files";
+export type DataView = "overview" | "sources" | "discovery" | "files";
 
 export interface SourceInfo {
   id: string;
@@ -42,7 +42,7 @@ export interface BankSources {
   sources: SourceInfo[];
 }
 
-export type SettingsSection = "general" | "banks" | "sources";
+export type SettingsSection = "general" | "banks";
 
 /** A discovery campaign lifecycle (from the Core store, read-only). */
 export interface DiscoveryRun {
