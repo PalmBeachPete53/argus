@@ -193,6 +193,7 @@ A minimal desktop shell (Tauri 2 + React + TypeScript) exposes the Argus
 Core configuration (single source of truth). See `docs/GUI.md`.
 
 ```bash
+python3 -m venv .venv && .venv/bin/python -m pip install -e .   # Python env for the bridge
 cd desktop
 npm install
 npm run tauri dev        # development

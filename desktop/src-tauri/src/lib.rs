@@ -26,10 +26,18 @@ fn resolve_root() -> PathBuf {
             return PathBuf::from(root);
         }
     }
-    let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     // Generic project detection (not a hardcoded path): walk upward from the
-    // current directory until a directory containing the Python Core marker
-    // `src/argus` is found — that is the repository root that owns `data/`.
+    // running executable (works both under `cargo tauri dev` and for the
+    // packaged .app, which lives inside the repository build tree) until a
+    // directory containing the Python Core marker `src/argus` is found — that
+    // is the repository root that owns `data/`. The current working directory
+    // (which macOS sets to `/` for GUI apps launched from Finder) is only a
+    // fallback.
+    let mut start = std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from));
+    if start.is_none() {
+        start = std::env::current_dir().ok();
+    }
+    let start = start.unwrap_or_else(|| PathBuf::from("."));
     let mut dir: Option<&std::path::Path> = Some(start.as_path());
     while let Some(candidate) = dir {
         if candidate.join("src").join("argus").is_dir() {
@@ -46,9 +54,14 @@ fn resolve_python(root: &PathBuf) -> String {
             return python;
         }
     }
-    let venv = root.join(".venv").join("bin").join("python");
-    if venv.is_file() {
-        return venv.to_string_lossy().into_owned();
+    // The repository's virtualenv is the portable home of the Argus Core Python
+    // environment (gitignored, created by setup). Resolved relative to the
+    // repository root — never a machine-specific path.
+    for name in ["python", "python3"] {
+        let candidate = root.join(".venv").join("bin").join(name);
+        if candidate.is_file() {
+            return candidate.to_string_lossy().into_owned();
+        }
     }
     "python3".to_string()
 }
@@ -193,12 +206,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_root_finds_repo_from_subdirectory() {
-        // The crate's working directory is `src-tauri`; the ancestor walk must
-        // climb to the repository root that owns `src/argus`.
+    fn resolve_root_finds_repo_from_executable() {
+        // current_exe() walks up from the test binary (target/debug/deps) to
+        // the repository root that owns `src/argus` — the same mechanism the
+        // packaged .app relies on when launched from Finder.
         let root = resolve_root();
         assert!(root.join("src").join("argus").is_dir(), "root={root:?}");
         assert!(root.join("data").exists() || root.join("pyproject.toml").exists());
+    }
+
+    #[test]
+    fn resolve_python_prefers_repo_venv() {
+        let root = resolve_root();
+        let python = resolve_python(&root);
+        if root.join(".venv").join("bin").join("python").is_file() {
+            assert!(python.contains(".venv"), "expected venv python, got {python}");
+        } else {
+            // without a venv, fall back to a bare interpreter
+            assert!(!python.is_empty());
+        }
+    }
+
+    #[test]
+    fn bridge_runs_banks_end_to_end() {
+        // Real spawn: the exact chain the GUI uses (python -m argus.gui_bridge).
+        // Skips gracefully when the repository venv is not provisioned.
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let out = bridge.run(&["banks".into()]).expect("bridge must run");
+        let value: serde_json::Value = serde_json::from_str(&out).expect("bridge must emit JSON");
+        let banks = value.get("banks").and_then(|b| b.as_array()).expect("must contain banks");
+        assert!(banks.len() >= 10);
+        assert!(banks.iter().any(|b| b.get("id").and_then(|i| i.as_str()) == Some("rbnz")));
     }
 
     #[test]

@@ -51,9 +51,11 @@ ENV_DISABLED = "ARGUS_BANKS_DISABLED"
 ENV_ENABLED = "ARGUS_BANKS_ENABLED"
 
 # Persistent user overrides file. Defaults to the Argus data directory
-# (consistent with ``collector.DEFAULT_STORE_PATH = "data/argus.db"``), so it
-# lives next to the runtime data and is never committed (``data/`` is ignored).
-DEFAULT_BANKS_CONFIG = "data/argus_banks.json"
+# (consistent with ``collector.DEFAULT_STORE_PATH = "data/argus.db"``), resolved
+# from the package location — NOT from the process working directory — so the
+# file is the same whether the GUI is launched from a shell or from Finder, and
+# can be redirected with ARGUS_BANKS_CONFIG.
+DEFAULT_BANKS_CONFIG = str(Path(__file__).resolve().parents[2] / "data" / "argus_banks.json")
 ENV_CONFIG = "ARGUS_BANKS_CONFIG"
 
 # (path, mtime_ns, overrides) cache so the hot toggle path does not re-read the

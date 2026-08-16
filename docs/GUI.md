@@ -56,25 +56,50 @@ same `is_bank_enabled` / `enabled_banks`, so a toggle made in the GUI is
 immediately visible to the CLI and vice-versa. RBNZ can be re-enabled from the
 GUI without any code change.
 
-## Accessing `data/`
+## Accessing `data/` and the Python runtime
 
-`data-root` resolves the Core's `DEFAULT_STORE_PATH` (`data/argus.db`) parent.
-The Rust shell locates the repository root (the directory containing
-`src/argus`) by walking upward from its working directory, or via `ARGUS_ROOT`.
-No machine-specific absolute path is hardcoded.
+The bridge is spawned by Rust as:
 
-The Data view lists the `data/` contents (files and directories), supports
-navigation into directories and back to the parent, and surfaces access errors.
-It does **not** interpret the SQLite business content at this stage.
+```
+<python> -m argus.gui_bridge <command>
+```
+
+with `cwd` = the repository root, `PYTHONPATH` = `<root>/src`, and:
+
+- **repository root**: `ARGUS_ROOT`, else a generic upward walk from the running
+  executable (the `.app` lives inside the repository build tree) looking for the
+  `src/argus` marker — the working directory (which macOS sets to `/` for GUI
+  apps launched from Finder) is never used.
+- **Python interpreter**: `ARGUS_PYTHON`, else `<root>/.venv/bin/python`
+  (or `.venv/bin/python3`), else `python3`.
+
+`data-root` and the persistent bank-override file (`data/argus_banks.json`) are
+resolved **from the package location, not from the process working directory**,
+so the GUI finds the same `data/` and configuration whether it was launched from
+a shell or from Finder.
+
+## Prerequisites (Python)
+
+The GUI talks to the Python Core, so a working Argus Python environment must
+exist — the GUI does **not** bundle Python yet:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
+```
+
+This creates the repository `.venv` (gitignored) that the app resolves and uses
+for every bridge call. Without it the bridge falls back to `python3`, which may
+lack the Argus dependencies.
 
 ## Environment variables
 
 - `ARGUS_PYTHON` — Python interpreter used to run the bridge (default: the
   repository's `.venv/bin/python`, else `python3`).
 - `ARGUS_ROOT` — repository root (default: auto-detected by walking upward from
-  the working directory).
+  the running executable looking for `src/argus`).
 - `ARGUS_BANKS_CONFIG` — persistent bank-override file path (Core default:
-  `data/argus_banks.json`).
+  `<root>/data/argus_banks.json`).
 
 ## Install GUI dependencies
 
@@ -85,7 +110,7 @@ npm install
 
 ## Run in development
 
-From the repository root (with the Python venv active or `.venv/` present):
+From the repository root (with `.venv/` present):
 
 ```bash
 cd desktop
@@ -102,7 +127,18 @@ cd desktop
 npm run tauri build
 ```
 
-Produces the platform bundle (e.g. `src-tauri/target/release/bundle/`).
+Produces the platform bundle (e.g. `src-tauri/target/release/bundle/macos/Argus.app`
+and the `.dmg`). The generated `.app` finds the repository via its own location
+and works when launched from Finder.
+
+## Limitations (distribution)
+
+- The V1 `.app` requires the Argus repository on the same machine (it resolves
+  the repo root from its own build-tree location and uses the repository
+  `.venv`). A fully self-contained, distributable bundle (embedded Python
+  runtime + Argus package) is future work; until then, launching the `.app`
+  from Finder requires the repo + `.venv` to be present, or `ARGUS_ROOT` /
+  `ARGUS_PYTHON` to point to them.
 
 ## Verify
 

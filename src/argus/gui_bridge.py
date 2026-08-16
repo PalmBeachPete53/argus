@@ -23,6 +23,12 @@ from pathlib import Path
 
 USAGE = "usage: python -m argus.gui_bridge banks|banks-set <id> on|off|data-root"
 
+# Repository root, resolved from this module's own location
+# (`<root>/src/argus/gui_bridge.py`), never from the process working directory —
+# so the bridge behaves identically whether spawned from a shell, `tauri dev` or
+# a Finder-launched `.app`.
+ROOT = Path(__file__).resolve().parents[2]
+
 
 def _bank_list() -> list[dict]:
     from .config import is_bank_enabled
@@ -62,10 +68,8 @@ def _cmd_banks_set(argv: list[str]) -> int:
 
 
 def _cmd_data_root() -> int:
-    from .collector import DEFAULT_STORE_PATH
-
-    root = str(Path(DEFAULT_STORE_PATH).resolve().parent)
-    print(json.dumps({"root": root}, indent=2))
+    # Explicit, working-directory-independent resolution of the Argus data dir.
+    print(json.dumps({"root": str(ROOT / "data")}, indent=2))
     return 0
 
 
