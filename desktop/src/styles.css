@@ -48,13 +48,23 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  /* Left padding clears the native macOS traffic lights (Overlay title bar). */
+  padding: 0 16px 0 80px;
 }
 
 .header-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 20px;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+.header-logo-img {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
 }
 
 .header-settings {
