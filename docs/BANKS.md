@@ -55,7 +55,14 @@ RBNZ is simply a disabled bank.
 
 - `ARGUS_BANKS_DISABLED=fed,boe` — additionally disable banks.
 - `ARGUS_BANKS_ENABLED=fed,ecb,…,rbnz,…` — allow-list that re-enables banks
-  (including a default-OFF bank) without code changes.
+  (including a default-OFF bank) without code changes. When set it is the
+  complete allow-list and is authoritative: `ARGUS_BANKS_DISABLED` is ignored,
+  and a bank present in both lists is enabled.
+
+Explicit bank selection (e.g. `--bank`) does **not** bypass the toggle: a
+disabled bank requested directly is still excluded from every integrated
+execution path (discovery, fetch, normalize, classify, extract). The only way
+to run it is to re-enable it first via `ARGUS_BANKS_ENABLED`.
 
 ## Re-enabling a bank
 

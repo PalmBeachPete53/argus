@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .collector import CentralBankCollector
-from .config import enabled_banks, is_bank_enabled
+from .config import enabled_banks, filter_enabled, is_bank_enabled
 from .registry import SourceRegistry
 
 
@@ -276,7 +276,7 @@ def main(argv=None) -> int:
               f"{raw_entries} entrie(s) under {args.raw_root}")
         return 0
 
-    banks = tuple(args.bank) if args.bank else enabled_banks()
+    banks = filter_enabled(tuple(args.bank)) if args.bank else enabled_banks()
     pub_ids = tuple(args.publication) if args.publication else None
 
     if args.normalize or args.classify or args.report:
@@ -296,7 +296,7 @@ def main(argv=None) -> int:
         raw_root=args.raw_root,
         search_provider=_search_provider_from_env(),
     )
-    banks = tuple(args.bank) if args.bank else None
+    banks = filter_enabled(tuple(args.bank)) if args.bank else None
     source_ids = tuple(args.source) if args.source else None
 
     date_start, date_end = parse_date_bounds(args.year, args.month)

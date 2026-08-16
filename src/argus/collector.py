@@ -124,8 +124,11 @@ class CentralBankCollector:
         run_id: str | None = None,
     ) -> list[FetchResult]:
         run_id = run_id or self.store.run_stamp()
+        effective = self._effective_banks(banks)
+        if not effective:
+            return []  # selection filtered to zero enabled banks
         publications = self.store.list_publications(
-            bank=self._effective_banks(banks),
+            bank=effective,
             statuses=statuses, date_start=date_start, date_end=date_end,
         )
         results: list[FetchResult] = []
@@ -148,14 +151,21 @@ class CentralBankCollector:
                 self.errors.append(error)
         return results
 
-    def _effective_banks(self, banks) -> tuple[str, ...] | None:
-        """The banks to operate on: the caller's explicit selection, or — when
-        not restricted — the active (enabled) banks of the registry, so disabled
-        banks are never scheduled for operational work."""
+    def _effective_banks(self, banks) -> tuple[str, ...]:
+        """The banks to operate on, filtered by the toggle.
+
+        A caller's explicit selection is still filtered to the currently enabled
+        banks, so a disabled bank is never scheduled for operational work (the
+        only way to run it is to re-enable it first, e.g. via
+        ``ARGUS_BANKS_ENABLED``). When no selection is given, the registry's
+        active (enabled) banks are used. May return an empty tuple — the caller
+        must treat an empty result as "nothing to do" (never as "no filter")."""
         if banks is not None:
-            return tuple(banks)
+            from .config import filter_enabled
+
+            return filter_enabled(banks)
         active = [b.id for b in self.registry.active_banks]
-        return tuple(active) if active else None
+        return tuple(active)
 
     def fetch(
         self,

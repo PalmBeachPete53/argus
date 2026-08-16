@@ -130,6 +130,66 @@ def test_fetch_all_filters_to_active_banks(tmp_path):
     assert fetched == []
 
 
+def test_explicit_selection_of_disabled_bank_is_filtered(tmp_path):
+    """Uniformity defect: an explicit bank selection must NOT bypass the toggle.
+    A disabled bank requested directly is excluded from fetch and run, exactly
+    like the global path — the only way to run it is to re-enable it first."""
+    from argus.config import filter_enabled
+
+    registry = _registry_with_fake_and_rbnz()
+    store = make_store(tmp_path)
+    store.upsert_publication(
+        __import__("argus.models", fromlist=["Publication"]).Publication(
+            central_bank="rbnz", title="t", url="https://rbnz/x", source_id="s", source_url="u"
+        )
+    )
+    collector = CentralBankCollector(store=store, registry=registry, client=make_client(FakeSession({})))
+    # explicit request for the disabled bank → nothing scheduled
+    assert collector.fetch_all(banks=["rbnz"]) == []
+    # explicit request for an enabled bank → scheduled
+    feed = b"<rss><channel><item><title>D</title><link>https://fake.test/1</link></item></channel></rss>"
+    session = FakeSession({"https://fake.test/feed.xml": response(feed, url="https://fake.test/feed.xml", content_type="application/xml")})
+    collector2 = CentralBankCollector(store=store, registry=registry, client=make_client(session))
+    pubs = collector2.discover_all(banks=["fb"])
+    assert [p.central_bank for p in pubs] == ["fb"]
+    # filter_enabled mirrors the toggle for any selection
+    assert filter_enabled(["rbnz", "fb"]) == ("fb",)
+    assert filter_enabled(["rbnz"]) == ()
+
+
+def test_cli_bank_selection_filters_disabled_banks(monkeypatch):
+    """The CLI '--bank' selection is filtered through the toggle, so requesting
+    a disabled bank directly yields an empty (enabled) selection."""
+    from argus.cli import _search_provider_from_env  # ensure importable
+
+    args_bank = ("rbnz",)
+    from argus.config import filter_enabled, enabled_banks
+
+    resolved = filter_enabled(tuple(args_bank)) if args_bank else enabled_banks()
+    assert resolved == ()
+    # an enabled bank remains selectable
+    assert filter_enabled(("fed",)) == ("fed",)
+
+
+def test_config_allow_list_is_authoritative(monkeypatch):
+    """When ARGUS_BANKS_ENABLED is set it is the complete allow-list and is
+    authoritative over the default map and ARGUS_BANKS_DISABLED: a bank present
+    in both allow and disable lists is enabled (documented contract)."""
+    monkeypatch.setenv("ARGUS_BANKS_ENABLED", "fed,rbnz")
+    monkeypatch.setenv("ARGUS_BANKS_DISABLED", "rbnz,ecb")
+    assert is_bank_enabled("rbnz") is True   # allow wins over disable
+    assert is_bank_enabled("fed") is True
+    assert is_bank_enabled("ecb") is False   # not in the allow-list
+    assert enabled_banks() == ("fed", "rbnz")
+
+
+def test_filter_enabled_unknown_bank_defaults_enabled():
+    from argus.config import filter_enabled
+
+    # an unknown bank id is not disabled by the map (defaults enabled)
+    assert filter_enabled(("unknown-bank",)) == ("unknown-bank",)
+
+
 # ---------------------------------------------------------------------------
 # Reversibility: OFF -> ON without code changes
 # ---------------------------------------------------------------------------

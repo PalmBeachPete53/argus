@@ -13,6 +13,19 @@ Override hooks (environment):
 - ``ARGUS_BANKS_DISABLED``: comma-separated bank ids to additionally disable.
 - ``ARGUS_BANKS_ENABLED``: comma-separated allow-list that re-enables banks
   regardless of the default map (e.g. to temporarily turn RBNZ back on).
+
+Interaction rules (deterministic):
+- When ``ARGUS_BANKS_ENABLED`` is set, it is the *complete* allow-list and is
+  authoritative: ``ARGUS_BANKS_DISABLED`` is ignored, and a bank present in
+  both lists is enabled.
+- When only ``ARGUS_BANKS_DISABLED`` is set, it removes banks from the default
+  ``BANKS_ENABLED`` state.
+- An unknown bank id defaults to enabled (not registered banks are not part of
+  ``enabled_banks()``).
+- Every integrated execution path filters its bank selection through
+  ``is_bank_enabled`` (see ``filter_enabled``), so an OFF bank is never
+  scheduled — explicit selection alone cannot re-enable it; only
+  ``ARGUS_BANKS_ENABLED`` can.
 """
 
 from __future__ import annotations
@@ -76,3 +89,13 @@ def enabled_banks() -> tuple[str, ...]:
         bank_id for bank_id, enabled in BANKS_ENABLED.items()
         if enabled and bank_id not in disabled
     )
+
+
+def filter_enabled(banks) -> tuple[str, ...]:
+    """Return the subset of ``banks`` that is currently enabled.
+
+    Used so that every integrated execution path applies the same toggle filter,
+    whether the banks were selected globally or explicitly: a disabled bank is
+    never scheduled for operational work unless it was first re-enabled (e.g.
+    via ``ARGUS_BANKS_ENABLED``)."""
+    return tuple(b for b in (banks or ()) if is_bank_enabled(b))
