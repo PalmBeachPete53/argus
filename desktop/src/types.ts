@@ -25,7 +25,7 @@ export interface DirListing {
 export type SectionId = "data";
 
 /** Sub-views of the DATA section. */
-export type DataView = "overview" | "sources" | "discovery" | "files";
+export type DataView = "sources" | "discovery" | "files";
 
 export interface SourceInfo {
   id: string;
@@ -93,13 +93,4 @@ export interface DiscoveryResults {
 export interface ClearedCache {
   runs_preserved: number;
   candidates_cleared: number;
-}
-
-/** Read-only Core/Store aggregates shown on the Overview. */
-export interface DataStats {
-  publications: number;
-  documents: number;
-  normalized_documents: number;
-  facts: number;
-  last_discovery: DiscoveryRun | null;
 }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { DiscoveryCandidate } from "../types";
 import type { DiscoveryState } from "./MainContent";
 import { formatDate, formatDateTime } from "../lib/format";
+import { rangeStatus, REQUIRED_RANGE_HINT, INVALID_RANGE_HINT } from "../lib/discovery";
 import ConfirmDialog from "./ConfirmDialog";
 
 interface DiscoveryProps {
@@ -113,83 +114,43 @@ function ConfirmButton({
   );
 }
 
-function RangeControl({
-  discovery,
-}: {
-  discovery: DiscoveryState;
-}) {
-  const { status } = discovery;
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const active = status.status === "running" || status.status === "paused";
-
-  const runNow = () => {
-    const end = dateTo ? exclusiveEnd(dateTo) : undefined;
-    void discovery.launch(dateFrom || undefined, end);
-  };
-
-  return (
-    <div className="discovery-empty">
-      <p className="data-browser-muted">
-        Discover publication candidates from configured sources, optionally within a
-        publication-date window.
-      </p>
-      {!active && (
-        <div className="discovery-controls">
-          <label className="discovery-range">
-            <span>From</span>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-            />
-          </label>
-          <label className="discovery-range">
-            <span>To</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-            />
-          </label>
-          <button type="button" className="primary-button" onClick={() => void runNow()}>
-            Run Discovery
-          </button>
-        </div>
-      )}
-      {active && (
-        <div className="discovery-controls">
-          <button type="button" className="primary-button" disabled>
-            {status.status === "paused" ? "Paused" : "Running…"}
-          </button>
-        </div>
-      )}
-      {!active && (
-        <button
-          type="button"
-          className="secondary-button link"
-          onClick={() => void discovery.clearCache()}
-        >
-          Clear discovery cache
-        </button>
-      )}
-    </div>
-  );
-}
-
+/**
+ * The single, operational Discovery screen. Everything shown comes from the
+ * Core store through `useDiscovery` (the bridge is the source of truth — no
+ * parallel React copy). Launching forwards the selected date window to the
+ * Core; Run/Pause/Resume/Stop signal the campaign's recorded run_id/PID via
+ * `discovery_control`; Clear Cache is only offered once a campaign has ended
+ * (completed/stopped/failed) and goes through the bridge, which refuses it
+ * while a campaign is active.
+ */
 export default function Discovery({ discovery }: DiscoveryProps) {
   const { status, candidates, error, openUrl } = discovery;
   const [selected, setSelected] = useState<DiscoveryCandidate | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
   const running = status.status === "running";
   const paused = status.status === "paused";
   const active = running || paused;
+  const hasRun = status.run_id !== null;
+
   const range =
     status.date_start || status.date_end
       ? [status.date_start && formatDate(status.date_start), status.date_end && formatDate(status.date_end)]
           .filter(Boolean)
           .join(" → ")
-      : null;
+      : "Unbounded";
+
+  const windowStatus = rangeStatus(dateFrom, dateTo);
+  const runDisabled = active || windowStatus !== "valid";
+
+  const handleRun = () => {
+    // Both dates are guaranteed non-empty here (Run is disabled otherwise).
+    void discovery.launch(dateFrom, exclusiveEnd(dateTo));
+  };
+
+  const showResults = !active && (status.status === "completed" || status.status === "stopped");
 
   return (
     <div className="discovery-view">
@@ -200,62 +161,139 @@ export default function Discovery({ discovery }: DiscoveryProps) {
 
       {error && <div className="data-browser-error">{error}</div>}
 
-      {status.status === "idle" && <RangeControl discovery={discovery} />}
+      <section className="discovery-card" aria-label="Discovery campaign controls">
+        <div className="discovery-card-range">
+          <label className="discovery-range">
+            <span>Start date</span>
+            <input
+              type="date"
+              value={dateFrom}
+              disabled={active}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+          </label>
+          <label className="discovery-range">
+            <span>End date</span>
+            <input
+              type="date"
+              value={dateTo}
+              disabled={active}
+              onChange={(e) => setDateTo(e.target.value)}
+            />
+          </label>
+          <p
+            className={`discovery-range-hint${windowStatus === "invalid" ? " discovery-range-hint-error" : ""}`}
+          >
+            {windowStatus === "invalid"
+              ? INVALID_RANGE_HINT
+              : windowStatus === "missing"
+                ? REQUIRED_RANGE_HINT
+                : "Publication-date window (start-inclusive, end-exclusive)."}
+          </p>
+        </div>
+
+        <div className="discovery-controls discovery-controls-right">
+          <button
+            type="button"
+            className="primary-button"
+            disabled={runDisabled}
+            onClick={() => void handleRun()}
+          >
+            Run Discovery
+          </button>
+          {active &&
+            (paused ? (
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void discovery.resume()}
+              >
+                Resume
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void discovery.pause()}
+              >
+                Pause
+              </button>
+            ))}
+          {active && (
+            <ConfirmButton label="Stop" confirmLabel="Confirm stop?" onClick={() => void discovery.stop()} />
+          )}
+        </div>
+      </section>
+
+      <section className="discovery-card" aria-label="Discovery status">
+        <dl className="discovery-summary">
+          <div className="discovery-summary-row">
+            <dt>Status</dt>
+            <dd>{hasRun ? status.status : "No run yet"}</dd>
+          </div>
+          <div className="discovery-summary-row">
+            <dt>Run ID</dt>
+            <dd>{status.run_id ?? "—"}</dd>
+          </div>
+          <div className="discovery-summary-row">
+            <dt>Last run</dt>
+            <dd>{formatDateTime(status.started_at)}</dd>
+          </div>
+          {status.finished_at && (
+            <div className="discovery-summary-row">
+              <dt>Finished</dt>
+              <dd>{formatDateTime(status.finished_at)}</dd>
+            </div>
+          )}
+          <div className="discovery-summary-row">
+            <dt>Date range</dt>
+            <dd>{hasRun ? range : "—"}</dd>
+          </div>
+        </dl>
+        <div className="discovery-stats">
+          <div className="stat-card">
+            <span className="stat-value">{status.candidates.toLocaleString()}</span>
+            <span className="stat-label">Candidates</span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-value">{status.new.toLocaleString()}</span>
+            <span className="stat-label">New</span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-value">{status.known.toLocaleString()}</span>
+            <span className="stat-label">Known</span>
+          </div>
+        </div>
+      </section>
 
       {active && (
         <div className="discovery-empty">
           <p className={paused ? "discovery-paused-text" : "discovery-running-text"}>
             {paused ? "Discovery paused" : "Discovery running…"}
-            {range && ` · range ${range}`}
+            {hasRun && ` · range ${range}`}
           </p>
-          <div className="discovery-controls">
-            {paused ? (
-              <button type="button" className="primary-button" onClick={() => void discovery.resume()}>
-                Resume
-              </button>
-            ) : (
-              <button type="button" className="primary-button" onClick={() => void discovery.pause()}>
-                Pause
-              </button>
-            )}
-            <ConfirmButton label="Stop" confirmLabel="Confirm stop?" onClick={() => void discovery.stop()} />
-          </div>
         </div>
       )}
 
       {status.status === "failed" && (
         <div className="discovery-empty">
-          <p className="data-browser-muted">
-            {status.error || "Discovery failed."}
-          </p>
-          <button type="button" className="primary-button" onClick={() => void discovery.launch()}>
-            Retry Discovery
-          </button>
+          <p className="data-browser-muted">{status.error || "Discovery failed."}</p>
         </div>
       )}
-
-      {status.status === "stopped" && (
+      {status.status === "stopped" && !active && (
         <div className="discovery-empty">
-          <p className="data-browser-muted">
-            {status.error || "Discovery was stopped."}
-          </p>
-          <button type="button" className="primary-button" onClick={() => void discovery.launch()}>
-            Run Discovery again
-          </button>
+          <p className="data-browser-muted">{status.error || "Discovery was stopped."}</p>
         </div>
       )}
 
-      {(status.status === "completed" || status.status === "stopped") && (
+      {showResults && (
         <div className="discovery-results">
           {status.status === "completed" && (
             <p className="discovery-count">
               Discovery Candidates · {status.candidates.toLocaleString()} candidates discovered
-              {range && (
-                <>
-                  {" "}
-                  · {status.new} new / {status.known} known · range {range}
-                </>
-              )}
+              {status.date_start || status.date_end ? ` · range ${range}` : ""}
+              {" · "}
+              {status.new} new / {status.known} known
             </p>
           )}
           {candidates.length > 0 ? (
@@ -266,6 +304,7 @@ export default function Discovery({ discovery }: DiscoveryProps) {
                   <th>Title</th>
                   <th>Method</th>
                   <th>Status</th>
+                  <th>URL</th>
                 </tr>
               </thead>
               <tbody>
@@ -287,6 +326,7 @@ export default function Discovery({ discovery }: DiscoveryProps) {
                         {candidate.is_new ? "New" : "Known"}
                       </span>
                     </td>
+                    <td className="candidate-url">{candidate.url || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -294,16 +334,20 @@ export default function Discovery({ discovery }: DiscoveryProps) {
           ) : (
             <p className="data-browser-muted">No candidates were discovered.</p>
           )}
-          {selected && (
-            <CandidateDetail candidate={selected} onOpen={(url) => void openUrl(url)} />
-          )}
-          <div className="discovery-controls">
-            <button type="button" className="secondary-button" onClick={() => setConfirmClear(true)}>
-              Clear cache
-            </button>
-          </div>
+          {selected && <CandidateDetail candidate={selected} onOpen={(url) => void openUrl(url)} />}
         </div>
       )}
+
+      <div className="discovery-clear">
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={active || !hasRun}
+          onClick={() => setConfirmClear(true)}
+        >
+          Clear Discovery Cache
+        </button>
+      </div>
 
       <ConfirmDialog
         open={confirmClear}

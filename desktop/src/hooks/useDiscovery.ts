@@ -21,21 +21,24 @@ const POLL_MS = 1200;
 
 // States in which the campaign subprocess is still alive and worth polling.
 const ACTIVE: ReadonlySet<string> = new Set(["running", "paused"]);
+const TERMINAL: ReadonlySet<string> = new Set(["completed", "stopped", "failed"]);
 
 /**
- * Discovery campaign state machine shared by the Overview, the Discovery view
- * and the footer.
+ * Discovery campaign state machine shared by the Discovery view and the
+ * footer.
  *
  * Launching runs the campaign in a detached backend subprocess (Rust spawns
  * `python -m argus.gui_bridge discovery-run`); the interface never blocks. The
  * Core records the lifecycle in the store, so this hook only observes it:
  * - mount / after launch → poll `discovery_status` until it leaves an active
  *   state (a *paused* campaign is still alive, so polling keeps going);
- * - on `completed` → fetch `discovery_results` once;
+ * - on a terminal state → fetch `discovery_results` once, so the candidate
+ *   list always mirrors what the backend actually holds (no stale React copy);
  * - `failed` / `stopped` → surface the Core-provided state.
- * The real lifecycle controls (pause / resume / stop) signal the campaign's
- * recorded PID through `discovery_control`; clear-cache drops only the Core's
- * discovery report tables.
+ * The real lifecycle controls (pause / resume / stop) first re-read the
+ * authoritative status, then signal the campaign's recorded PID through
+ * `discovery_control` targeted at that run_id; clear-cache drops only the
+ * Core's discovery report tables and re-reads the state afterwards.
  * No progress percentage is invented — only the Core's own state is shown.
  */
 export function useDiscovery() {
@@ -50,7 +53,9 @@ export function useDiscovery() {
   const fetchResults = useCallback(async (runId: string | null) => {
     if (!runId) return;
     try {
-      const results = await invoke<import("../types").DiscoveryResults>("get_discovery_results");
+      const results = await invoke<import("../types").DiscoveryResults>("get_discovery_results", {
+        runId,
+      });
       setCandidates(results.candidates ?? []);
     } catch (err) {
       setError(String(err));
@@ -62,7 +67,7 @@ export function useDiscovery() {
       const run = await invoke<DiscoveryRun>("get_discovery_status");
       setStatus(run);
       statusRef.current = run;
-      if (run.status === "completed") {
+      if (TERMINAL.has(run.status)) {
         await fetchResults(run.run_id);
       }
       return run.status;
@@ -122,8 +127,15 @@ export function useDiscovery() {
   const control = useCallback(
     async (action: "pause" | "resume" | "stop") => {
       setError(null);
-      // Target the explicit active campaign (its recorded PID) — never an
-      // implicit "latest" that could be a different run.
+      // Re-read the authoritative lifecycle first so the command targets the
+      // *current* campaign's run_id (never an implicit "latest" or a stale
+      // optimistic copy held by React).
+      try {
+        await check();
+      } catch {
+        // check() never throws (it surfaces errors through `error`), but keep
+        // control resilient if the backend is temporarily unreachable.
+      }
       const runId = statusRef.current?.run_id ?? null;
       try {
         const run = await invoke<DiscoveryRun>("discovery_control", {
@@ -132,16 +144,13 @@ export function useDiscovery() {
         });
         setStatus(run);
         statusRef.current = run;
-        if (action === "stop") {
-          setCandidates([]);
-        }
       } catch (err) {
         setError(String(err));
         return false;
       }
       return true;
     },
-    [],
+    [check],
   );
 
   const pause = useCallback(() => control("pause"), [control]);

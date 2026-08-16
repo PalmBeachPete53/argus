@@ -16,9 +16,10 @@ Commands (``python -m argus.gui_bridge <command>``):
 - ``sources``        → JSON view of the real ``SourceRegistry`` (read-only)
 - ``discovery-run``  → run a discovery campaign over the enabled banks (long;
   designed to be spawned detached by the Rust shell and observed via
-  ``discovery-status`` / ``discovery-results``). Optional ``--start-date`` /
-  ``--end-date`` limit the campaign to a publication-date window, applied by
-  the Core (start-inclusive, end-exclusive).
+  ``discovery-status`` / ``discovery-results``). ``--start-date`` /
+  ``--end-date`` are **required** and bound the campaign to a
+  publication-date window, applied by the Core (start-inclusive,
+  end-exclusive; ``start_date <= end_date``).
 - ``discovery-control <pause|resume|stop>`` → the real lifecycle controls:
   the campaign subprocess is frozen (SIGSTOP), resumed (SIGCONT) or asked to
   stop (SIGTERM, the campaign records itself as ``stopped``). The PID is read
@@ -43,6 +44,8 @@ import os
 import signal
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -59,7 +62,7 @@ USAGE = (
     "usage: python -m argus.gui_bridge "
     "banks|banks-set <id> on|off|data-root|list-dir <relative-path>|"
     "open-file <relative-path>|sources|"
-    "discovery-run [--bank <id>]... [--start-date YYYY-MM-DD|--end-date YYYY-MM-DD]|"
+    "discovery-run [--bank <id>]... --start-date YYYY-MM-DD --end-date YYYY-MM-DD|"
     "discovery-control <pause|resume|stop> [<run-id>]|discovery-clear|"
     "discovery-status|discovery-results [<run-id>]|stats|open-url <url>"
 )
@@ -349,6 +352,101 @@ def _process_alive(pid: int) -> bool:
     return bool(state) and not state.startswith("Z")
 
 
+def _process_command_line(pid: int) -> str:
+    """The full command line of ``pid`` (``ps -o command=``), or ``""``."""
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "command=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip()
+
+
+def _process_identity(pid: int) -> str:
+    """Classify the recorded PID for signalling decisions.
+
+    - ``"missing"``   → no runnable process exists for that PID;
+    - ``"discovery"`` → a live process whose command line is recognizably an
+      Argus discovery campaign (``argus.gui_bridge discovery-run``);
+    - ``"foreign"``   → a *live* process that is not the recorded campaign —
+      typically a recycled PID. It is never signalled.
+    """
+    if not _process_alive(pid):
+        return "missing"
+    cmdline = _process_command_line(pid)
+    if "argus.gui_bridge" in cmdline and "discovery-run" in cmdline:
+        return "discovery"
+    return "foreign"
+
+
+def _process_group_id(pid: int) -> int | None:
+    """The process-group id of ``pid`` (``ps -o pgid=``), or ``None``."""
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "pgid=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = out.stdout.strip()
+    if not value.isdigit():
+        return None
+    return int(value)
+
+
+def _process_group_members(pgid: int) -> list[int]:
+    """PIDs of every process currently in the process group ``pgid``.
+
+    A GUI-launched campaign is its own group leader (pgid == pid), so this
+    covers any descendants it may have spawned. An empty list means the whole
+    group is gone.
+    """
+    try:
+        out = subprocess.run(
+            ["ps", "-g", str(pgid), "-o", "pid="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    pids: list[int] = []
+    for token in out.stdout.split():
+        if token.isdigit():
+            pids.append(int(token))
+    return pids
+
+
+def _process_group_alive(pgid: int) -> bool:
+    """True while any *runnable* member of the group remains.
+
+    Zombies are excluded: a killed-but-unreaped member still answers ``ps``,
+    but it does no work — counting it would make the shutdown wait forever on a
+    process that is already gone.
+    """
+    for member in _process_group_members(pgid):
+        state = _process_state(member)
+        if state and not state.startswith("Z"):
+            return True
+    return False
+
+
+# Set by the Rust shell when it spawns a campaign detached (as opposed to a
+# campaign driven in-process by the test harness or a terminal). Enables the
+# launcher-liveness guards: a detached campaign must never outlive Argus.
+_DETACHED_ENV = "ARGUS_DISCOVERY_DETACHED"
+
+
+def _launched_detached() -> bool:
+    return os.environ.get(_DETACHED_ENV) == "1"
+
+
 def _reconcile_run(store: Store, run: dict | None) -> dict | None:
     """Bring the Store in line with reality: a campaign whose recorded PID is
     no longer a live process can never be ``running``/``paused`` again.
@@ -372,20 +470,22 @@ def _reconcile_run(store: Store, run: dict | None) -> dict | None:
 
 
 def _terminate_campaign(store: Store, run: dict, pid: int) -> dict:
-    """Stop a campaign and guarantee the process is really gone before the
-    Store says ``stopped``.
+    """Stop a campaign and guarantee the whole process tree is really gone
+    before the Store says ``stopped``.
 
-    1. un-freeze a paused campaign so its signals can be delivered;
-    2. SIGTERM (graceful — the campaign records itself as ``stopped``);
-    3. wait for real termination (``STOP_GRACE_S``);
-    4. escalate to SIGKILL if it is still alive (``STOP_KILL_S``);
-    5. only when the process is verified dead, write ``stopped``.
+    1. un-freeze a paused campaign (SIGCONT) so its signals can be delivered;
+    2. verify the recorded PID is the real discovery campaign — a live but
+       foreign process (e.g. a recycled PID) is never signalled;
+    3. SIGTERM the campaign's process group (a detached campaign is its own
+       group leader, so any descendants are covered) — graceful stop;
+    4. wait for real termination of the whole group (``STOP_GRACE_S``);
+    5. escalate to SIGKILL on the same target if anything still lives
+       (``STOP_KILL_S``);
+    6. only when every member is verified dead, write ``stopped``.
 
     The Store is never edited to hide a still-living process: if the process
     cannot be killed, the error propagates and the campaign stays active.
     """
-    import time
-
     if run["status"] == "paused":
         try:
             os.kill(pid, signal.SIGCONT)
@@ -393,35 +493,97 @@ def _terminate_campaign(store: Store, run: dict, pid: int) -> dict:
             pass
         except OSError:
             pass
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
 
+    identity = _process_identity(pid)
+    if identity == "foreign":
+        # A live process that is not the recorded campaign: killing it could
+        # take down an unrelated process. Never signal it; the run is
+        # finalized as failed (the expected campaign is gone) and the stop is
+        # reported as an error.
+        store.finish_discovery_run(
+            run["run_id"],
+            status="failed",
+            error=f"recorded pid {pid} is no longer the discovery campaign; not terminating",
+        )
+        raise RuntimeError(
+            f"recorded pid {pid} is no longer the discovery campaign; not terminating"
+        )
+    if identity == "missing":
+        # Already gone (or never existed): there is nothing to signal.
+        current = store.get_discovery_run(run["run_id"])
+        if current and current["status"] in _ACTIVE_STATUSES:
+            store.finish_discovery_run(run["run_id"], status="stopped", error="stopped by user")
+        return store.get_discovery_run(run["run_id"])
+
+    pgid = _process_group_id(pid)
+    group_target = pgid if (pgid is not None and pgid == pid) else None
+    # A negative kill targets the whole process group (leader + descendants).
+    target = -group_target if group_target is not None else pid
+
+    def _tree_alive() -> bool:
+        if _process_alive(pid):
+            return True
+        if group_target is not None:
+            return _process_group_alive(group_target)
+        return False
+
+    def _signal(sig: int) -> None:
+        try:
+            os.kill(target, sig)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            pass
+
+    _signal(signal.SIGTERM)
     deadline = time.monotonic() + STOP_GRACE_S
     while time.monotonic() < deadline:
-        if not _process_alive(pid):
+        if not _tree_alive():
             break
         time.sleep(0.05)
 
-    if _process_alive(pid):
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+    if _tree_alive():
+        _signal(signal.SIGKILL)
         kill_deadline = time.monotonic() + STOP_KILL_S
         while time.monotonic() < kill_deadline:
-            if not _process_alive(pid):
+            if not _tree_alive():
                 break
             time.sleep(0.05)
 
-    if _process_alive(pid):
+    if _tree_alive():
         raise RuntimeError(f"could not terminate campaign process {pid}")
 
     current = store.get_discovery_run(run["run_id"])
     if current and current["status"] in _ACTIVE_STATUSES:
         store.finish_discovery_run(run["run_id"], status="stopped", error="stopped by user")
     return store.get_discovery_run(run["run_id"])
+
+
+def _start_parent_watchdog() -> None:
+    """Stop the campaign if its launching parent disappears.
+
+    A campaign launched *detached* by the desktop GUI must never outlive Argus.
+    If the parent (the Rust shell) dies for any reason — normal close, system
+    shutdown, even a force-quit that skips ``ExitRequested`` — the campaign is
+    reparented to the init process; the watchdog then asks the campaign to stop
+    itself (SIGTERM → the campaign records ``stopped``). Daemon thread, only
+    active while this process lives.
+    """
+    if not _launched_detached():
+        return
+
+    def _watch() -> None:
+        try:
+            while os.getppid() != 1:
+                time.sleep(0.5)
+        except Exception:
+            return
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            pass
+
+    threading.Thread(target=_watch, daemon=True, name="argus-parent-watchdog").start()
 
 
 def _run_discovery_campaign(
@@ -443,8 +605,24 @@ def _run_discovery_campaign(
     (start-inclusive, end-exclusive) and are handed to the Core, which is the
     single place a window is applied. The campaign process records its own PID
     with the run so the GUI's pause/resume/stop can signal it.
+
+    A campaign launched *detached* by the desktop GUI must never outlive Argus:
+    launcher-liveness guards run before recording (refuse to start an orphan),
+    right after recording, and for the whole run via a parent watchdog (a
+    launcher that dies — even by force-quit — asks the campaign to stop itself).
     """
     signal.signal(signal.SIGTERM, _raise_discovery_stopped)
+    detached = _launched_detached()
+    if detached and os.getppid() == 1:
+        # The desktop app that spawned this campaign is already gone (reparented
+        # to the init process). Never become an orphan doing work after Argus
+        # closed — refuse to start.
+        return {
+            "run_id": None,
+            "status": "failed",
+            "error": "launcher exited during campaign startup",
+            "candidates": 0,
+        }
     store = Store(store_path)
     registry = SourceRegistry()
     run_id = store.run_stamp()
@@ -456,6 +634,21 @@ def _run_discovery_campaign(
         date_start=iso(date_start) if date_start else None,
         date_end=iso(date_end) if date_end else None,
     )
+    if detached and os.getppid() == 1:
+        # The launcher vanished in the instant between the first check and the
+        # run being recorded — close the window by finalizing immediately.
+        store.finish_discovery_run(
+            run_id,
+            status="stopped",
+            error="launcher exited during campaign startup",
+        )
+        return {
+            "run_id": run_id,
+            "status": "stopped",
+            "error": "launcher exited during campaign startup",
+            "candidates": 0,
+        }
+    _start_parent_watchdog()
     known = {p.id for p in store.list_publications()}
     try:
         config = HttpConfig(respect_robots=True, min_interval=1.0)
@@ -509,11 +702,12 @@ def _cmd_discovery_run(argv: list[str]) -> int:
     Optional ``--bank <id>`` (repeatable) selects a subset; without one, the
     run uses every currently enabled bank. Either way the selection is the
     Core's toggle-respecting enabled set — never a GUI-side bank list.
-    Optional ``--start-date`` / ``--end-date`` (ISO dates) bound the campaign
-    to a publication-date window, applied by the Core and persisted with the
-    run. Exactly one campaign may be active; the Store claims the run in a
-    locked transaction, so a concurrent or second launch (even racing) is
-    refused here too.
+    ``--start-date`` / ``--end-date`` (ISO dates) are **required**: a campaign
+    may only be launched with a complete, ordered window
+    (``start_date <= end_date``). The window is applied by the Core and
+    persisted with the run. Exactly one campaign may be active; the Store
+    claims the run in a locked transaction, so a concurrent or second launch
+    (even racing) is refused here too.
     """
     banks = enabled_banks()
     selected: list[str] = []
@@ -525,25 +719,42 @@ def _cmd_discovery_run(argv: list[str]) -> int:
             selected.append(argv[index + 1])
             index += 2
         elif argv[index] == "--start-date" and index + 1 < len(argv):
-            try:
-                date_start = _parse_date_arg(argv[index + 1], "start-date")
-            except ValueError as exc:
-                print(str(exc), file=sys.stderr)
-                return 2
+            value = argv[index + 1].strip()
+            if value:
+                try:
+                    date_start = _parse_date_arg(value, "start-date")
+                except ValueError as exc:
+                    print(str(exc), file=sys.stderr)
+                    return 2
             index += 2
         elif argv[index] == "--end-date" and index + 1 < len(argv):
-            try:
-                date_end = _parse_date_arg(argv[index + 1], "end-date")
-            except ValueError as exc:
-                print(str(exc), file=sys.stderr)
-                return 2
+            value = argv[index + 1].strip()
+            if value:
+                try:
+                    date_end = _parse_date_arg(value, "end-date")
+                except ValueError as exc:
+                    print(str(exc), file=sys.stderr)
+                    return 2
             index += 2
         else:
             print(f"unexpected argument: {argv[index]}", file=sys.stderr)
             return 2
-    if date_start is not None and date_end is not None and date_start > date_end:
-        print("start-date must be <= end-date", file=sys.stderr)
-        return 2
+    if date_start is None or date_end is None:
+        print(
+            json.dumps(
+                {"error": "Discovery requires both start_date and end_date."},
+                indent=2,
+            )
+        )
+        return 1
+    if date_start > date_end:
+        print(
+            json.dumps(
+                {"error": "start_date must be <= end_date"},
+                indent=2,
+            )
+        )
+        return 1
     if selected:
         from .config import filter_enabled
 
@@ -615,9 +826,22 @@ def _cmd_discovery_control(argv: list[str]) -> int:
         if action == "stop":
             run = _terminate_campaign(store, run, pid)
         else:
-            if not _process_alive(pid):
+            identity = _process_identity(pid)
+            if identity == "missing":
                 _reconcile_run(store, run)
                 print(json.dumps({"error": f"campaign process {pid} is no longer running"}, indent=2))
+                return 1
+            if identity == "foreign":
+                store.finish_discovery_run(
+                    run["run_id"],
+                    status="failed",
+                    error=f"recorded pid {pid} is no longer the discovery campaign",
+                )
+                print(
+                    json.dumps(
+                        {"error": f"recorded pid {pid} is no longer the discovery campaign; not {action}ing"}
+                    )
+                )
                 return 1
             os.kill(pid, signal.SIGSTOP if action == "pause" else signal.SIGCONT)
             # The signal is only taken as applied once the process is still

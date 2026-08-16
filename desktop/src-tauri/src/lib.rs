@@ -94,19 +94,31 @@ impl Bridge {
     }
 
     /// Spawn a `python -m argus.gui_bridge` command detached, with output sent
-    /// to the void. Used for long-running or fire-and-forget work: discovery
-    /// campaigns and exit-time cleanup of an active campaign.
+    /// to the void. Used for the discovery campaign subprocess.
+    ///
+    /// The campaign is launched as the leader of its own process group
+    /// (``process_group(0)``, pgid == pid) so that on shutdown the bridge can
+    /// terminate the *whole* tree (the campaign plus any descendants it spawned)
+    /// via a negative-pid kill — never an unrelated process. The
+    /// ``ARGUS_DISCOVERY_DETACHED`` marker lets the campaign arm its
+    /// launcher-liveness watchdog (a campaign must never outlive Argus).
     fn spawn_detached(&self, args: &[String]) -> Result<(), String> {
-        Command::new(&self.python)
-            .arg("-m")
+        let mut cmd = Command::new(&self.python);
+        cmd.arg("-m")
             .arg("argus.gui_bridge")
             .args(args)
             .current_dir(&self.root)
             .env("PYTHONPATH", self.root.join("src"))
+            .env("ARGUS_DISCOVERY_DETACHED", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+            .stderr(Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+        cmd.spawn()
             .map_err(|err| format!("failed to launch bridge command {args:?}: {err}"))?;
         Ok(())
     }
@@ -177,8 +189,11 @@ impl Bridge {
     /// store) and returns immediately. The frontend observes it via
     /// ``discovery_status`` / ``discovery_results`` and controls it via
     /// ``discovery_control``; the interface never blocks on the run.
-    /// ``start_date`` / ``end_date`` (ISO dates, optional) bound the campaign
-    /// to a publication-date window, applied by the Core itself.
+    /// ``start_date`` / ``end_date`` (ISO dates) are **required** and bound
+    /// the campaign to a publication-date window, applied by the Core itself
+    /// (start-inclusive, end-exclusive). Both must be present and ordered
+    /// (``start_date <= end_date``); a detached spawn would swallow a bridge
+    /// refusal, so the precondition is enforced here synchronously.
     ///
     /// Only one campaign may run at a time: the Core refuses a second launch,
     /// but the detached spawn would swallow that refusal — so the active state
@@ -186,20 +201,24 @@ impl Bridge {
     /// synchronous error instead of a silent no-op. The Core guard remains the
     /// authority for the racing case.
     fn discovery_run(&self, start_date: Option<String>, end_date: Option<String>) -> Result<(), String> {
+        let start = start_date.filter(|s| !s.trim().is_empty());
+        let end = end_date.filter(|s| !s.trim().is_empty());
+        if start.is_none() || end.is_none() {
+            return Err("Discovery requires both start_date and end_date.".to_string());
+        }
+        if start.as_deref() > end.as_deref() {
+            return Err("start_date must be <= end_date".to_string());
+        }
         let active = self.discovery_status()?;
         if matches!(active.status.as_str(), "running" | "paused") {
             let run_id = active.run_id.as_deref().unwrap_or("<unknown>");
             return Err(format!("a discovery campaign is already active: {run_id}"));
         }
         let mut args = vec!["discovery-run".to_string()];
-        if let Some(date) = start_date {
-            args.push("--start-date".into());
-            args.push(date);
-        }
-        if let Some(date) = end_date {
-            args.push("--end-date".into());
-            args.push(date);
-        }
+        args.push("--start-date".into());
+        args.push(start.unwrap_or_default());
+        args.push("--end-date".into());
+        args.push(end.unwrap_or_default());
         self.spawn_detached(&args)
     }
 
@@ -207,13 +226,33 @@ impl Bridge {
     /// ``run_id``: the bridge signals the recorded PID (SIGSTOP / SIGCONT /
     /// SIGTERM) and returns the updated run lifecycle. The id makes the
     /// command address an explicit campaign — never an implicit "latest".
+    ///
+    /// Command-level failures surface through ``run`` (the bridge exits
+    /// non-zero); the parsed run may legitimately carry an ``error`` field
+    /// (e.g. ``"stopped by user"``) that is *not* a command failure.
     fn discovery_control(&self, action: &str, run_id: &str) -> Result<DiscoveryRun, String> {
         let out = self.run(&["discovery-control".into(), action.to_string(), run_id.to_string()])?;
-        let value: serde_json::Value = serde_json::from_str(&out).map_err(|err| err.to_string())?;
-        if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
-            return Err(err.to_string());
+        serde_json::from_str(&out).map_err(|err| err.to_string())
+    }
+
+    /// Synchronously stop any active discovery campaign, mirroring a user Stop.
+    ///
+    /// Called at application exit. Reads the real campaign state; only an
+    /// active (``running`` / ``paused``) campaign is stopped, targeted by its
+    /// explicit ``run_id``. The bridge performs the SIGCONT→SIGTERM→(SIGKILL)
+    /// escalation and only records ``stopped`` once the process tree is
+    /// verified gone — so a successful return means no discovery process from
+    /// this instance remains. Terminal campaigns are left untouched.
+    fn stop_active_discovery(&self) -> Result<DiscoveryRun, String> {
+        let run = self.discovery_status()?;
+        if !matches!(run.status.as_str(), "running" | "paused") {
+            return Ok(run);
         }
-        serde_json::from_value(value).map_err(|err| err.to_string())
+        let run_id = run.run_id.as_deref().unwrap_or("");
+        if run_id.is_empty() {
+            return Err("active discovery run has no run_id".to_string());
+        }
+        self.discovery_control("stop", run_id)
     }
 
     /// Drop the discovery report cache (runs + candidate snapshots only).
@@ -228,15 +267,14 @@ impl Bridge {
         serde_json::from_str(&out).map_err(|err| err.to_string())
     }
 
-    /// JSON candidates of a discovery campaign (latest run by default).
-    fn discovery_results(&self) -> Result<DiscoveryResults, String> {
-        let out = self.run(&["discovery-results".into()])?;
-        serde_json::from_str(&out).map_err(|err| err.to_string())
-    }
-
-    /// Read-only store aggregates for the Overview.
-    fn stats(&self) -> Result<DataStats, String> {
-        let out = self.run(&["stats".into()])?;
+    /// JSON candidates of a discovery campaign (a specific run_id, or the
+    /// latest run when none is given).
+    fn discovery_results(&self, run_id: &str) -> Result<DiscoveryResults, String> {
+        let mut args = vec!["discovery-results".to_string()];
+        if !run_id.is_empty() {
+            args.push(run_id.to_string());
+        }
+        let out = self.run(&args)?;
         serde_json::from_str(&out).map_err(|err| err.to_string())
     }
 
@@ -351,16 +389,6 @@ struct ClearedCache {
     candidates_cleared: i64,
 }
 
-#[derive(Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-struct DataStats {
-    publications: i64,
-    documents: i64,
-    normalized_documents: i64,
-    facts: i64,
-    last_discovery: Option<DiscoveryRun>,
-}
-
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
@@ -422,13 +450,11 @@ fn get_discovery_status(state: State<'_, Bridge>) -> Result<DiscoveryRun, String
 }
 
 #[tauri::command]
-fn get_discovery_results(state: State<'_, Bridge>) -> Result<DiscoveryResults, String> {
-    state.discovery_results()
-}
-
-#[tauri::command]
-fn get_stats(state: State<'_, Bridge>) -> Result<DataStats, String> {
-    state.stats()
+fn get_discovery_results(
+    state: State<'_, Bridge>,
+    run_id: Option<String>,
+) -> Result<DiscoveryResults, String> {
+    state.discovery_results(run_id.as_deref().unwrap_or(""))
 }
 
 #[tauri::command]
@@ -436,7 +462,26 @@ fn open_url(state: State<'_, Bridge>, url: String) -> Result<(), String> {
     state.open_url(&url)
 }
 
-// ---------------------------------------------------------------------------
+/// Stop any active discovery campaign when the application is closing.
+///
+/// Called from the run loop on both ``ExitRequested`` (the documented
+/// interception point) and ``Exit`` (which is what macOS actually emits on a
+/// terminate/AppleScript quit — see the shutdown smoke tests). Runs entirely in
+/// Rust, independent of the React frontend, and blocks until the campaign is
+/// verified gone (or reported as error), so no orphan process survives Argus.
+fn stop_active_discovery_on_exit<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
+    let Some(bridge) = app_handle.try_state::<Bridge>() else {
+        return;
+    };
+    match bridge.stop_active_discovery() {
+        Ok(run) => eprintln!(
+            "argus: shutdown: discovery run {} finalized as {}",
+            run.run_id.as_deref().unwrap_or("(none)"),
+            run.status
+        ),
+        Err(err) => eprintln!("argus: shutdown: {err}"),
+    }
+}
 
 pub fn run() {
     tauri::Builder::default()
@@ -453,18 +498,16 @@ pub fn run() {
             clear_discovery_cache,
             get_discovery_status,
             get_discovery_results,
-            get_stats,
             open_url
         ])
         .build(tauri::generate_context!())
         .expect("error while building Argus")
         .run(|app_handle, event| {
-            // When the app closes while a discovery campaign is running, ask
-            // the campaign to stop so no orphan process survives the app.
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                if let Some(bridge) = app_handle.try_state::<Bridge>() {
-                    let _ = bridge.spawn_detached(&["discovery-control".into(), "stop".into()]);
-                }
+                stop_active_discovery_on_exit(&app_handle);
+            }
+            if let tauri::RunEvent::Exit = event {
+                stop_active_discovery_on_exit(&app_handle);
             }
         });
 }
@@ -603,17 +646,72 @@ mod tests {
     }
 
     #[test]
-    fn bridge_stats_are_readable() {
-        // Read-only aggregates; numbers must come from the Core store.
+    fn discovery_run_requires_complete_ordered_window() {
+        // The launch precondition must be enforced synchronously *before* any
+        // store or subprocess access, so a valid-launch case is never tested
+        // here (it would spawn a real detached campaign against the real
+        // store). These refusals must not touch the store at all.
         let bridge = Bridge::new();
         if !bridge.root.join(".venv").join("bin").join("python").is_file() {
             return;
         }
-        let stats = bridge.stats().expect("bridge must return stats");
-        assert!(stats.publications >= 0);
-        assert!(stats.documents >= 0);
-        assert!(stats.normalized_documents >= 0);
-        assert!(stats.facts >= 0);
+        assert!(bridge.discovery_run(None, None).is_err());
+        assert!(bridge.discovery_run(None, Some("2026-01-01".into())).is_err());
+        assert!(bridge.discovery_run(Some("2026-01-01".into()), None).is_err());
+        assert!(bridge.discovery_run(Some("2026-01-01".into()), Some("".into())).is_err());
+        assert!(bridge.discovery_run(Some("".into()), Some("2026-01-01".into())).is_err());
+        assert!(bridge.discovery_run(Some("2026-12-31".into()), Some("2026-01-01".into())).is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn detached_spawn_isolates_process_group() {
+        // The campaign spawn uses process_group(0) so the child is its own
+        // process-group leader (pgid == pid) — this is how the bridge kills the
+        // whole tree on shutdown via a negative-pid signal, never unrelated
+        // processes.
+        use std::io::{Read, Write};
+        use std::os::unix::process::CommandExt;
+
+        let bridge = Bridge::new();
+        let mut child = Command::new(&bridge.python)
+            .arg("-c")
+            .arg("import os; print(os.getpid(), os.getpgrp(), flush=True)")
+            .process_group(0)
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn python");
+        let mut out = String::new();
+        child
+            .stdout
+            .take()
+            .expect("stdout")
+            .read_to_string(&mut out)
+            .expect("read stdout");
+        assert!(child.wait().expect("wait").success(), "python must run");
+        let parts: Vec<i64> = out
+            .split_whitespace()
+            .map(|p| p.parse().expect("int"))
+            .collect();
+        assert_eq!(parts.len(), 2, "output: {out}");
+        assert_eq!(parts[0], parts[1], "pgid must equal the child pid (own group): {out}");
+    }
+
+    #[test]
+    fn shutdown_noop_when_no_active_campaign() {
+        // The exit handler must never transform a terminal campaign. Read the
+        // real store; only when nothing is active is stop_active_discovery
+        // exercised (a live active campaign is never stopped from a unit test).
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let run = bridge.discovery_status().expect("bridge must return discovery status");
+        if matches!(run.status.as_str(), "running" | "paused") {
+            return;
+        }
+        let after = bridge.stop_active_discovery().expect("shutdown no-op must succeed");
+        assert_eq!(after.status, run.status, "terminal state must be unchanged");
     }
 
     #[test]

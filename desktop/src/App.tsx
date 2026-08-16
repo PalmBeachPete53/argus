@@ -8,7 +8,7 @@ import { useDiscovery } from "./hooks/useDiscovery";
 import type { DataView } from "./types";
 
 export default function App() {
-  const [view, setView] = useState<DataView>("overview");
+  const [view, setView] = useState<DataView>("discovery");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const discovery = useDiscovery();
 
@@ -17,11 +17,7 @@ export default function App() {
       <Header onOpenSettings={() => setSettingsOpen(true)} />
       <div className="app-body">
         <Sidebar active={view} onSelect={setView} />
-        <MainContent
-          view={view}
-          discovery={discovery}
-          onGoToDiscovery={() => setView("discovery")}
-        />
+        <MainContent view={view} discovery={discovery} />
       </div>
       <Footer status={discovery.status} />
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}

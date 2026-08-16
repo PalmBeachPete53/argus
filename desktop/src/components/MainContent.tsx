@@ -1,7 +1,6 @@
 import type { DataView, DiscoveryCandidate, DiscoveryRun } from "../types";
 import DataBrowser from "./DataBrowser";
 import Discovery from "./Discovery";
-import Overview from "./Overview";
 import Sources from "./Sources";
 
 export interface DiscoveryState {
@@ -19,10 +18,9 @@ export interface DiscoveryState {
 interface MainContentProps {
   view: DataView;
   discovery: DiscoveryState;
-  onGoToDiscovery: () => void;
 }
 
-export default function MainContent({ view, discovery, onGoToDiscovery }: MainContentProps) {
+export default function MainContent({ view, discovery }: MainContentProps) {
   switch (view) {
     case "sources":
       return (
@@ -37,16 +35,10 @@ export default function MainContent({ view, discovery, onGoToDiscovery }: MainCo
         </main>
       );
     case "files":
-      return (
-        <main className="main">
-          <DataBrowser />
-        </main>
-      );
-    case "overview":
     default:
       return (
         <main className="main">
-          <Overview discovery={discovery} onGoToDiscovery={onGoToDiscovery} />
+          <DataBrowser />
         </main>
       );
   }
