@@ -1,4 +1,4 @@
-"""Phase 10 — type-specific monetary policy report extractors.
+"""Phase 4.6 — type-specific monetary policy report extractors.
 
 An extractor converts a ``NormalizedDocument`` of a monetary policy report (the
 ECB/Eurosystem "Economic Bulletin" being the report-like publication of the
@@ -18,7 +18,7 @@ on ``central_bank``.
 
 A monetary policy report is a large **narrative** document: economic outlook,
 inflation drivers, growth outlook, labour market, financial conditions, risks
-and policy rationale. Phase 10 is the most over-extraction-prone phase so far,
+and policy rationale. Phase 4.6 is the most over-extraction-prone phase so far,
 so its cardinal rule is **precision over recall**: a Fact is only produced from
 a known economic section (conservative routing) + an explicit economic
 assertion with sufficient identity (subject + predicate + value + unit + period
@@ -89,7 +89,7 @@ def extract_report(
     state: ``rebuild_facts_for_document`` (delete + insert) runs for every
     valid normalized document, **including when the result is empty**, so a
     re-extraction that now yields no facts clears the stale facts of that
-    document instead of leaving them behind (same guarantee as Phases 5–9).
+    document instead of leaving them behind (same guarantee as Phases 4.1–4.5).
 
     Returns the list of ``ExtractionResult`` (empty if no extractor applies or
     the publication is not classified as ``monetary_policy_report``).
@@ -126,7 +126,7 @@ def _is_report_publication(store, publication, *, expected_types: tuple[str, ...
     """Gate extraction to monetary policy report publications.
 
     The ``classifications`` table is the **single source of truth** (same strict
-    mechanism as Phases 5–9): extraction is authorized only when an
+    mechanism as Phases 4.1–4.5): extraction is authorized only when an
     authoritative classification record exists for the publication and its
     ``publication_type`` is ``monetary_policy_report``. The denormalized
     ``publication.publication_type`` cache is never used to infer

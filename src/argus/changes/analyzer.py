@@ -1,4 +1,4 @@
-"""Phase 12 — temporal / cross-publication change analysis.
+"""Phase 5 — temporal / cross-publication change analysis.
 
 The analyzer is **pure** (``FactChangeAnalyzer.analyze`` works on in-memory
 Facts + Publications and never touches a store) and strictly deterministic.

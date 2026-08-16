@@ -272,7 +272,7 @@ class Fact:
     identity because two facts differing only by their effective date are
     distinct facts (see ``facts/identity.py``).
 
-    ``speaker`` (Phase 7, optional) preserves the verbatim official speaker of a
+    ``speaker`` (Phase 4.3, optional) preserves the verbatim official speaker of a
     statement when the source structure exposes one (e.g. a Q&A answer labelled
     "President Christine Lagarde"). It is a provenance attribute, never
     inferred: an unlabelled/collective statement carries ``speaker=None``. It is

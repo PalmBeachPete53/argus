@@ -20,10 +20,10 @@ This extractor follows the Report-family **precision-over-recall** rule:
 The SMP is classified as ``monetary_policy_report`` (its canonical type in the
 Argus taxonomy maps ``statement_on_monetary_policy`` → ``monetary_policy_report``),
 so it is the report-family extractor for the RBA; the shorter cash-rate decision
-stays Phase 5.
+stays Phase 4.1.
 
-Deliberately NOT extracted (Phase 5/8/9 boundary): the cash-rate decision
-(Phase 5), the projection tables (Phase 9) and hawkish/dovish interpretation.
+Deliberately NOT extracted (Phase 4.1/8/9 boundary): the cash-rate decision
+(Phase 4.1), the projection tables (Phase 4.5) and hawkish/dovish interpretation.
 """
 
 from __future__ import annotations

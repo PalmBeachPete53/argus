@@ -12,11 +12,11 @@ normalized press release:
 - the decision wording, verbatim
 - forward guidance / policy-commitment sentences, verbatim
 
-Deliberately NOT extracted (Phase 5 boundary):
+Deliberately NOT extracted (Phase 4.1 boundary):
 
 - the "key drivers and outlook" narrative (inflation/growth analysis) — later
   phases
-- the Monetary Policy Report — Phase 10
+- the Monetary Policy Report — Phase 4.6
 - votes / hawkish-dovish / forex — never
 
 Design rules

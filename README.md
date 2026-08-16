@@ -31,9 +31,9 @@ Gated dispatch → Extractor (per bank, per publication family)
       ↓
 Facts (typed, provenance-carrying) → Store
       ↓
-FactChanges (Phase 12 — temporal comparisons)
+FactChanges (Phase 5 — temporal comparisons)
       ↓
-PolicyReactions (Phase 13 — temporal relations between condition and response changes)
+PolicyReactions (Phase 6 — temporal relations between condition and response changes)
 ```
 
 Key responsibilities:
@@ -98,11 +98,11 @@ the toggle — the only way to run a disabled bank is to re-enable it via
 
 - **Facts** — canonical typed assertions (policy rates, changes, dates,
   assessments, forward guidance, …) with verbatim provenance.
-- **FactChanges (Phase 12)** — temporal comparisons of the same lineage
+- **FactChanges (Phase 5)** — temporal comparisons of the same lineage
   (same bank/subject/predicate/value kind/period/qualifier/type) between
   consecutive publications, with provenance on both sides and deterministic
   identities. Idempotent.
-- **PolicyReactions (Phase 13)** — temporal relations between a condition
+- **PolicyReactions (Phase 6)** — temporal relations between a condition
   `FactChange` and a policy `FactChange`, within the implemented lag window and
   without look-ahead. **This is a temporal relation, not a causal claim.**
   Idempotent.
@@ -158,8 +158,8 @@ SHA-256 fingerprint and provenance in the SQLite store (`data/argus.db`).
 ```python
 from argus.store import Store
 from argus.config import enabled_banks
-from argus.changes import analyze_changes      # Phase 12
-from argus.reactions import analyze_reactions  # Phase 13
+from argus.changes import analyze_changes      # Phase 5
+from argus.reactions import analyze_reactions  # Phase 6
 
 store = Store("data/argus.db")
 for bank in enabled_banks():                          # the active banks
@@ -193,8 +193,8 @@ the right extractor only for the classified publication type.
   real capture yet (its official domain is WAF-blocked from the capture
   environment) and stays at 9/10 — no synthetic golden exists.
 - Phases 1–4 (Foundation, Source Discovery, Document Pipeline, Fact Extraction
-  incl. 4.1–4.7) and Phases 12–15 are `COMPLETE`; Phase 16 (Historical
-  Validation) is `DEFERRED`; Phase 17 (Trading) is `NOT STARTED`.
+  incl. 4.1–4.7) and Phases 5–8 are `COMPLETE`; Phase 9 (Historical
+  Validation) is `DEFERRED`; Phase 10 (Trading) is `NOT STARTED`.
 
 ## Documentation
 
@@ -205,9 +205,9 @@ the right extractor only for the classified publication type.
 - `docs/DATA_MODEL.md` — the Fact model: what a Fact is/is not, value types,
   temporal semantics, provenance, confidence, identity, persistence.
 - `docs/EXTRACTORS.md` — the type-specific extractors (per family and bank).
-- `docs/CHANGES.md` — Phase 12: FactChange matching and identity rules.
-- `docs/REACTIONS.md` — Phase 13: PolicyReaction temporal-relation rules.
-- `docs/MONETARY_POLICY_STATE.md`, `docs/FOREX_FUNDAMENTALS.md` — Phases 14/15.
+- `docs/CHANGES.md` — Phase 5: FactChange matching and identity rules.
+- `docs/REACTIONS.md` — Phase 6: PolicyReaction temporal-relation rules.
+- `docs/MONETARY_POLICY_STATE.md`, `docs/FOREX_FUNDAMENTALS.md` — Phase 7/8.
 - `docs/SOURCES.md` — the verified research matrix of official sources per bank.
 - `docs/SEARCH_DISCOVERY.md` — the SearXNG discovery fallback.
 - `docs/BANKS.md` — the Bank Toggle.

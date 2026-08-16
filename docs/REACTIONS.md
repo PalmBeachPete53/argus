@@ -1,4 +1,4 @@
-# Data Model — Policy Reaction Function (Phase 13)
+# Data Model — Policy Reaction Function (Phase 6)
 
 This document is the authoritative reference for the **empirical policy reaction
 layer** of Argus (`src/argus/reactions/`). It defines what a `PolicyReaction`
@@ -8,18 +8,18 @@ identity scheme and the persistence.
 ## Where Policy Reactions sit in the pipeline
 
 ```
-Type-Specific Extractor                 ← Phases 5–11
+Type-Specific Extractor                 ← Phases 4.1–4.7
     ↓
 Fact                                    ← Phase 4 (src/argus/facts/)
     ↓
-Temporal / Cross-Publication Analysis   ← Phase 12 (src/argus/changes/)
+Temporal / Cross-Publication Analysis   ← Phase 5 (src/argus/changes/)
     ↓
-Policy Reaction Function                ← Phase 13 (src/argus/reactions/, THIS layer)
-Monetary Policy State                   ← Phase 14 (COMPLETE — docs/MONETARY_POLICY_STATE.md)
-Forex Fundamentals                      ← Phase 15 (NOT STARTED)
+Policy Reaction Function                ← Phase 6 (src/argus/reactions/, THIS layer)
+Monetary Policy State                   ← Phase 7 (COMPLETE — docs/MONETARY_POLICY_STATE.md)
+Forex Fundamentals                      ← Phase 8 (NOT STARTED)
 ```
 
-Phase 13 is an **analysis layer over the output of Phase 12**. It consumes
+Phase 6 is an **analysis layer over the output of Phase 5**. It consumes
 existing `FactChange` relations (which in turn point to existing `Fact`s) and
 relates a **condition-side change** (an observed change in an economic
 condition) to a subsequent **policy-side change** (an observable monetary-policy
@@ -29,13 +29,13 @@ any network, model or fuzzy/semantic comparator, and never mutates the
 
 ## Epistemic boundary (the core principle)
 
-There are exactly three levels, and Phase 13 never collapses them:
+There are exactly three levels, and Phase 6 never collapses them:
 
 ```
 SOURCE                       observed   (official publication / document)
 → OBSERVED FACT              observed   (Phase 4 — explicit in source)
-→ OBSERVED CHANGE            observed   (Phase 12 — descriptive delta)
-→ TEMPORAL RELATIONSHIP      INFERRED   (Phase 13 — THIS layer)
+→ OBSERVED CHANGE            observed   (Phase 5 — descriptive delta)
+→ TEMPORAL RELATIONSHIP      INFERRED   (Phase 6 — THIS layer)
 ```
 
 - `Fact` and `FactChange` are **observed**. They describe what the source said
@@ -71,7 +71,7 @@ used, and a non-causal formulation.
   produced.
 - **Not a stance score** — no hawkish/dovish, no +1/−1, no sentiment.
 - **Not a forecast / trading signal** — no forex, no entries/exits, no P&L, no
-  recommendation. Those belong to Phases 15/17.
+  recommendation. Those belong to Phase 8/10.
 - **Not produced by fuzzy/semantic/LLM/network logic** — matching is exact,
   deterministic and explainable.
 
@@ -85,7 +85,7 @@ gdp, growth, unemployment, wages, labour_market,
 financial_conditions, fiscal_policy
 ```
 
-This reuses the canonical `subject` vocabulary produced by Phases 5–11.
+This reuses the canonical `subject` vocabulary produced by Phases 4.1–4.7.
 Projection facts (`predicate=projection` on `gdp` / `inflation` / etc.) are
 conditions too, because the subject is already in the set. **No value is
 reinterpreted and no qualitative fact is turned into a numeric score.**
@@ -100,7 +100,7 @@ policy_guidance, asset_purchase,
 risk, inflation_risk, growth_risk
 ```
 
-These are the observable policy-side events already represented by Phases 5–11:
+These are the observable policy-side events already represented by Phases 4.1–4.7:
 policy-rate changes, forward-guidance wording changes, balance-sheet /
 asset-purchase decisions, and risk-assessment changes.
 
@@ -108,8 +108,8 @@ asset-purchase decisions, and risk-assessment changes.
 (`risk`, `inflation_risk`, `growth_risk`) are ambiguous in principle — they can
 be read as a condition or as a policy response. In this first implementation
 they are assigned the **reaction** role (policy communication responses),
-matching the Phase 13 objective "reconstruct the observable reaction of the
-central bank to … risks". They are never used as a *condition* in Phase 13.
+matching the Phase 6 objective "reconstruct the observable reaction of the
+central bank to … risks". They are never used as a *condition* in Phase 6.
 This is a documented, deterministic choice, not a silent one.
 
 Subjects outside both vocabularies are simply not part of a reaction
@@ -119,7 +119,7 @@ relationship (no warning — they are irrelevant, not errors).
 
 1. **Observation time of a change.** The observation time of a `FactChange` is
    the temporal reference of its **current-side** publication — `meeting_date`
-   when set, else `publication_date` (the same reference Phase 12 uses to order
+   when set, else `publication_date` (the same reference Phase 5 uses to order
    observations). This is the moment the new value became known. The `period`
    (e.g. forecast year) and the `effective_date` are **never** used as the
    observation time.
@@ -158,7 +158,7 @@ reaction for the Fed.
 ## Deterministic identity
 
 `reaction_id` is a SHA-256 over the complete semantic identity of the
-relationship (following the Phase 12 convention — the identity derives from the
+relationship (following the Phase 5 convention — the identity derives from the
 relationship itself, not from the analysis version):
 
 ```
@@ -199,7 +199,7 @@ intent, stance and market meaning are never asserted.
 
 - The `policy_reactions` table is **derived data**. `analyze_reactions(store,
   *, bank=None, max_lag_days=…)` reads the persisted `fact_changes` of a bank
-  (the Phase 12 output), recomputes the full reaction scope and **replaces** it
+  (the Phase 5 output), recomputes the full reaction scope and **replaces** it
   atomically (`rebuild_reactions`).
 - Consequences: re-analysis is **idempotent**; an empty result **clears** the
   scope; a reaction can never survive the disappearance of the changes it
@@ -210,7 +210,7 @@ intent, stance and market meaning are never asserted.
 - `save_reaction` upserts by `reaction_id` and preserves `created_at`.
 - `delete_reactions`, `delete_reactions_for_document`,
   `delete_reactions_for_publication` provide the same lifecycle surface as
-  Phase 12.
+  Phase 5.
 
 ## Analysis version
 
@@ -232,9 +232,9 @@ version is persisted with every reaction.
 Changes whose subject is neither condition nor reaction are ignored silently
 (they are not errors).
 
-## Out of scope (Phase 14/15 boundaries)
+## Out of scope (Phase 7/8 boundaries)
 
-Phase 13 does **not** build: policy state (stance, direction, rate_level,
+Phase 6 does **not** build: policy state (stance, direction, rate_level,
 rate_expectation, inflation_risk/growth_risk/labour_risk, guidance, confidence,
 `as_of`), structural econometrics, causal identification, VAR/DSGE, machine
 learning, Bayesian inference, forex fundamentals, cross-bank comparison, or any

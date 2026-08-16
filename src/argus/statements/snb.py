@@ -1,7 +1,7 @@
-"""SNB — Swiss National Bank statement extractor (Phase 6).
+"""SNB — Swiss National Bank statement extractor (Phase 4.2).
 
 Encapsulates the SNB's quarterly "Monetary policy assessment" vocabulary on top
-of the shared Phase 6 engine. The SNB releases a "Monetary policy assessment as
+of the shared Phase 4.2 engine. The SNB releases a "Monetary policy assessment as
 of 19 June 2026" whose narrative sections (economic conditions, inflation
 outlook, monetary conditions) carry the statements.
 """

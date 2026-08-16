@@ -411,7 +411,7 @@ def test_no_cross_phase_facts():
             assert "change" not in predicates, name
             # decision instruments are never emitted as *value* facts from
             # statements/minutes/reports (fed_sep projects policy_rate under
-            # the "projection" predicate, which is Phase 9, not Phase 5)
+            # the "projection" predicate, which is Phase 4.5, not Phase 4.1)
             instrument_values = {f.subject for f in result.facts if f.predicate == "value"}
             assert not DECISION_INSTRUMENTS & instrument_values, (name, instrument_values)
 

@@ -1,4 +1,4 @@
-"""Phase 12 — temporal / cross-publication change analysis (deep hardening).
+"""Phase 5 — temporal / cross-publication change analysis (deep hardening).
 
 Tests the pure ``FactChangeAnalyzer`` and the store integration
 (``analyze_changes`` + ``fact_changes`` persistence).
@@ -883,7 +883,7 @@ class TestOrderingChaining:
 
 
 # ---------------------------------------------------------------------------
-# final chaining hardening (Phase 12): documented adjacency semantics
+# final chaining hardening (Phase 5): documented adjacency semantics
 # ---------------------------------------------------------------------------
 class TestChainingHardening:
     """Formalizes the exact chaining semantics documented in docs/CHANGES.md.

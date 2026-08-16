@@ -3,7 +3,7 @@
 Extracts the facts of an RBNZ speech by the Governor, Deputy Governor or MPHC
 members, published under ``/hub/speeches``. Each RBNZ speech has an explicit
 speaker and sections. RBNZ monetary-policy-statement and OCR decision
-documents are Phases 5/8 (gated), never mined here.
+documents are Phase 4.1/8 (gated), never mined here.
 
 Bank-specific knowledge kept here:
 

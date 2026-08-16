@@ -1,7 +1,7 @@
-"""BoE — Bank of England statement extractor (Phase 6).
+"""BoE — Bank of England statement extractor (Phase 4.2).
 
 Encapsulates the Bank of England's Monetary Policy Committee vocabulary on top
-of the shared Phase 6 engine. BoE language uses "per cent"; the reference date
+of the shared Phase 4.2 engine. BoE language uses "per cent"; the reference date
 is the "20 August 2026" style release date. Sections mirror the Monetary Policy
 Report structure: inflation outlook, economic outlook, the labour market, wages
 and costs, risks to the outlook.

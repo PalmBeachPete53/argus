@@ -1,11 +1,11 @@
-"""Phase 7 — ECB Press Conference extractor: end-to-end tests using the local
+"""Phase 4.3 — ECB Press Conference extractor: end-to-end tests using the local
 HTML fixtures and the existing Store (vertical slice).
 
 Covers: remarks vs Q&A provenance, speaker attribution (never invented),
 journalist questions never mined, categories A–G, quantitative values with
 periods, no invented values, ambiguous wording never interpreted, determinism,
 idempotence, empty-result persistence, strict classification gating and the
-Phase 5 / Phase 6 boundaries.
+Phase 4.1 / Phase 4.2 boundaries.
 """
 
 from __future__ import annotations
@@ -535,7 +535,7 @@ def test_no_decision_or_rationale_facts_from_press_conference():
         "deposit_facility_rate", "asset_purchase", "vote",
     }
     assert not phase5_subjects & {f.subject for f in result.facts}
-    assert not any(f.predicate == "rationale" for f in result.facts)  # Phase 6 rationale stays in the statement
+    assert not any(f.predicate == "rationale" for f in result.facts)  # Phase 4.2 rationale stays in the statement
     assert not any(f.predicate == "change" for f in result.facts)
     assert not any(f.predicate == "date" for f in result.facts)
 
@@ -806,7 +806,7 @@ def test_speaker_is_persisted_roundtrip(tmp_path):
     guindos = [f for f in persisted if f.speaker == "Vice-President Luis de Guindos"]
     assert len(lagarde) == 2
     assert len(guindos) == 2
-    # legacy facts without a speaker (Phase 5/6 style) still load as None
+    # legacy facts without a speaker (Phase 4.1/6 style) still load as None
     assert all(f.speaker is None for f in persisted if f.identity_qualifier.startswith("remarks:"))
 
 
@@ -946,13 +946,13 @@ def test_empty_result_persistence_is_idempotent(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Phase 5 / Phase 6 coexistence
+# Phase 4.1 / Phase 4.2 coexistence
 # ---------------------------------------------------------------------------
 
 
 def test_phase5_and_phase6_do_not_overlap_with_press_conf(tmp_path):
     """A press conference publication never feeds the decision or statement
-    extractors (gating on classification), and Phase 7 never emits Phase 5/6
+    extractors (gating on classification), and Phase 4.3 never emits Phase 4.1/6
     fact subjects."""
     store = _store_press_conf(tmp_path)
     pub = press_conference_publication()
@@ -967,7 +967,7 @@ def test_phase5_and_phase6_do_not_overlap_with_press_conf(tmp_path):
     # store-level helpers are gated on classification
     assert extract_decision(store, pub) == []
     assert extract_statement(store, pub) == []
-    # Phase 7 extraction produces its own facts only
+    # Phase 4.3 extraction produces its own facts only
     extract_press_conference(store, pub)
     persisted = store.get_facts(publication_id="pub-ecb-pressconf")
     phase5_subjects = {
@@ -975,6 +975,6 @@ def test_phase5_and_phase6_do_not_overlap_with_press_conf(tmp_path):
         "deposit_facility_rate", "asset_purchase", "vote",
     }
     assert not phase5_subjects & {f.subject for f in persisted}
-    assert not any(f.predicate == "rationale" for f in persisted)  # Phase 6 rationale is not a Phase 7 category
+    assert not any(f.predicate == "rationale" for f in persisted)  # Phase 4.2 rationale is not a Phase 4.3 category
     assert not any(f.predicate == "change" for f in persisted)
     assert all(f.extraction_version == EcbPressConferenceExtractor.extraction_version for f in persisted)

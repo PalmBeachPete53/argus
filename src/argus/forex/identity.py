@@ -1,4 +1,4 @@
-"""Phase 15 — deterministic identity of a ``ForexFundamental`` and a
+"""Phase 8 — deterministic identity of a ``ForexFundamental`` and a
 ``ForexDifferential``.
 
 A ``fundamental_id`` is derived solely from the relationship itself — the

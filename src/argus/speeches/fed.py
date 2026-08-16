@@ -17,8 +17,7 @@ pipeline in ``_pipeline.py`` / ``_shared.py``):
 
 Speeches are the individual communications of one official: the explicit
 speaker label is preserved verbatim in ``Fact.speaker``, never inferred, and a
-speech is never mistaken for a collective FOMC decision (those are Phases
-5/6/9, gated on their own publication types).
+speech is never mistaken for a collective FOMC decision (those are Phase 4.1/6/9, gated on their own publication types).
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Phase 6 — type-specific monetary policy statement extractors.
+"""Phase 4.2 — type-specific monetary policy statement extractors.
 
 An extractor converts a ``NormalizedDocument`` of a monetary policy statement
 into a list of provenance-carrying ``Fact`` assertions, following the

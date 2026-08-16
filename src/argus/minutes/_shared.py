@@ -1,4 +1,4 @@
-"""Structural helpers shared by the bank-specific Minutes extractors (Phase 8).
+"""Structural helpers shared by the bank-specific Minutes extractors (Phase 4.4).
 
 These helpers are deliberately **structural only**: normalized-heading cleaning,
 sentence splitting, value-token parsing, the explicit value-claim gate, control
@@ -13,7 +13,7 @@ Nothing here knows about a particular central bank's minutes layout or wording.
 Reusing these helpers across banks is the "genuinely structural operations" the
 phase contract allows; encoding bank wording here is forbidden.
 
-Two Phase 8 invariants are enforced by construction here:
+Two Phase 4.4 invariants are enforced by construction here:
 
 - ``Fact.speaker`` is always ``None`` — the accounts do not reliably name
   individual governors and a name is never invented; the attribution the source
@@ -45,7 +45,7 @@ from ..facts import (
 )
 from ..normalize import normalize_title
 
-# Canonical Phase 8 minutes subjects (controlled vocabulary).
+# Canonical Phase 4.4 minutes subjects (controlled vocabulary).
 SUBJECT_INFLATION = "inflation"
 SUBJECT_CORE_INFLATION = "core_inflation"
 SUBJECT_INFLATION_EXPECTATIONS = "inflation_expectations"
@@ -197,7 +197,7 @@ class MinutesReporter:
     structural configuration supplied by the bank-specific extractor. Every
     emitted Fact:
 
-    - carries ``speaker=None`` (Phase 8: a name is never invented);
+    - carries ``speaker=None`` (Phase 4.4: a name is never invented);
     - carries ``identity_qualifier = minutes:{attribution}:{n}``, where
       ``attribution`` is supplied per emission by the bank extractor (the
       controlled vocabulary above) and ``n`` is the per-(subject, attribution)

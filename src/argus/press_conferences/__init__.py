@@ -1,4 +1,4 @@
-"""Phase 7 — type-specific press conference extraction public API."""
+"""Phase 4.3 — type-specific press conference extraction public API."""
 
 from .base import (
     PRESS_CONFERENCE_PUBLICATION_TYPE,

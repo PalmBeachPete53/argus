@@ -12,10 +12,10 @@ normalized media release:
   verbatim
 - forward guidance / OCR-prospect sentences, verbatim
 
-Deliberately NOT extracted (Phase 5 boundary):
+Deliberately NOT extracted (Phase 4.1 boundary):
 
-- the Monetary Policy Statement (economic outlook / projections) — Phase 9/10
-- votes / dissents — Phase 8 (minutes); hawkish-dovish / forex — never
+- the Monetary Policy Statement (economic outlook / projections) — Phase 4.5/10
+- votes / dissents — Phase 4.4 (minutes); hawkish-dovish / forex — never
 
 Design rules
 

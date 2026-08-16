@@ -1,4 +1,4 @@
-"""Fed — Summary of Economic Projections (SEP) extractor (Phase 9).
+"""Fed — Summary of Economic Projections (SEP) extractor (Phase 4.5).
 
 Extracts the official numerical economic projections of the Federal Open Market
 Committee from the normalized document **tables**, answering "what does the FOMC
@@ -12,21 +12,21 @@ projections. The Fed-specific parsing feature here is **median extraction**: a
 projection cell is a Fact only when its row carries the explicit ``median``
 metric. The ranges (e.g. ``2.0–2.5``) are never parsed into numbers — a range
 has no single value and is never coerced into one (``UNKNOWN ≠ PROJECTION`` —
-precision over recall, Phase 9).
+precision over recall, Phase 4.5).
 
 The Fed's SEP also carries the **federal funds rate** projections — the median
 of participants' individual projections of the appropriate level of the funds
 rate under their monetary policy assumptions. Those are kept as
 ``policy_rate / projection`` facts (the SEP explicitly publishes them as its
 own projections, before the next FOMC decision — they are the Committee's own
-content, kept with their source row verbatim; the *decision* itself is Phase 5
+content, kept with their source row verbatim; the *decision* itself is Phase 4.1
 territory and is not here).
 
 Structure handled (DocumentTable):
 
 - headers: ``["Variable", "Metric", "2026", "2027", "2028", "Longer run"]`` —
   the first two columns identify the row, the numeric columns are the years
-  (``20xx``). The ``Longer run`` column is not a year and is ignored (Phase 9
+  (``20xx``). The ``Longer run`` column is not a year and is ignored (Phase 4.5
   full-table handling is out of scope for this representative).
 - rows: the variable label (exact canonical match, never a substring near-miss),
   the metric (``median`` only), then one numeric value per year.
@@ -34,13 +34,13 @@ Structure handled (DocumentTable):
   states ``Percent`` (the SEP's own unit). A table without an explicit unit is
   ignored as a whole — no unit is ever assumed.
 
-Deliberately NOT extracted (Phase 9 boundary):
+Deliberately NOT extracted (Phase 4.5 boundary):
 
 - interpretation (hawkish/dovish, which policy is "projected") — never;
 - the ranges, the central tendency band, bootstrap / fan-chart text, the
   "longer run" column, prose ("Participants agreed that …"), methodology and
   disclaimer sections;
-- the decision itself (rates, changes, effective date) — Phase 5.
+- the decision itself (rates, changes, effective date) — Phase 4.1.
 """
 
 from __future__ import annotations

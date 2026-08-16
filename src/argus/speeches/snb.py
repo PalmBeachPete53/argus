@@ -3,7 +3,7 @@
 Extracts the facts of an SNB speech by the Chairman, Vice Chairman or a
 Governing Board member, published under ``/en/mmr/speeches/…``. Each SNB
 speech has an explicit speaker and sections. The SNB's collective decisions
-(monetary policy assessment) are Phase 5/8 (gated), never mined here.
+(monetary policy assessment) are Phase 4.1/8 (gated), never mined here.
 
 Bank-specific knowledge kept here:
 

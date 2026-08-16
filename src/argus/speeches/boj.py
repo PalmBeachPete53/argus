@@ -3,7 +3,7 @@
 Extracts the facts of a Bank of Japan speech by the Governor, Deputy Governors
 or Policy Board members, published (in English) under ``/en/announcements/
 press/koen_…/`` (koen = speech). Each speech has an explicit speaker and
-sections. BoJ collective decisions and outlook reports are Phases 5/9 (gated
+sections. BoJ collective decisions and outlook reports are Phase 4.1/9 (gated
 on their own publication types), never mined here.
 
 Bank-specific knowledge kept here:

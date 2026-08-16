@@ -1,4 +1,4 @@
-"""Phase 11 — ECB Speech extractor: end-to-end tests using the local HTML
+"""Phase 4.7 — ECB Speech extractor: end-to-end tests using the local HTML
 fixtures and the existing Store (vertical slice).
 
 Covers: classification gating (``speech``), conservative section routing
@@ -13,7 +13,7 @@ speaker attribution (body ``Speaker:`` line > metadata author, never inferred,
 quoted authors never attributed to the speaker), provenance (verbatim
 source_text, source_location, extraction version/method, ``speech:`` identity
 qualifiers), within-run deduplication, deterministic extraction, idempotent and
-empty-result persistence, and Phase 5/6/7/8/9/10 coexistence.
+empty-result persistence, and Phase 4.1/6/7/8/9/10 coexistence.
 """
 
 from __future__ import annotations
@@ -246,7 +246,7 @@ def test_golden_facts_across_all_fixtures():
 
 
 # ---------------------------------------------------------------------------
-# conservative section routing — Phase 11 (UNKNOWN sections are strictly mined)
+# conservative section routing — Phase 4.7 (UNKNOWN sections are strictly mined)
 # ---------------------------------------------------------------------------
 
 
@@ -582,7 +582,7 @@ def test_quantitative_growth_is_gdp_value():
 def test_gdp_near_misses_never_anchor_growth():
     # "GDP deflator", "GDP per capita" and "per capita GDP" are distinct
     # measures and must never anchor (or emit) a GDP value fact (same guard as
-    # Phase 10 reports).
+    # Phase 4.6 reports).
     sections = [
         _section("Economic outlook", "The GDP deflator rose by 2.1% in 2026."),
         _section("Economic outlook", "GDP per capita increased by 1.1% in 2026."),
@@ -1052,14 +1052,14 @@ def test_empty_result_persistence_is_idempotent(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Phase 5 / 6 / 7 / 8 / 9 / 10 coexistence
+# Phase 4.1 / 6 / 7 / 8 / 9 / 10 coexistence
 # ---------------------------------------------------------------------------
 
 
 def test_other_extractors_do_not_overlap_with_speeches(tmp_path):
     """A speech publication never feeds the decision, statement, press
     conference, minutes, projections or report extractors (gating on
-    classification), and Phase 11 never emits Phase 5/6/7/8/9/10 fact
+    classification), and Phase 4.7 never emits Phase 4.1/6/7/8/9/10 fact
     subjects."""
     store = _store_speech(tmp_path)
     pub = speeches_publication()
@@ -1071,7 +1071,7 @@ def test_other_extractors_do_not_overlap_with_speeches(tmp_path):
     assert extract_minutes(store, pub) == []
     assert extract_projections(store, pub) == []
     assert extract_report(store, pub) == []
-    # Phase 11 extraction produces its own facts only
+    # Phase 4.7 extraction produces its own facts only
     extract_speech(store, pub)
     persisted = store.get_facts(publication_id="pub-ecb-speech")
     phase_subjects = {
@@ -1092,7 +1092,7 @@ def test_speeches_extractor_refuses_other_publication_types(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Phase 11 hardening — precision over recall: economic vocabulary alone is
+# Phase 4.7 hardening — precision over recall: economic vocabulary alone is
 # never a fact; an explicit assertion is required for qualitative facts, and
 # generic content anchors were replaced or removed.
 # ---------------------------------------------------------------------------
@@ -1209,7 +1209,7 @@ def test_hardening_no_period_contamination_across_sentences():
 
 
 # ---------------------------------------------------------------------------
-# Phase 11 assertion-signal hardening (correctif) — an economic anchor plus a
+# Phase 4.7 assertion-signal hardening (correctif) — an economic anchor plus a
 # generic assertion verb is never sufficient: the predicate must actually
 # describe the economic subject. Rhetorical / institutional / personal
 # constructions → 0 qualitative Facts. State/property assertions stay extracted.

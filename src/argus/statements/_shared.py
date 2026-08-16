@@ -1,4 +1,4 @@
-"""Shared machinery for Phase 6 bank-specific statement extractors.
+"""Shared machinery for Phase 4.2 bank-specific statement extractors.
 
 The seven "long tail" statement extractors (fed, boe, boc, snb, rba, rbnz,
 riksbank) all need the same extraction engine — the affine part is limited to
@@ -47,8 +47,8 @@ from ..normalize import normalize_title, parse_datetime
 from .base import StatementExtractor
 
 # ---------------------------------------------------------------------------
-# Canonical Phase 6 subjects (controlled vocabulary, shared by all statement
-# extractors). ``policy_guidance`` is shared with Phase 5.
+# Canonical Phase 4.2 subjects (controlled vocabulary, shared by all statement
+# extractors). ``policy_guidance`` is shared with Phase 4.1.
 # ---------------------------------------------------------------------------
 SUBJECT_MONETARY_POLICY = "monetary_policy"
 SUBJECT_INFLATION = "inflation"
@@ -90,7 +90,7 @@ CAT_UNCLASSIFIED = "unclassified"
 
 
 class BankStatementExtractor(StatementExtractor):
-    """Generic Phase 6 statement engine. Concrete banks defined the vocabulary
+    """Generic Phase 4.2 statement engine. Concrete banks defined the vocabulary
     below; everything else is shared."""
 
     # --- per-bank vocabulary (class attributes, overridden by banks) -------

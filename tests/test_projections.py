@@ -1,4 +1,4 @@
-"""Phase 9 — ECB Economic Projections extractor: end-to-end tests using the
+"""Phase 4.5 — ECB Economic Projections extractor: end-to-end tests using the
 local HTML fixtures and the existing Store (vertical slice).
 
 Covers: classification gating (``economic_projections``), table-driven
@@ -9,7 +9,7 @@ when explicitly stated (never ``current − previous``), the value gate (a bare
 cell without variable+year+unit identity is never a Fact,
 ``UNKNOWN ≠ PROJECTION``), provenance (table/row/column + verbatim rows),
 ``speaker`` never set, deterministic extraction, idempotent and empty-result
-persistence, and Phase 5/6/7/8 coexistence.
+persistence, and Phase 4.1/6/7/8 coexistence.
 """
 
 from __future__ import annotations
@@ -986,14 +986,14 @@ def test_empty_result_persistence_is_idempotent(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Phase 5 / 6 / 7 / 8 coexistence
+# Phase 4.1 / 6 / 7 / 8 coexistence
 # ---------------------------------------------------------------------------
 
 
 def test_other_extractors_do_not_overlap_with_projections(tmp_path):
     """An economic projections publication never feeds the decision, statement,
     press conference or minutes extractors (gating on classification), and
-    Phase 9 never emits Phase 5/6/7/8 fact subjects."""
+    Phase 4.5 never emits Phase 4.1/6/7/8 fact subjects."""
     store = _store_projections(tmp_path)
     pub = projections_publication()
     classify_projections(store)
@@ -1002,7 +1002,7 @@ def test_other_extractors_do_not_overlap_with_projections(tmp_path):
     assert extract_statement(store, pub) == []
     assert extract_press_conference(store, pub) == []
     assert extract_minutes(store, pub) == []
-    # Phase 9 extraction produces its own facts only
+    # Phase 4.5 extraction produces its own facts only
     extract_projections(store, pub)
     persisted = store.get_facts(publication_id="pub-ecb-projections")
     phase_subjects = {

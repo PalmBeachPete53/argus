@@ -1,4 +1,4 @@
-"""Phase 11 — type-specific speech extraction public API."""
+"""Phase 4.7 — type-specific speech extraction public API."""
 
 from .base import (
     SPEECH_PUBLICATION_TYPES,

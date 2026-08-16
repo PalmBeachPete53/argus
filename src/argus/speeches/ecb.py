@@ -1,4 +1,4 @@
-"""ECB — Speech / Remarks / Address extractor (Phase 11).
+"""ECB — Speech / Remarks / Address extractor (Phase 4.7).
 
 Extracts the facts of an ECB speech from the normalized document, answering
 "what does this official explicitly state about the economy, its risks and
@@ -39,16 +39,16 @@ everything else is IGNORED:
   ceremonial thanks, history without explicit values and quoted authors are
   never facts.
 
-Deliberately NOT extracted (Phase 11 boundary):
+Deliberately NOT extracted (Phase 4.7 boundary):
 
 - hawkish/dovish, bullish/bearish or any market interpretation — never
-- policy decisions / rates / changes / votes — Phases 5 and 8, gated on their
+- policy decisions / rates / changes / votes — Phase 4.1 and 8, gated on their
   own publication types; a speech's *narrative* of policy is kept verbatim,
   never priced
 - the Q&A of a speech document (journalist content; press-conference Q&A is
-  Phase 7), fiscal analysis (Phase 10), structured projections tables
-  (Phases 9/10)
-- an individual statement is never a collective decision: no Phase 5–10
+  Phase 4.3), fiscal analysis (Phase 4.6), structured projections tables
+  (Phase 4.5/10)
+- an individual statement is never a collective decision: no Phase 4.1–4.6
   subject is ever emitted here.
 
 Design rules
@@ -108,7 +108,7 @@ from .base import SpeechExtractor
 EXTRACTION_VERSION = "11.0.0"
 
 # ---------------------------------------------------------------------------
-# Section routing — CONSERVATIVE (Phase 11). A heading is mined in full only
+# Section routing — CONSERVATIVE (Phase 4.7). A heading is mined in full only
 # when it is a known economic section; a known non-economic heading (biography,
 # thanks, closing remarks, Q&A, legal/back matter) is ignored; an **unknown
 # heading** is mined at paragraph level but never yields an automatic fact —
@@ -128,7 +128,7 @@ _IGNORE_HEADINGS = frozenset({
     "about the speaker", "speaker biography", "biography", "biographical note",
     "acknowledgements", "acknowledgments", "thanks", "thank you",
     "closing remarks", "concluding remarks", "closing",
-    # Q&A — journalist content (press-conference Q&A is Phase 7)
+    # Q&A — journalist content (press-conference Q&A is Phase 4.3)
     "questions and answers", "questions", "question", "answers", "q&a", "questions from",
     # legal & back matter
     "references", "bibliography", "further reading", "notes", "endnotes",
@@ -276,7 +276,7 @@ _FINANCIAL_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\bfinancial conditions\b", re.IGNORECASE),
     re.compile(r"\bfinancing conditions?\b", re.IGNORECASE),
     # "credit" alone is too generic ("Credit is important.") — it fires only as
-    # a contextual credit-conditions marker. Phase 11 hardening.
+    # a contextual credit-conditions marker. Phase 4.7 hardening.
     re.compile(r"\bcredit\s+(?:growth|standards|supply|demand|conditions?|availability|creation|extension|provision|restrictions?|tightening|easing|expansion|flows?)\b", re.IGNORECASE),
     re.compile(r"\bbank lending\b", re.IGNORECASE),
     re.compile(r"\b(?:bank\s+lending|lending\s+(?:rates?|growth|to|conditions?|standards?))\b", re.IGNORECASE),
@@ -311,7 +311,7 @@ _LABOUR_ANCHORS: tuple[re.Pattern, ...] = (
 # Near-misses that must never be read as GDP growth: "GDP deflator" and
 # "GDP per capita" (and the reversed "per capita GDP") are distinct measures
 # and must never anchor (or emit) a GDP value fact on their own (same guard as
-# Phase 10 reports).
+# Phase 4.6 reports).
 _GDP_NEAR_MISS = re.compile(
     r"(?:\bgdp\b\s+(?:deflator|per\s+capita)\b|per\s+capita\s+\bgdp\b)",
     re.IGNORECASE,
@@ -327,7 +327,7 @@ _GROWTH_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\b(?:economic\s+)?activity\b", re.IGNORECASE),
     re.compile(r"\beconom(?:y|ic)\b", re.IGNORECASE),
     # bare "output" is a growth marker ("output increased"); the gate still
-    # requires an explicit assertion for a qualitative fact. Phase 11 hardening.
+    # requires an explicit assertion for a qualitative fact. Phase 4.7 hardening.
     re.compile(r"\boutput\b", re.IGNORECASE),
     # "demand" alone is too generic — only a qualified demand is a growth signal
     re.compile(r"\b(?:domestic|aggregate|global|external|private|overall|total)\s+demand\b", re.IGNORECASE),

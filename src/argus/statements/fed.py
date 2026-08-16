@@ -1,7 +1,7 @@
-"""Fed — FOMC statement extractor (Phase 6).
+"""Fed — FOMC statement extractor (Phase 4.2).
 
 Encapsulates the Federal Reserve's own statement vocabulary (FOMC language) on
-top of the shared Phase 6 engine. The FOMC statement is a single flowing text —
+top of the shared Phase 4.2 engine. The FOMC statement is a single flowing text —
 most sections route through the content-first fallback (guidance > risk >
 rationale). Value claims use "percent"; the reference date is the "For release
 at 2:00 p.m. EDT, September 20, 2026" header.

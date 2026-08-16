@@ -124,31 +124,31 @@ documents are re-tried on later runs up to a per-document retry budget.
   source_text, extraction_method/version, confidence, extracted_at
 - `ExtractionResult` (Phase 4) — publication_id, document_id, facts[], warnings[]
   (contract returned by future type-specific extractors)
-- `FactChange` (Phase 12) — change_id (deterministic SHA-256 over previous fact
+- `FactChange` (Phase 5) — change_id (deterministic SHA-256 over previous fact
   id + current fact id + change type), previous_fact_id → current_fact_id,
   change_type (numeric/qualitative/text_changed), denormalized provenance of
   **both** source Facts (publication, document, value, period, effective date,
   verbatim source text), delta (numeric only), analysis_version, analyzed_at
-- `PolicyReaction` (Phase 13) — reaction_id (deterministic SHA-256 over
+- `PolicyReaction` (Phase 6) — reaction_id (deterministic SHA-256 over
   central_bank + condition_change_id + policy_change_id), inferred (constant
   `True`), condition side + policy side (each a denormalized `FactChange`
   provenance), lag_days, max_lag_days, non-causal formulation, analysis_version
-- `MonetaryPolicyState` (Phase 14) — state_id (deterministic SHA-256 over
+- `MonetaryPolicyState` (Phase 7) — state_id (deterministic SHA-256 over
   central_bank + source_change_id), synthesized (constant `True`), one policy
   dimension (subject, predicate, value_kind, qualifier, period, authoritative
   publication type), the observed level (current side of the source
   `FactChange`, verbatim — never invented or converted), observed_at
   (meeting_date, else publication_date; `effective_date` kept separate),
   denormalized current-side provenance, analysis_version
-- `ForexFundamental` (Phase 15) — fundamental_id (deterministic SHA-256 over
+- `ForexFundamental` (Phase 8) — fundamental_id (deterministic SHA-256 over
   currency + source_kind + source_id), synthesized (constant `True`), one
   fundamental dimension of one economy (currency, resolved from the canonical
-  `CentralBank.currency` mapping), one source observation (a Phase 14
+  `CentralBank.currency` mapping), one source observation (a Phase 7
   `MonetaryPolicyState` — monetary dimensions — or a Phase 4 `Fact` — macro
   dimensions), the observed level copied verbatim, observed_at, currency-scoped
   `dimension_key` + currency-independent `lineage_key`, denormalized
   provenance, analysis_version
-- `ForexDifferential` (Phase 15) — differential_id (deterministic SHA-256 over
+- `ForexDifferential` (Phase 8) — differential_id (deterministic SHA-256 over
   base_currency + quote_currency + subject + predicate + base_source_id +
   quote_source_id), synthesized (constant `True`), an ordered same-dimension
   pair (base/quote convention never silently inverted), the arithmetic
@@ -274,7 +274,7 @@ Future type-specific extractors return an `ExtractionResult(publication_id,
  document_id, facts, warnings)`. No extractor exists yet: this phase only
  defines the contract and the data model.
 
-## Type-specific extractor families (Phases 5–11, 4.x)
+## Type-specific extractor families (Phases 4.1–4.7, 4.x)
 
 Each **publication type** is mined by its own extractor family — decisions,
 statements, press conferences, minutes/meeting accounts, economic projections,
@@ -288,7 +288,7 @@ normalization, sentence splitting, the explicit value-claim gate, a
 deterministic provenance-carrying fact emitter with within-run deduplication)
 are shared between a family's extractors (`src/argus/reports/_shared.py`);
 **no bank-specific semantics** live in those helpers. The press-conference
-family (`src/argus/press_conferences/`) follows the same split: ECB (Phase 7
+family (`src/argus/press_conferences/`) follows the same split: ECB (Phase 4.3
 reference implementation, conserved), Fed and BoE extractors are dispatched
 generically on `central_bank`, and only structural mechanics are shared
 (`press_conferences/_shared.py`). BoE press conferences are classified via the
@@ -304,7 +304,7 @@ currently covers ECB, Norges, BoE, BoC, RBA, RBNZ and Riksbank; Fed, BoJ and
 SNB are documented as not-applicable / represented by another family (see
 `docs/EXTRACTORS.md`, `docs/REPORTS.md`).
 
-## Phase 12 — Temporal / Cross-Publication Analysis (`changes/`)
+## Phase 5 — Temporal / Cross-Publication Analysis (`changes/`)
 
 `FactChangeAnalyzer` relates consecutive observations of the same lineage
 (same central bank, subject, predicate, value kind, canonical period,
@@ -318,10 +318,10 @@ never an economic interpretation. It is derived data: `fact_changes` is
 rebuilt idempotently per bank (`rebuild_changes`), empty results clear the
 scope, and source `Fact`s are never modified. See `docs/CHANGES.md`.
 
-## Phase 13 — Policy Reaction Function (`reactions/`)
+## Phase 6 — Policy Reaction Function (`reactions/`)
 
 `PolicyReactionAnalyzer` derives **inferred, non-causal** temporal associations
-between Phase 12 `FactChange`s: a condition-side change (condition vocabulary:
+between Phase 5 `FactChange`s: a condition-side change (condition vocabulary:
 inflation, core_inflation, inflation_expectations, gdp, growth, unemployment,
 wages, labour_market, financial_conditions, fiscal_policy) temporally followed
 by a policy-side change (reaction vocabulary: policy_rate,
@@ -340,12 +340,12 @@ never causal, and carries no stance/trading interpretation. It is derived data:
 empty results clear the scope, and source `Fact`s / `FactChange`s are never
 modified. See `docs/REACTIONS.md`.
 
-## Phase 14 — Monetary Policy State (`states/`)
+## Phase 7 — Monetary Policy State (`states/`)
 
 `MonetaryPolicyStateAnalyzer` synthesizes a **derived, dated** state of the
-**observable policy dimensions** of each central bank from Phase 12
+**observable policy dimensions** of each central bank from Phase 5
 `FactChange`s. Each eligible policy change (subject in `STATE_SUBJECTS`, which
-is exactly Phase 13's reaction vocabulary; predicate not in
+is exactly Phase 6's reaction vocabulary; predicate not in
 `STATE_EXCLUDED_PREDICATES = {"projection"}`) yields exactly one state entry:
 the current side of the change is the newest known level of that dimension,
 observed at the temporal reference of the current-side publication
@@ -363,12 +363,12 @@ rebuilt idempotently per bank (`rebuild_policy_states`), empty results clear
 the scope, and source `Fact`s / `FactChange`s are never modified. See
 `docs/MONETARY_POLICY_STATE.md`.
 
-## Phase 15 — Forex Fundamentals (`forex/`)
+## Phase 8 — Forex Fundamentals (`forex/`)
 
 `ForexFundamentalsAnalyzer` synthesizes a **derived, dated, cross-economy**
-layer from two existing sources only: Phase 14 `MonetaryPolicyState` entries
-(monetary dimensions: `MONETARY_SUBJECTS`, Phase 14's reaction vocabulary) and
-Phase 4 `Fact`s (macro dimensions: `MACRO_SUBJECTS`, Phase 13's condition
+layer from two existing sources only: Phase 7 `MonetaryPolicyState` entries
+(monetary dimensions: `MONETARY_SUBJECTS`, Phase 7's reaction vocabulary) and
+Phase 4 `Fact`s (macro dimensions: `MACRO_SUBJECTS`, Phase 6's condition
 vocabulary). Each eligible source observation yields exactly one
 `ForexFundamental`: one fundamental dimension of one economy, whose currency is
 resolved from the canonical `CentralBank.currency` mapping (an economy is a

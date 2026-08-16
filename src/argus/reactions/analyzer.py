@@ -1,4 +1,4 @@
-"""Phase 13 — empirical policy reaction analysis.
+"""Phase 6 — empirical policy reaction analysis.
 
 The analyzer is **pure** (``PolicyReactionAnalyzer.analyze`` works on in-memory
 ``FactChange`` objects + a publications mapping and never touches a store) and
@@ -12,7 +12,7 @@ Relationship rules (documented in ``docs/REACTIONS.md``):
    not an error).
 2. The observation time of a change is the temporal reference of its
    **current-side** publication — ``meeting_date`` when set, else
-   ``publication_date`` (same reference Phase 12 uses to order observations).
+   ``publication_date`` (same reference Phase 5 uses to order observations).
 3. **No look-ahead**: a condition may relate to a policy response only when
    ``condition_observed_at <= policy_observed_at``.
 4. **Window**: the lag ``policy_observed_at - condition_observed_at`` must be
@@ -71,7 +71,7 @@ class PolicyReactionAnalyzer:
         """Derive the empirical reactions between condition-side and
         reaction-side changes.
 
-        ``changes`` are the ``FactChange`` relations produced by Phase 12;
+        ``changes`` are the ``FactChange`` relations produced by Phase 5;
         ``publications`` maps ``publication_id → Publication`` and supplies the
         temporal reference (``meeting_date`` else ``publication_date``) of each
         change's current-side publication.
@@ -194,11 +194,11 @@ def analyze_reactions(
     persist: bool = True,
 ) -> PolicyReactionResult:
     """Recompute the reactions of a bank (or the whole store) from the current
-    ``fact_changes`` table (Phase 12 output), persist them idempotently, and
+    ``fact_changes`` table (Phase 5 output), persist them idempotently, and
     return the result (reactions + observability warnings).
 
-    Phase 13 consumes Phase 12 output: the changes are read from the persisted
-    ``fact_changes`` table; Phase 12 must be run first. The ``policy_reactions``
+    Phase 6 consumes Phase 5 output: the changes are read from the persisted
+    ``fact_changes`` table; Phase 5 must be run first. The ``policy_reactions``
     table is derived data: ``analyze_reactions`` recomputes the full bank scope
     and *replaces* it (``rebuild_reactions``), so repeated runs are idempotent,
     empty results clear the scope, and a reaction can never survive the

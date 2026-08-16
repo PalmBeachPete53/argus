@@ -3,7 +3,7 @@
 Extracts the facts of a Norges Bank speech by the Governor, Deputy Governor or
 Executive Board members, published under ``/en/…/speeches-and-articles/``. Each
 speech has an explicit speaker and sections. Norges Bank's collective
-decisions / MPR are Phases 5/8 (gated), never mined here.
+decisions / MPR are Phase 4.1/8 (gated), never mined here.
 
 Bank-specific knowledge kept here:
 

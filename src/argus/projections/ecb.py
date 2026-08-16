@@ -1,4 +1,4 @@
-"""ECB — Staff macroeconomic projections extractor (Phase 9).
+"""ECB — Staff macroeconomic projections extractor (Phase 4.5).
 
 Extracts the official staff projections for the euro area from the normalized
 document **tables**, answering "what does the ECB staff project for each
@@ -13,7 +13,7 @@ variable and each year?":
   projections*, in percentage points), the stated revision deltas are kept as
   ``predicate = revision`` facts. A revision is **never computed**: the
   ``current − previous`` difference between two projection tables is never
-  calculated or invented (Phase 9 boundary).
+  calculated or invented (Phase 4.5 boundary).
 
 Projection tables are recognised structurally (``DocumentTable``):
 
@@ -39,16 +39,16 @@ never coerced into a core variable. In particular the "Technical assumptions"
 box (oil price, exchange rates, interest rates) is a set of *assumptions*, not
 projections, and yields nothing.
 
-Deliberately NOT extracted (Phase 9 boundary):
+Deliberately NOT extracted (Phase 4.5 boundary):
 
 - interpretation (hawkish/dovish, stance, market impact) — never;
-- policy decisions / rates / guidance — Phases 5–8, gated on their own
+- policy decisions / rates / guidance — Phases 4.1–4.4, gated on their own
   publication types;
 - analysis of the outlook (prose), methodology, disclaimer / copyright /
   legal-notice sections — ignored;
 - revisions **computed** as ``current − previous`` — never; only explicitly
   stated revision columns are kept;
-- Phases 10–11 (reports, speeches) — not this layer.
+- Phases 4.6–4.7 (reports, speeches) — not this layer.
 
 Design rules
 
@@ -94,7 +94,7 @@ from .base import ProjectionsExtractor
 EXTRACTION_VERSION = "9.0.0"
 
 # ---------------------------------------------------------------------------
-# Canonical Phase 9 subjects (controlled vocabulary). Reuses the Phase 6/7/8
+# Canonical Phase 4.5 subjects (controlled vocabulary). Reuses the Phase 4.2/7/8
 # subjects verbatim: a projection of headline HICP is the same ``inflation``
 # subject, a projection of HICP excluding energy and food is ``core_inflation``,
 # and a real GDP projection is ``gdp``. Only these three core variables are

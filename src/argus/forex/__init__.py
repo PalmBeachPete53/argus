@@ -1,8 +1,8 @@
-"""Phase 15 — forex fundamentals analysis.
+"""Phase 8 — forex fundamentals analysis.
 
 This package synthesizes the forex fundamentals layer: a ``ForexFundamental``
 is a derived, dated observation of one fundamental dimension of one economy
-(currency), established by one ``MonetaryPolicyState`` (Phase 14 — monetary
+(currency), established by one ``MonetaryPolicyState`` (Phase 7 — monetary
 dimensions) or one ``Fact`` (Phase 4 — macro dimensions); a
 ``ForexDifferential`` is a derived, dated arithmetic comparison of two
 fundamentals of two different economies on an explicitly declared shared

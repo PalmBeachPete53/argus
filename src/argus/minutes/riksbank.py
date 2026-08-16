@@ -1,5 +1,5 @@
 """Sveriges Riksbank —Minutes of the Executive Board's monetary policy meeting
-extractor (Phase 8).
+extractor (Phase 4.4).
 
 Extracts the facts of a Riksbank "Minutes of the Executive Board's monetary
 policy meeting" from the normalized document, answering "what did the Executive
@@ -9,7 +9,7 @@ Board explicitly say or discuss during the meeting?":
   financial conditions, risks and the monetary policy assessment;
 - forward guidance, verbatim.
 
-Phase 8 specifics — attribution (Riksbank vocabulary):
+Phase 4.4 specifics — attribution (Riksbank vocabulary):
 
 - ``Fact.speaker`` stays ``None``; the attribution the minutes state —
   ``dissent`` / ``one_member`` / ``some_members`` / ``most_members`` /
@@ -23,14 +23,14 @@ outlook for inflation" states no position and produces no fact; "A majority of
 the Executive Board assessed that inflation would be close to 2 per cent in
 2027" is mined normally.
 
-Deliberately NOT extracted (Phase 8 boundary):
+Deliberately NOT extracted (Phase 4.4 boundary):
 
 - the decision itself — the policy rate, the rate change and the vote are the
-  policy-rate-decision content and are Phase 5 territory (Riksbank
+  policy-rate-decision content and are Phase 4.1 territory (Riksbank
   ``monetary_policy_decision``); the minutes extractor never produces
   decision/rate/vote facts
 - hawkish/dovish interpretation
-- Phases 6/7/9/10/11 (statements, press conferences, projections, reports,
+- Phase 4.2/7/9/10/11 (statements, press conferences, projections, reports,
   speeches)
 
 An unknown section is never assumed to be economic: "absence of proof →

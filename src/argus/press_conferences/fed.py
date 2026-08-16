@@ -10,7 +10,7 @@ officials explicitly state during the press conference?":
 - the **Q&A answers**: the officials' individual answers to journalists, with
   the verbatim ALL-CAPS speaker label preserved (``Fact.speaker``) and the
   Q&A position preserved in ``identity_qualifier`` (``answer:<turn>:<n>`` vs
-  ``remarks:<n>`` — the Phase 7 attribution contract).
+  ``remarks:<n>`` — the Phase 4.3 attribution contract).
 
 Fed transcript structure. The transcript is a **turn-based dialog**: each turn
 is a speech-verbatim ALL-CAPS speaker label followed by that speaker's words,
@@ -55,9 +55,9 @@ helpers in ``_shared.py``):
 - Fed inflation vocabulary ("PCE", "core inflation", "consumer prices") on top
   of the generic English inflation anchors.
 
-Deliberately NOT extracted (Phase 7 / press-conference boundary): the decision
-itself (wording, rates, changes, effective date) — Phase 5, gated on decision
-publications; decision rationale — Phase 6; journalist question content;
+Deliberately NOT extracted (Phase 4.3 / press-conference boundary): the decision
+itself (wording, rates, changes, effective date) — Phase 4.1, gated on decision
+publications; decision rationale — Phase 4.2; journalist question content;
 hawkish/dovish or stance interpretation, market expectations, forex
 fundamentals — none of these is ever invented here.
 """
@@ -131,7 +131,7 @@ def _is_fed_label(line: str) -> bool:
 
 # ---------------------------------------------------------------------------
 # FOMC guidance phrasing — Fed vernacular, distinct vocabulary, same structural
-# "guidance" slot as Phase 7.
+# "guidance" slot as Phase 4.3.
 # ---------------------------------------------------------------------------
 _GUIDANCE_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\bast\s+appropriate\b", re.IGNORECASE),

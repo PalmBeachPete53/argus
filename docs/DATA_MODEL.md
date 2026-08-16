@@ -2,19 +2,19 @@
 
 This document is the authoritative reference for the **Fact layer** of Argus.
 It defines what a Fact is, what it is not, and every design decision behind
-`src/argus/facts/`. Future extractors (Phases 5–11) and analysis layers
-(Phases 12–17) are expected to build on this contract.
+`src/argus/facts/`. Future extractors (Phases 4.1–4.7) and analysis layers
+(Phases 5–10) are expected to build on this contract.
 
 ## Where Facts sit in the pipeline
 
 ```
 Normalized Document                      ← Phase 2
     ↓
-Type-Specific Extractor                  ← Phases 5+ (decisions, statements, press conferences)
+Type-Specific Extractor                  ← Phases 4.1+ (decisions, statements, press conferences)
     ↓
 Fact                                     ← Phase 4 (this layer)
     ↓
-Temporal / Cross-Publication Analysis    ← Phase 12 (src/argus/changes/, see docs/CHANGES.md)
+Temporal / Cross-Publication Analysis    ← Phase 5 (src/argus/changes/, see docs/CHANGES.md)
 ```
 
 The Fact model is the **canonical interface** between publication-specific
@@ -48,7 +48,7 @@ verify it against the source.
 - **Not a model interpretation** — `"Argus considers the central bank
   hawkish"` belongs to a later analytical layer, never here.
 
-Interpretation belongs to later phases (12+). The Fact layer stays as close as
+Interpretation belongs to later phases (5+). The Fact layer stays as close as
 reasonably possible to the source material.
 
 ## Relation to existing models
@@ -313,7 +313,7 @@ Store operations:
 
 ## Extractor contract: `ExtractionResult`
 
-Future type-specific extractors (Phase 5+) return one object per
+Future type-specific extractors (Phase 4.1+) return one object per
 `(publication, document)`:
 
 ```

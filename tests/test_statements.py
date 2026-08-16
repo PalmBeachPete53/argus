@@ -1,4 +1,4 @@
-"""Phase 6 — ECB Monetary Policy Statement extractor: end-to-end tests using the
+"""Phase 4.2 — ECB Monetary Policy Statement extractor: end-to-end tests using the
 local HTML fixtures and the existing Store (vertical slice)."""
 
 from __future__ import annotations
@@ -257,7 +257,7 @@ def test_forward_guidance_is_verbatim_and_never_interpreted():
         assert f.value.value == f.source_text  # verbatim, no stance interpretation
         assert f.identity_qualifier
         assert f.identity_qualifier.startswith("policy_guidance:")
-    # the decision wording is Phase 5 territory and is NOT mined here
+    # the decision wording is Phase 4.1 territory and is NOT mined here
     assert not any(f.subject == "monetary_policy_decision" for f in result.facts)
 
 
@@ -295,7 +295,7 @@ def test_provenance_is_traceable():
 
 
 def test_no_decision_facts_from_statement():
-    """The decision (wording, rates, changes, effective date) is Phase 5
+    """The decision (wording, rates, changes, effective date) is Phase 4.1
     territory and never surfaces from a statement publication."""
     result = extract_fixture("ecb_statement.html")
     phase5_subjects = {
@@ -602,7 +602,7 @@ def test_gating_statement_classification_wins_over_contradictory_cache(tmp_path)
 
 def test_gating_statement_cache_cannot_override_minutes_classification(tmp_path):
     """The cache saying `monetary_policy_statement` can never bypass a `minutes`
-    classification — extraction is refused and no Phase 6 fact is produced."""
+    classification — extraction is refused and no Phase 4.2 fact is produced."""
     store = _store_statement(tmp_path)
     classify_statement(store, publication_type="minutes")
     assert extract_statement(store, statement_publication(publication_type="monetary_policy_statement")) == []
@@ -644,7 +644,7 @@ def test_gating_publication_type_cache_alone_never_authorizes(tmp_path):
 def test_gating_refusal_never_deletes_existing_facts(tmp_path):
     """A classification that refuses extraction must NOT delete facts that an
     earlier authorized extraction persisted — pipeline-wide classification
-    changes are not Phase 6's concern."""
+    changes are not Phase 4.2's concern."""
     store = _store_statement(tmp_path)
     classify_statement(store)
     assert len(extract_statement(store, statement_publication())) == 1
@@ -655,7 +655,7 @@ def test_gating_refusal_never_deletes_existing_facts(tmp_path):
 
 
 def test_gating_cross_phase_types_all_refuse_statement(tmp_path):
-    """Phase 6 refuses publications of every other phase's type — gating is on
+    """Phase 4.2 refuses publications of every other phase's type — gating is on
     the authoritative classification, never on the cache."""
     for other_type in (
         "monetary_policy_decision",
@@ -800,7 +800,7 @@ def test_extract_statement_batch_runs_all_statements(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Phase 5 / Phase 6 coexistence
+# Phase 4.1 / Phase 4.2 coexistence
 # ---------------------------------------------------------------------------
 
 
@@ -819,7 +819,7 @@ def test_phase5_and_phase6_do_not_overlap(tmp_path):
     )
     # the decision extractor, even called directly, never mines the statement's
     # own section: the rationale and its forward guidance sit under the
-    # "Monetary policy statement" heading (the Phase 6 boundary)
+    # "Monetary policy statement" heading (the Phase 4.2 boundary)
     decision_result = EcbDecisionExtractor().extract(pub, normalized_fixture("ecb_statement.html"))
     assert not any(f.subject == SUBJECT_MONETARY_POLICY for f in decision_result.facts)
     assert not any(

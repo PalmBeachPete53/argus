@@ -4,7 +4,7 @@ Extracts the facts of a Riksbank speech (tal) by the Governor, the
 First/Deputy Governors or Executive Board members, published on the English
 site under ``/en-gb/press-och-publicerat/tal/`` (tal = speech). Each speech has
 an explicit speaker and sections. Riksbank's collective decisions / minutes are
-Phases 5/8 (gated), never mined here.
+Phase 4.1/8 (gated), never mined here.
 
 Bank-specific knowledge kept here:
 

@@ -1,7 +1,7 @@
-"""Phase 14 — the Monetary Policy State model.
+"""Phase 7 — the Monetary Policy State model.
 
 A ``MonetaryPolicyState`` is a **derived, dated observation of ONE policy
-dimension of ONE central bank**, established by ONE Phase 12 ``FactChange``.
+dimension of ONE central bank**, established by ONE Phase 5 ``FactChange``.
 The current side of a policy ``FactChange`` is precisely "the newest known
 value of this dimension, known at ``observed_at``"; the state historises those
 observations so that "what is the observable state of a central bank's
@@ -9,15 +9,14 @@ monetary policy at instant T?" is always answerable without look-ahead.
 
 Epistemic boundary (see ``docs/MONETARY_POLICY_STATE.md``):
 
-- ``Fact`` / ``FactChange`` are **observed** (Phases 4 / 12).
-- A ``PolicyReaction`` (Phase 13) is **inferred**.
+- ``Fact`` / ``FactChange`` are **observed** (Phases 4 /5).
+- A ``PolicyReaction`` (Phase 6) is **inferred**.
 - A ``MonetaryPolicyState`` is **synthesized**: ``synthesized`` is always
   ``True``, its ``formulation`` is purely descriptive, and it is never
   presented as a new fact, as a stance, as a forecast, or as a
   trading/forex signal.
 
-The state consumes Phase 12 output (``FactChange`` relations) and reuses Phase
-13's reaction-side vocabulary as its dimensions. Phase 13's *inferred*
+The state consumes Phase 5 output (``FactChange`` relations) and reuses Phase 6's reaction-side vocabulary as its dimensions. Phase 6's *inferred*
 ``PolicyReaction`` values are deliberately **not** state inputs.
 
 This layer never mutates the ``FactChange`` / ``Fact`` inputs, never reads
@@ -35,7 +34,7 @@ from ..normalize import from_iso, iso, now_utc
 from ..reactions.base import REACTION_SUBJECTS
 
 # ---------------------------------------------------------------------------
-# State dimension vocabulary — exactly Phase 13's reaction-side subjects
+# State dimension vocabulary — exactly Phase 6's reaction-side subjects
 # (the observable monetary-policy dimensions). Shared with the reaction layer
 # so the two analyses never drift.
 # ---------------------------------------------------------------------------

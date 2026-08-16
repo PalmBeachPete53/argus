@@ -1,6 +1,6 @@
-"""BoC — Bank of Canada statement extractor (Phase 6).
+"""BoC — Bank of Canada statement extractor (Phase 4.2).
 
-Encapsulates the Bank of Canada's vocabulary on top of the shared Phase 6
+Encapsulates the Bank of Canada's vocabulary on top of the shared Phase 4.2
 engine. BoC language uses "per cent"; the reference date is the "July 24, 2026"
 style release date. Section headings mirror the Monetary Policy Report
 structure (inflation, the labour market, economic activity, risks).

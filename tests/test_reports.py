@@ -1,4 +1,4 @@
-"""Phase 10 — ECB Monetary Policy Report / Reports extractor: end-to-end tests
+"""Phase 4.6 — ECB Monetary Policy Report / Reports extractor: end-to-end tests
 using the local HTML fixtures and the existing Store (vertical slice).
 
 Covers: classification gating (``monetary_policy_report``), conservative
@@ -12,7 +12,7 @@ balanced) only when explicit, table extraction (variable × year × value × uni
 integrity, unit from the table's own caption), provenance (verbatim
 source_text, source_location, extraction version/method), ``speaker`` always
 ``None``, within-run deduplication, deterministic extraction, idempotent and
-empty-result persistence, and Phase 5/6/7/8/9 coexistence.
+empty-result persistence, and Phase 4.1/6/7/8/9 coexistence.
 """
 
 from __future__ import annotations
@@ -360,7 +360,7 @@ def test_known_general_overview_heading_is_mined():
 
 
 # ---------------------------------------------------------------------------
-# Phase 10 hardening — exact heading routing (near-miss + identity)
+# Phase 4.6 hardening — exact heading routing (near-miss + identity)
 # ---------------------------------------------------------------------------
 
 NEAR_MISS_HEADINGS = [
@@ -447,7 +447,7 @@ def test_heading_routing_is_exact_identity_not_substring():
 
 
 # ---------------------------------------------------------------------------
-# Phase 10 final hardening — exact IGNORE heading matching (controlled
+# Phase 4.6 final hardening — exact IGNORE heading matching (controlled
 # vocabulary, never substring coincidence)
 # ---------------------------------------------------------------------------
 
@@ -536,7 +536,7 @@ def test_unknown_heading_with_economic_content_yields_zero_facts():
 
 
 # ---------------------------------------------------------------------------
-# Phase 10 hardening — content anchors require context, never a bare token
+# Phase 4.6 hardening — content anchors require context, never a bare token
 # ---------------------------------------------------------------------------
 
 
@@ -683,7 +683,7 @@ def test_labour_context_variants_are_mined():
 
 
 # ---------------------------------------------------------------------------
-# Phase 10 hardening — content-first precedence is fixed and deterministic
+# Phase 4.6 hardening — content-first precedence is fixed and deterministic
 # ---------------------------------------------------------------------------
 
 
@@ -1384,14 +1384,14 @@ def test_empty_result_persistence_is_idempotent(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Phase 5 / 6 / 7 / 8 / 9 coexistence
+# Phase 4.1 / 6 / 7 / 8 / 9 coexistence
 # ---------------------------------------------------------------------------
 
 
 def test_other_extractors_do_not_overlap_with_reports(tmp_path):
     """A monetary policy report publication never feeds the decision, statement,
     press conference, minutes or projections extractors (gating on
-    classification), and Phase 10 never emits Phase 5/6/7/8/9 fact subjects."""
+    classification), and Phase 4.6 never emits Phase 4.1/6/7/8/9 fact subjects."""
     store = _store_report(tmp_path)
     pub = reports_publication()
     classify_report(store)
@@ -1401,7 +1401,7 @@ def test_other_extractors_do_not_overlap_with_reports(tmp_path):
     assert extract_press_conference(store, pub) == []
     assert extract_minutes(store, pub) == []
     assert extract_projections(store, pub) == []
-    # Phase 10 extraction produces its own facts only
+    # Phase 4.6 extraction produces its own facts only
     extract_report(store, pub)
     persisted = store.get_facts(publication_id="pub-ecb-report")
     phase_subjects = {

@@ -1,8 +1,8 @@
-"""RBA — Reserve Bank of Australia statement extractor (Phase 6).
+"""RBA — Reserve Bank of Australia statement extractor (Phase 4.2).
 
 Encapsulates the RBA's "Statement by the Reserve Bank Board: Monetary Policy
 Decision" / "Statement on Monetary Policy" vocabulary on top of the shared
-Phase 6 engine. RBA language uses "per cent"; the release date is the "Date:
+Phase 4.2 engine. RBA language uses "per cent"; the release date is the "Date:
 4 August 2026" header.
 """
 

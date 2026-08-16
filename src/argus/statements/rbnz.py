@@ -1,7 +1,7 @@
-"""RBNZ — Reserve Bank of New Zealand statement extractor (Phase 6).
+"""RBNZ — Reserve Bank of New Zealand statement extractor (Phase 4.2).
 
 Encapsulates the RBI's (Reserve Bank of New Zealand) vocabulary on top of the
-shared Phase 6 engine. RBNZ language uses "percent"; the release date is the
+shared Phase 4.2 engine. RBNZ language uses "percent"; the release date is the
 "19 November 2026" style release date. Section headings mirror the Monetary
 Policy Statement structure (the current situation, the outlook, inflation).
 """

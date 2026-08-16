@@ -1,4 +1,4 @@
-"""Phase 12 — deterministic identity of a ``FactChange``.
+"""Phase 5 — deterministic identity of a ``FactChange``.
 
 A ``change_id`` is derived solely from the two source Facts and the change
 kind, so the *same pair of facts observed the same way always yields the same

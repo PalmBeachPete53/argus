@@ -39,7 +39,7 @@ from ..facts import (
 from ..normalize import normalize_title
 
 # Canonical Phase 4.x/11 Speech subjects (controlled vocabulary). These reuse
-# the Phase 6/7/8/10 subjects verbatim — no subject is added for speeches.
+# the Phase 4.2/7/8/10 subjects verbatim — no subject is added for speeches.
 SUBJECT_INFLATION = "inflation"
 SUBJECT_CORE_INFLATION = "core_inflation"
 SUBJECT_INFLATION_EXPECTATIONS = "inflation_expectations"
@@ -155,7 +155,7 @@ def is_quoted_other(sentence: str, speaker_label: str | None) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Qualitative fact gate — Phase 11 hardening. A qualitative assessment is only
+# Qualitative fact gate — Phase 4.7 hardening. A qualitative assessment is only
 # emitted when the sentence states an explicit economic assertion; economic
 # vocabulary alone ("the economy", "credit", "investment", "growth") is never
 # enough. The gate is layered:

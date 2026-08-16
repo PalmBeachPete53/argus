@@ -1,11 +1,11 @@
-"""Phase 14 — monetary policy state analysis.
+"""Phase 7 — monetary policy state analysis.
 
 Tests the pure ``MonetaryPolicyStateAnalyzer`` and the store integration
 (``analyze_policy_state`` + ``monetary_policy_states`` persistence).
 
 Coverage:
 
-- **Vocabulary**: state dimensions == Phase 13 reaction-side subjects;
+- **Vocabulary**: state dimensions == Phase 6 reaction-side subjects;
   excluded (forecast) predicates documented; dimensions are disjoint from the
   excluded set.
 - **Model**: ``synthesized`` is always ``True``; formulation is purely

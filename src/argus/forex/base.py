@@ -1,23 +1,23 @@
-"""Phase 15 — the Forex Fundamentals model.
+"""Phase 8 — the Forex Fundamentals model.
 
 A ``ForexFundamental`` is a **derived, dated observation of ONE fundamental
 dimension of ONE economy (currency)**, established by ONE source observation:
-either a ``MonetaryPolicyState`` (Phase 14 — monetary dimensions) or a ``Fact``
+either a ``MonetaryPolicyState`` (Phase 7 — monetary dimensions) or a ``Fact``
 (Phase 4 — macro dimensions). A ``ForexDifferential`` is a **derived, dated
 arithmetic comparison of two fundamentals of two different economies on an
 explicitly declared, shared dimension**.
 
 Epistemic boundary (see ``docs/FOREX_FUNDAMENTALS.md``):
 
-- ``Fact`` / ``FactChange`` are **observed** (Phases 4 / 12).
-- A ``PolicyReaction`` (Phase 13) is **inferred**.
-- A ``MonetaryPolicyState`` (Phase 14) is **synthesized**.
-- A ``ForexFundamental`` / ``ForexDifferential`` (Phase 15) is **synthesized**:
+- ``Fact`` / ``FactChange`` are **observed** (Phases 4 /5).
+- A ``PolicyReaction`` (Phase 6) is **inferred**.
+- A ``MonetaryPolicyState`` (Phase 7) is **synthesized**.
+- A ``ForexFundamental`` / ``ForexDifferential`` (Phase 8) is **synthesized**:
   ``synthesized`` is always ``True``, the ``formulation`` is purely
   descriptive, and neither is ever presented as a new fact, as a stance, as a
   forecast, as a fair value, or as a trading/forex signal.
 
-The layer consumes Phase 14 ``MonetaryPolicyState`` entries and Phase 4 ``Fact``
+The layer consumes Phase 7 ``MonetaryPolicyState`` entries and Phase 4 ``Fact``
 objects only. It never reads source documents, never reconstructs rates, never
 mutates its inputs, and never uses LLM / network / fuzzy / semantic logic.
 """
@@ -34,8 +34,8 @@ from ..reactions.base import CONDITION_SUBJECTS
 from ..states.base import STATE_SUBJECTS
 
 # ---------------------------------------------------------------------------
-# Dimension vocabulary. Monetary dimensions are Phase 14's reaction-side
-# subjects (the observable policy dimensions); macro dimensions are Phase 13's
+# Dimension vocabulary. Monetary dimensions are Phase 7's reaction-side
+# subjects (the observable policy dimensions); macro dimensions are Phase 6's
 # condition-side subjects (the observed economic conditions). Reused, never
 # re-declared, so the layers never drift.
 # ---------------------------------------------------------------------------

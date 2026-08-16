@@ -1,4 +1,4 @@
-"""Phase 7 — type-specific press conference extractors.
+"""Phase 4.3 — type-specific press conference extractors.
 
 An extractor converts a ``NormalizedDocument`` of a press conference transcript
 into a list of provenance-carrying ``Fact`` assertions, following the
@@ -17,11 +17,11 @@ on ``central_bank``.
 
 A press conference transcript differs from a decision/statement: it mixes the
 collective **introductory statement** (remarks) with the **individual answers**
-of officials to journalists' questions. The Phase 7 extractors therefore keep,
+of officials to journalists' questions. The Phase 4.3 extractors therefore keep,
 per Fact, the attribution context (remarks vs Q&A answer, the Q&A turn, and the
 verbatim official speaker when the document labels one) in ``identity_qualifier``
 and the ``Fact.speaker`` attribute — an individual's words are never presented
-as a collective decision (roadmap Phase 7 criterion).
+as a collective decision (roadmap Phase 4.3 criterion).
 """
 
 from __future__ import annotations
@@ -84,7 +84,7 @@ def extract_press_conference(
     state: ``rebuild_facts_for_document`` (delete + insert) runs for every
     valid normalized document, **including when the result is empty**, so a
     re-extraction that now yields no facts clears the stale facts of that
-    document instead of leaving them behind (same guarantee as Phase 6).
+    document instead of leaving them behind (same guarantee as Phase 4.2).
 
     Returns the list of ``ExtractionResult`` (empty if no extractor applies or
     the publication is not classified as ``press_conference``).
@@ -121,7 +121,7 @@ def _is_press_conference_publication(store, publication, *, expected_type: str) 
     """Gate extraction to press conference publications.
 
     The ``classifications`` table is the **single source of truth** (same strict
-    mechanism as Phase 6, ``statements/base.py``): extraction is authorized only
+    mechanism as Phase 4.2, ``statements/base.py``): extraction is authorized only
     when an authoritative classification record exists for the publication and
     its ``publication_type`` is ``press_conference``. The denormalized
     ``publication.publication_type`` cache is never used to infer authorization,

@@ -1,4 +1,4 @@
-# Type-Specific Extractors (Phase 5)
+# Type-Specific Extractors (Phase 4.1)
 
 This document is the reference for the first type-specific extractor: the
 **ECB Monetary Policy Decision extractor**. It builds on the Phase 4 contract
@@ -19,7 +19,7 @@ facts table
 - the ECB extractor producing structured **Facts**
 - an `ExtractionResult` handed to the existing `Store`
 
-No aggregation, no temporal analysis, no interpretation (Phases 12+).
+No aggregation, no temporal analysis, no interpretation (Phase 5+).
 
 ## Extractor contract
 
@@ -132,28 +132,28 @@ an interpreted policy stance.
 - **Votes.** ECB Monetary Policy Decisions do not report individual votes (no
   unanimity/dissent counts on the decision page). Vote extraction is therefore
   **unsupported for ECB Decision documents** and a vote fact is never
-  fabricated. Votes/dissents belong to Minutes / Meeting Accounts (Phase 8).
+  fabricated. Votes/dissents belong to Minutes / Meeting Accounts (Phase 4.4).
 - **Risk assessment.** The decision document carries no risk assessment; risk
   language on the ECB website belongs to the separate Monetary Policy
   Statement, the press conference and the Economic Bulletin. Risk assessment is
-  therefore **not extracted from ECB decisions** — it is Phase 6 territory
+  therefore **not extracted from ECB decisions** — it is Phase 4.2 territory
   (see boundary below).
 - **Inflation/growth/employment analysis.** The macro-economic justification is
-  **deferred to Phase 6** even when it appears on the same page.
+  **deferred to Phase 4.2** even when it appears on the same page.
 - hawkish/dovish assessment, forex interpretation, temporal/cross-publication
   analysis — later phases;
 - LLM extraction — prohibited by invariant 8.
 
-### Phase 5 / Phase 6 boundary
+### Phase 4.1 / Phase 4.2 boundary
 
-Phase 5 answers *"what did the central bank explicitly decide or announce as
+Phase 4.1 answers *"what did the central bank explicitly decide or announce as
 part of the decision?"*. Content belonging to the separate **Monetary Policy
 Statement** (macro-economic justification, inflation/growth/employment
 analysis, full risk framework, formulation-change analysis, temporal
-comparison) is Phase 6 and is **not** extracted. Concretely:
+comparison) is Phase 4.2 and is **not** extracted. Concretely:
 
 - content under a heading normalized to `monetary policy statement` is **not**
-  mined for Phase 5 facts: the same sentence that is a source of forward
+  mined for Phase 4.1 facts: the same sentence that is a source of forward
   guidance inside the decision body is **not** extracted when it sits in the
   statement section (regression-tested);
 
@@ -183,7 +183,7 @@ distinct facts.
 `tests/fixtures/documents/ecb_decision*.html` (modeled on the real ECB page:
 date paragraph, decision section, "Key ECB interest rates" section with the
 enumeration + "with effect from …", APP/PEPP/TLTRO sections, forward guidance,
-decoy dates, and a "Monetary policy statement" section used to prove the Phase 6
+decoy dates, and a "Monetary policy statement" section used to prove the Phase 4.2
 boundary). `tests/test_decisions.py` runs the normalizer → extractor → store
 slice and asserts, per fixture:
 
@@ -216,10 +216,10 @@ tests** (no new fixtures, documents built inline):
 
 ---
 
-# Type-Specific Extractors — Phase 6 (Monetary Policy Statement)
+# Type-Specific Extractors — Phase 4.2 (Monetary Policy Statement)
 
 This section is the reference for the **ECB Monetary Policy Statement
-extractor**, built on the same Phase 4 contract and following the Phase 5
+extractor**, built on the same Phase 4 contract and following the Phase 4.1
 pattern (`src/argus/statements/`).
 
 ## Pipeline
@@ -268,7 +268,7 @@ class StatementExtractor(ABC):
   its own) are all refused — classification runs first
   (classification → extraction). A gating refusal never deletes facts that an
   earlier authorized extraction persisted (pipeline-wide classification changes
-  are out of Phase 6's scope).
+  are out of Phase 4.2's scope).
 
 ## ECB statement extractor
 
@@ -331,7 +331,7 @@ risk target is read from the wording (`inflation` → `inflation_risk`,
 **never inferred** from absence: a statement with no risk section emits a
 `no_risk_assessment` warning and no risk fact.
 
-The risk **anchor** is the same controlled set used by Phases 10/11
+The risk **anchor** is the same controlled set used by Phase 4.6/11
 (`risks? to/for/around/…`, `downside/upside/two-sided/… risks`,
 `uncertain/uncertainty/uncertainties`, `tilted`): a word merely carrying the
 "risk" prefix ("risky", "risk-free", "riskiness") is never a risk anchor, and a
@@ -354,23 +354,22 @@ A percentage immediately followed by a reference period keeps it as
 - `MEDIUM` — verbatim qualitative assessments (sentence-level category
   identification).
 
-### Not covered — Phase 6 boundaries
+### Not covered — Phase 4.2 boundaries
 
-- **The decision itself** (wording, rates, changes, effective date) stays Phase
-  5, gated on decision publications; the decision sentences inside a statement
+- **The decision itself** (wording, rates, changes, effective date) stays Phase 4.1, gated on decision publications; the decision sentences inside a statement
   ("… decided to lower the three key ECB interest rates by 25 basis points") are
   never mined.
-- **Formulation-change analysis** (old wording vs new wording) is Phase 12;
-  Phase 6 only preserves the current wording verbatim so Phase 12 can diff it.
+- **Formulation-change analysis** (old wording vs new wording) is Phase 5;
+  Phase 4.2 only preserves the current wording verbatim so Phase 5 can diff it.
 - **Votes, hawkish/dovish or stance interpretation, forex fundamentals** —
   none of these is ever produced here.
 - An absent optional section (no risk assessment, no forward guidance) never
   becomes an invented "balanced" / "no guidance" fact; it is surfaced as a
   warning (`no_risk_assessment`, `no_forward_guidance`).
 
-### Phase 5 / Phase 6 boundary (statement side)
+### Phase 4.1 / Phase 4.2 boundary (statement side)
 
-Phase 6 reuses the `policy_guidance` subject introduced in Phase 5 for
+Phase 4.2 reuses the `policy_guidance` subject introduced in Phase 4.1 for
 statement-level forward guidance: the content type is the same, only the
 publication type differs (gating keeps the two extractors disjoint). The
 decision extractor never mines the statement's own section (heading normalized
@@ -386,13 +385,13 @@ slice and asserts, per fixture:
 
 - the exact expected facts (rationale, guidance, assessments, quantitative
   values with their reference periods, risk orientations) with warnings;
-- no invented facts — no Phase 5 decision subjects, no vote, no
+- no invented facts — no Phase 4.1 decision subjects, no vote, no
   hawkish/dovish label, nothing for absent optional categories;
 - verbatim provenance: each `fact.source_text` and `fact.value.source_text` is
   a substring of the referenced section;
 - deterministic extraction and idempotent Store persistence;
 - classification gating (`extract_statement` skips non-statement
-  publications) and Phase 5/6 coexistence.
+  publications) and Phase 4.1/6 coexistence.
 
 In addition, `tests/test_statements.py` holds dedicated **hardening regression
 tests** (no new fixtures, documents built inline):
@@ -420,10 +419,10 @@ tests** (no new fixtures, documents built inline):
 
 ---
 
-# Type-Specific Extractors — Phase 7 (Press Conferences)
+# Type-Specific Extractors — Phase 4.3 (Press Conferences)
 
 This section is the reference for the **ECB Press Conference extractor**, built
-on the same Phase 4 contract and following the Phase 5/6 patterns
+on the same Phase 4 contract and following the Phase 4.1/6 patterns
 (`src/argus/press_conferences/`).
 
 ## Pipeline
@@ -486,7 +485,7 @@ labelled `Question:` / `Answer:` markers) applies when the heading carries no
 signal. Only the colon-labelled lines are Q&A markers — a natural sentence
 beginning with "Question marks remain …" is never read as one.
 
-**Routing is conservative** (Phase 7 hardening): an unknown heading is mined
+**Routing is conservative** (Phase 4.3 hardening): an unknown heading is mined
 only when the text carries a reliable Q&A signal, and is otherwise **ignored** —
 `UNKNOWN ≠ REMARKS`. "Absence of proof → absence of extraction": a future
 section such as an appendix, biography, financial-stability annex, legal
@@ -519,7 +518,7 @@ inflation > labour > growth. An unmatched sentence produces no fact
 
 ### Provenance — speaker attribution
 
-Every Fact carries the Phase 5/6 provenance fields (`source_location`,
+Every Fact carries the Phase 4.1/6 provenance fields (`source_location`,
 `source_text`, value-level `source_text`, `extraction_method = regex`,
 `extraction_version = 7.0.0`, `confidence`). In addition:
 
@@ -531,8 +530,8 @@ Every Fact carries the Phase 5/6 provenance fields (`source_location`,
 - **`identity_qualifier`** — `remarks:{n}` for remarks facts,
   `answer:{turn}:{n}` for Q&A answer facts (`turn` = 1-based Q&A turn, `n` =
   per-turn ordinal). This is what distinguishes *"what the Governing Council
-  decided"* (decision facts, Phase 5) from *"what an individual governor said"*
-  (individual attribution) — the Phase 7 validation criterion.
+  decided"* (decision facts, Phase 4.1) from *"what an individual governor said"*
+  (individual attribution) — the Phase 4.3 validation criterion.
 - The journalist's **questions are never mined**: `Question:` lines start a
   turn and are skipped.
 
@@ -552,7 +551,7 @@ rejected, and the question phrasing is never reclassified by the model.
 
 ### Risk assessment
 
-Identical to Phase 6: a categorical orientation fact (`upside` / `downside` /
+Identical to Phase 4.2: a categorical orientation fact (`upside` / `downside` /
 `balanced`, with `two-sided` / `symmetric` normalized to `balanced`) when an
 explicit orientation word is present; otherwise a verbatim text assessment.
 Absence never becomes an invented orientation — it is surfaced as a
@@ -560,7 +559,7 @@ Absence never becomes an invented orientation — it is surfaced as a
 
 ### Quantitative values & confidence
 
-Identical gate to Phase 6: values are extracted only from explicit value
+Identical gate to Phase 4.2: values are extracted only from explicit value
 claims, so "the 2% target" / "close to 2%" / "converging towards 2%" is never
 read as a value; a percentage with a following reference period keeps a
 `FactPeriod` (year, or month when a month is named). Confidence: `HIGH` for
@@ -571,20 +570,20 @@ percentages and categorical orientations, `MEDIUM` for verbatim text.
 `no_sections` (early return), `no_remarks`, `no_qna`,
 `no_risk_assessment`, `no_forward_guidance`, `non_economic_question_skipped`.
 
-### Not covered — Phase 7 boundaries
+### Not covered — Phase 4.3 boundaries
 
 - **No collective decision from an individual statement**: a governor's remark
   is a personal statement (`speaker` set), never a `monetary_policy_decision`
-  fact — that subject belongs to Phase 5 and is gated on decision
+  fact — that subject belongs to Phase 4.1 and is gated on decision
   publications.
-- **No Phase 5/6 subjects**: decision wording, rates, changes, effective date,
+- **No Phase 4.1/6 subjects**: decision wording, rates, changes, effective date,
   rationale, and decision-type forward guidance are never mined from a press
   conference (regression-tested via gating + phase-separation tests).
 - No hawkish/dovish / stance / forex / trading interpretation — later phases;
   no LLM (invariant 8); multi-thematic section routing limitations inherited
-  from Phase 6, documented, not fixed in this phase.
+  from Phase 4.2, documented, not fixed in this phase.
 
-### Phase 5 / 6 / 7 boundary
+### Phase 4.1 / 6 / 7 boundary
 
 The three extractors are disjoint by **publication type** (classification
 gating): decisions, statements and press conferences are never cross-mined.
@@ -603,12 +602,12 @@ non-economic questions). `tests/test_press_conferences.py` runs the normalizer
   texts) with warnings;
 - remarks vs. Q&A routing, speaker attribution (exact, verbatim, never
   invented), journalist content never mined, non-economic turns skipped;
-- no invented facts — no Phase 5/6 subjects, no interpretation, nothing for
+- no invented facts — no Phase 4.1/6 subjects, no interpretation, nothing for
   absent optional categories;
 - verbatim provenance: each `fact.source_text` and `fact.value.source_text` is
   a substring of the referenced section;
 - deterministic extraction and idempotent Store persistence, `speaker`
-  roundtrip through the store, classification gating and Phase 5/6
+  roundtrip through the store, classification gating and Phase 4.1/6
   coexistence.
 
 In addition, `tests/test_press_conferences.py` holds dedicated **hardening
@@ -666,7 +665,7 @@ Fed-official label is one containing a role word (`CHAIRMAN` / `CHAIRWOMAN` /
 ALL-CAPS name label — and the ambiguous `MR.` / `MS.` forms — is a **journalist /
 moderator** turn: it starts a new turn, is **never mined** and never invented a
 speaker. The label is preserved verbatim in `Fact.speaker` (ALL-CAPS, trailing
-period stripped). `identity_qualifier` follows the Phase 7 contract —
+period stripped). `identity_qualifier` follows the Phase 4.3 contract —
 `remarks:{n}` / `answer:{turn}:{n}` — which is what distinguishes *collective
 communication* from *individual attribution*.
 
@@ -684,7 +683,7 @@ Supported facts, value gate, risk facts, confidence (`HIGH` percentages and
 categorical orientations, `MEDIUM` verbatim text) and warnings (`no_sections`,
 `no_remarks`, `no_qna`, `no_risk_assessment`, `no_forward_guidance`) are
 identical to the ECB press conference extractor. Deliberately **not** extracted:
-the decision itself (Phase 5), decision rationale (Phase 6),
+the decision itself (Phase 4.1), decision rationale (Phase 4.2),
 hawkish/dovish / stance / market / forex interpretation; journalist question
 content is never mined.
 
@@ -795,10 +794,10 @@ across the Governor and both Deputy Governors. See `docs/PRESS_CONFERENCES.md`.
 
 ---
 
-# Type-Specific Extractors — Phase 8 (Minutes / Meeting Accounts)
+# Type-Specific Extractors — Phase 4.4 (Minutes / Meeting Accounts)
 
 This section is the reference for the **ECB Minutes / Meeting Account
-extractor**, built on the same Phase 4 contract and following the Phase 5–7
+extractor**, built on the same Phase 4 contract and following the Phase 4.1–4.3
 patterns (`src/argus/minutes/`).
 
 ## Pipeline
@@ -891,7 +890,7 @@ is an unknown heading and is ignored (0 facts, `UNKNOWN ≠ ECONOMIC`).
 | `growth_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
 
 Sentence classification is **content-first for every mined section** with the
-same deterministic precedence as Phase 7 (guidance > policy > risk > financial
+same deterministic precedence as Phase 4.3 (guidance > policy > risk > financial
 > inflation > labour > growth); the section heading only gates *whether* the
 section is mined, never *how* a sentence is classified. An unmatched sentence
 produces no fact (reliability over coverage).
@@ -911,9 +910,9 @@ attribution: "Members noted that inflation was expected to average 2.0% in
 
 ### Provenance — attribution without invented identities
 
-Every Fact carries the Phase 5–7 provenance fields (`source_location`,
+Every Fact carries the Phase 4.1–4.3 provenance fields (`source_location`,
 `source_text`, value-level `source_text`, `extraction_method = regex`,
-`extraction_version = 8.0.0`, `confidence`). Phase 8 specifics:
+`extraction_version = 8.0.0`, `confidence`). Phase 4.4 specifics:
 
 - **`Fact.speaker` is always `None`** — the accounts do not reliably label
   individual governors and a name is never guessed.
@@ -922,21 +921,21 @@ Every Fact carries the Phase 5–7 provenance fields (`source_location`,
   `dissent` > `one_member` > `some_members` > `members` > `council` >
   `collective` (unmarked sentences). Individual positions and dissents are
   therefore **distinguished and traced** without fabricating identities
-  (roadmap Phase 8 criterion).
+  (roadmap Phase 4.4 criterion).
 - A dissent is kept as the verbatim policy statement it is part of, tagged
   `minutes:dissent:` — it is **never** turned into an invented vote count or a
   `vote` subject.
 
 ### Quantitative values & risk
 
-Identical gate to Phases 6/7: values are extracted only from explicit value
+Identical gate to Phase 4.2/7: values are extracted only from explicit value
 claims ("projected / expected … to average / stand at …", "stood at …"), so
 target phrasing is never read as a value; a percentage with a following
 reference period keeps a `FactPeriod` (year, or month when a month is named).
 Risk facts are categorical (`upside` / `downside` / `balanced`, with
 `two-sided` / `symmetric` normalized to `balanced`) only when the source states
 an explicit orientation, otherwise a verbatim text assessment. The risk anchor
-is the same controlled set as Phases 6/7/10/11 (`risks? to/for/around/…`,
+is the same controlled set as Phase 4.2/7/10/11 (`risks? to/for/around/…`,
 `downside/upside/two-sided/… risks`, `uncertain/uncertainty/uncertainties`,
 `tilted`) — "risky", "risk-free", "riskiness" are never anchors. Confidence:
 `HIGH` for percentages and categorical orientations, `MEDIUM` for verbatim
@@ -946,19 +945,19 @@ text.
 
 `no_sections` (early return), `no_risk_assessment`, `no_forward_guidance`.
 
-### Not covered — Phase 8 boundaries
+### Not covered — Phase 4.4 boundaries
 
 - **The decision itself** (wording, rates, changes, effective date) stays
-  Phase 5, gated on decision publications; the verbatim policy statement of the
+  Phase 4.1, gated on decision publications; the verbatim policy statement of the
   account is kept as `monetary_policy/statement`, never as a rate value.
-- **Rationale** (Phase 6), **votes** (never fabricated — a dissent is traced,
+- **Rationale** (Phase 4.2), **votes** (never fabricated — a dissent is traced,
   not counted), hawkish/dovish / stance / forex / trading interpretation (later
-  phases), **Phases 9–11** (projections, reports, speeches — the qualitative
+  phases), **Phases 4.5–4.7** (projections, reports, speeches — the qualitative
   economic discussion of the account is mined, never a separate projection
   table).
 - No LLM (invariant 8).
 
-### Phase 5 / 6 / 7 / 8 boundary
+### Phase 4.1 / 6 / 7 / 8 boundary
 
 The four extractors are disjoint by **publication type** (classification
 gating): decisions, statements, press conferences and minutes are never
@@ -983,13 +982,13 @@ asserts, per fixture:
 - discussion wording (theme-only sentences suppressed, explicit content mined
   with attribution) and attribution (dissent / some_members / members / council
   / collective qualifiers, `speaker` never set, no invented vote);
-- no invented facts — no Phase 5/6 subjects, no interpretation, nothing for
+- no invented facts — no Phase 4.1/6 subjects, no interpretation, nothing for
   absent optional categories;
 - verbatim provenance: each `fact.source_text` and `fact.value.source_text` is
   a substring of the referenced section;
 - deterministic extraction and idempotent Store persistence (including
   empty-result persistence and the `minutes` / `meeting_account` gating),
-  classification gating and Phase 5/6/7 coexistence.
+  classification gating and Phase 4.1/6/7 coexistence.
 
 ## Multi-bank Minutes extractors — BoE, BoJ, Norges, RBA, Riksbank
 
@@ -1028,7 +1027,7 @@ All five follow the Minutes-family rules established by the ECB extractor:
   `collective` (unmarked sentences). Dissents are traced verbatim, never turned
   into invented vote counts;
 - verbatim provenance preserved on every Fact; deterministic output; source
-  objects never mutated; no Phase 5/6/7 decision / statement / press-conference
+  objects never mutated; no Phase 4.1/6/7 decision / statement / press-conference
   subjects, no hawkish/dovish interpretation.
 
 ### BoE — `BoeMinutesExtractor`
@@ -1062,8 +1061,7 @@ inflation). The Board-Minutes archive source (`rba_board_minutes_archive` in
 `src/argus/adapters/rba.py`) makes real official Board Minutes discoverable and
 classifies them `minutes` (Tier‑1 source type-hint). The fixture
 `tests/fixtures/documents/rba_minutes.html` (11 facts, no warnings) is
-**synthetic**; no real-historical-corpus validation has been performed (Phase
-16 remains `DEFERRED`).
+**synthetic**; no real-historical-corpus validation has been performed (Phase 9 remains `DEFERRED`).
 
 ### Riksbank — `RiksbankMinutesExtractor`
 `src/argus/minutes/riksbank.py` (`extraction_version 8.5.0`). Mined sections:
@@ -1109,7 +1107,7 @@ See `tests/test_minutes_multibank.py` for the contract, dispatch, attribution,
 provenance, boundary, determinism, immutability, gating and end-to-end
 integration coverage of these five extractors.
 
-# Type-Specific Extractors — Phase 9 (Economic Projections)
+# Type-Specific Extractors — Phase 4.5 (Economic Projections)
 
 ## Pipeline
 
@@ -1206,7 +1204,7 @@ keeps working.
 
 Only the three core variables are mined; any other row (private consumption,
 unemployment, employment, compensation per employee, oil price, …) is ignored —
-reliability over coverage. The `revision` predicate is a Phase 9 extension of
+reliability over coverage. The `revision` predicate is a Phase 4.5 extension of
 the controlled predicate vocabulary (documented here, per
 `docs/DATA_MODEL.md`).
 
@@ -1247,17 +1245,17 @@ output, never attributed to an individual).
 `no_tables` (early return), `no_projection_table` (tables exist but none
 produced a Fact — e.g. only assumptions / scenario / unlabelled tables).
 
-### Not covered — Phase 9 boundaries
+### Not covered — Phase 4.5 boundaries
 
 - **No interpretation**: no hawkish/dovish, stance, market impact, forex or
   trading logic — never.
 - **No computed analysis**: revision magnitude, acceleration, surprise,
   deviation or `current − previous` deltas are never derived.
-- **No policy facts**: decisions, rates, guidance stay Phases 5–8, gated on
+- **No policy facts**: decisions, rates, guidance stay Phases 4.1–4.4, gated on
   their own publication types.
 - **No LLM** (invariant 8).
 
-### Phase 5 / 6 / 7 / 8 / 9 boundary
+### Phase 4.1 / 6 / 7 / 8 / 9 boundary
 
 The five extractors are disjoint by **publication type** (classification
 gating): decisions, statements, press conferences, minutes and economic
@@ -1313,17 +1311,17 @@ asserts, per fixture:
 - revisions only from explicit column blocks, never computed as
   `current − previous`, current vs previous distinguished by
   `identity_qualifier`;
-- no invented facts — no Phase 5/6/7/8 subjects, no interpretation, `speaker`
+- no invented facts — no Phase 4.1/6/7/8 subjects, no interpretation, `speaker`
   always `None`;
 - verbatim provenance: each `fact.source_text` is a row of the referenced
   table, `fact.value.source_text` is the exact cell;
 - deterministic extraction and idempotent Store persistence (including
   empty-result persistence and the `economic_projections` gating),
-  classification gating and Phase 5/6/7/8 coexistence.
+  classification gating and Phase 4.1/6/7/8 coexistence.
 
 ---
 
-# Type-Specific Extractors — Phase 10 (Monetary Policy Report / Reports)
+# Type-Specific Extractors — Phase 4.6 (Monetary Policy Report / Reports)
 
 ## Pipeline
 
@@ -1384,7 +1382,7 @@ The ECB's report-like publication is the **Economic Bulletin**. Classification
 The decision/statement/minutes/press-conference/speech families are untouched.
 `get_extractor("ecb")` dispatches `EcbReportsExtractor`.
 
-Phase 10 is the most over-extraction-prone phase, so its cardinal rule is
+Phase 4.6 is the most over-extraction-prone phase, so its cardinal rule is
 **precision over recall**: a Fact is only produced from a known economic
 section (conservative routing) + an explicit economic assertion with sufficient
 identity (subject + predicate + value + unit + period when applicable) +
@@ -1501,7 +1499,7 @@ embeddings, no semantic similarity, no LLM.
 | `inflation_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
 | `growth_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
 
-`fiscal_policy` is the Phase 10 addition to the controlled subject vocabulary.
+`fiscal_policy` is the Phase 4.6 addition to the controlled subject vocabulary.
 
 ### Quantitative values — explicit value claims only
 
@@ -1526,7 +1524,7 @@ claim verb) yields nothing.
 
 ### Risk assessment
 
-Identical to Phases 6–8: a categorical orientation fact (`upside` /
+Identical to Phases 4.2–4.4: a categorical orientation fact (`upside` /
 `downside` / `balanced`, with `two-sided` / `symmetric` normalized to
 `balanced`) **only when an explicit orientation word is present**; otherwise a
 verbatim text assessment ("risks remained elevated" is never forced into a
@@ -1538,7 +1536,7 @@ category). The risk target is read from the wording (`inflation` →
 ### Tables — variable × year × value × unit integrity
 
 The extractor also reads economic data tables (same value-gate philosophy as
-Phase 9):
+Phase 4.5):
 
 - **columns** are years (`20xx` header cells);
 - **rows** are variables, identified by **exact canonical label matching**
@@ -1598,22 +1596,22 @@ index, or `LocationKind.TABLE` with `table` / `row` / `column`), `source_text`
 section was mined and no table produced a fact), `no_risk_assessment`,
 `no_forward_guidance`.
 
-### Not covered — Phase 10 boundaries
+### Not covered — Phase 4.6 boundaries
 
 - **No interpretation**: hawkish/dovish, bullish/bearish, stance or market
   reaction, forex or trading logic — never.
 - **The decision itself** (wording, rates, changes, effective date) stays
-  Phase 5, gated on decision publications; the report's *narrative* of policy
+  Phase 4.1, gated on decision publications; the report's *narrative* of policy
   is kept verbatim (`monetary_policy / statement`), never priced, and
   "unchanged" is never recast as a categorical outcome.
-- **The structured economic projections tables** stay Phase 9, gated on
+- **The structured economic projections tables** stay Phase 4.5, gated on
   `economic_projections`; prose forecasts inside a report are kept as value
   claims only when they carry an explicit reference period.
-- **Phases 11** (speeches) — not this layer.
+- **Phase 4.7** (speeches) — not this layer.
 - **No LLM** (invariant 8); an absent optional section (no risk assessment, no
   forward guidance) never becomes an invented fact, only a warning.
 
-### Phase 5 / 6 / 7 / 8 / 9 / 10 boundary
+### Phase 4.1 / 6 / 7 / 8 / 9 / 10 boundary
 
 The six extractors are disjoint by **publication type** (classification
 gating): decisions, statements, press conferences, minutes, economic
@@ -1657,7 +1655,7 @@ asserts, per fixture:
   headings and analytical boxes ignored — including economic content under an
   unknown heading → 0 facts), content-first precedence (guidance > policy >
   risk > financial > inflation > labour > growth > fiscal);
-- Phase 10 hardening near-misses: exact heading routing (the nine near-miss
+- Phase 4.6 hardening near-misses: exact heading routing (the nine near-miss
   headings — `Non-financial developments`, `Non-economic developments`,
   `Financial institutions`, `Core developments`, `Output developments`,
   `Risk management`, `Fiscal institutions`, `Employment policy`, `Economic
@@ -1666,7 +1664,7 @@ asserts, per fixture:
   leading "the") and context-specific content anchors (per-category near-miss
   sentences yield 0 facts while the contextual positives are mined with the
   correct subject, predicate, value and source_text);
-- Phase 10 final hardening: the **IGNORE routing is exact too** — every
+- Phase 4.6 final hardening: the **IGNORE routing is exact too** — every
   controlled non-economic heading (including normalized variants such as
   "3. LEGAL NOTICE.") yields 0 facts, headings that merely share a word with
   an ignore heading ("Legal framework for monetary policy", "Annexation of
@@ -1683,13 +1681,13 @@ asserts, per fixture:
   placeholder cells ignored;
 - within-run deduplication (repeated assertion across sections → one fact;
   identical prose + table value → one fact);
-- no invented facts — no Phase 5/6/7/8/9 subjects, `speaker` always `None`,
+- no invented facts — no Phase 4.1/6/7/8/9 subjects, `speaker` always `None`,
   no hawkish/dovish / stance / forex interpretation;
 - verbatim provenance: each `fact.source_text` and `fact.value.source_text` is
   a substring of the referenced section/row;
 - deterministic extraction and idempotent Store persistence (including
   empty-result persistence and the `monetary_policy_report` gating),
-  classification gating and Phase 5/6/7/8/9 coexistence.
+  classification gating and Phase 4.1/6/7/8/9 coexistence.
 
 ## Norges Bank report extractor
 
@@ -1707,9 +1705,9 @@ faces:
 - the policy-rate path is extracted only from sentences that explicitly put a
   numeric policy-rate level in a future year ("a policy rate of 1.90 per cent
   in 2028") as a `policy_rate_projection/value` Fact;
-- the current policy-rate decision stays Phase 5 (gated on decision
+- the current policy-rate decision stays Phase 4.1 (gated on decision
   publications) — the report never re-prices it; the full projection tables
-  stay Phase 9; hawkish/dovish interpretation is never produced.
+  stay Phase 4.5; hawkish/dovish interpretation is never produced.
 
 ## Multi-bank Report extractors — BoE, BoC, RBA, RBNZ, Riksbank
 
@@ -1788,7 +1786,7 @@ boundaries, determinism, immutability, end-to-end persistence).
 ### RBA — `RbaReportExtractor` (v10.4.0)
 
 Publication: the RBA **Statement on Monetary Policy** (the report-family type
-for the RBA; the cash-rate decision stays Phase 5). Mined sections include
+for the RBA; the cash-rate decision stays Phase 4.1). Mined sections include
 `overview`, `domestic economic conditions`, `the international environment`,
 `the labour market`, `inflation and prices`, `financial conditions`,
 `the stance of monetary policy`, `risks`. Underlying-inflation measures
@@ -1798,12 +1796,12 @@ for the RBA; the cash-rate decision stays Phase 5). Mined sections include
 ### RBNZ — `RbnzReportExtractor` (v10.5.0)
 
 Publication: the RBNZ **Monetary Policy Statement** (the report-family type;
-the OCR decision stays Phase 5). Mined sections include `executive summary`,
+the OCR decision stays Phase 4.1). Mined sections include `executive summary`,
 `the economic outlook`, `the new zealand economy`, `the labour market`,
 `inflation`, `financial conditions`, `monetary policy`, `risks`. Supports
 inflation, GDP, unemployment, wages, financial conditions, monetary-policy
 statement, forward guidance and risk orientations. The structured OCR-path /
-projection tables stay Phase 9. Fixture:
+projection tables stay Phase 4.5. Fixture:
 `tests/fixtures/documents/rbnz_report.html` (11 facts, no warnings).
 
 ### Riksbank — `RiksbankReportExtractor` (v10.6.0)
@@ -1817,8 +1815,8 @@ target inflation measure → `inflation`), underlying inflation / CPIF excluding
 energy (→ `core_inflation`), the Executive Board as decision body. The MPR's
 narrative of the latest decision ("The Executive Board decided to cut the
 policy rate by 0.25 percentage points to 2.5 per cent") is kept **verbatim** as
-`monetary_policy/statement` and **never priced** (Phase 5 boundary); the
-`forecast tables` section is never mined (Phase 9 boundary). Section-title dash
+`monetary_policy/statement` and **never priced** (Phase 4.1 boundary); the
+`forecast tables` section is never mined (Phase 4.5 boundary). Section-title dash
 glyphs (`—` `–` `-` `−`) are normalized so heading identity never depends on
 the dash glyph. Fixture:
 `tests/fixtures/documents/riksbank_report.html` (15 facts, no warnings); see
@@ -1828,7 +1826,7 @@ See `tests/test_reports_multibank.py` for the contract, dispatch, provenance,
 boundary, determinism, immutability and end-to-end integration coverage of
 these extractors, and `tests/test_reports_riksbank.py` for the Riksbank
 specifics (see also `docs/REPORTS.md`).
-# Type-Specific Extractors — Phase 11 (Speeches / Remarks / Address)
+# Type-Specific Extractors — Phase 4.7 (Speeches / Remarks / Address)
 
 ## Pipeline
 
@@ -1846,13 +1844,13 @@ facts table
 - an `ExtractionResult` handed to the existing `Store`
 
 A speech is the **individual** communication of one central bank official
-(remarks / address / keynote). Its cardinal rule, like Phase 10, is
+(remarks / address / keynote). Its cardinal rule, like Phase 4.6, is
 **precision over recall**: a Fact is only produced from an explicit economic
 assertion with sufficient identity (subject + predicate + value + unit + period
 when applicable) + provenance, and the speaker's own words are never confused
 with personal anecdote, biography, ceremonial thanks, historical narrative or
 quoted authors. Interviews (`interview`) are a separate publication type with
-their own treatment — out of Phase 11 scope (`SPEECH_PUBLICATION_TYPES =
+their own treatment — out of Phase 4.7 scope (`SPEECH_PUBLICATION_TYPES =
 ("speech",)`).
 
 ## Extractor contract
@@ -1922,7 +1920,7 @@ in `Fact.speaker` **only when the source states one**:
 ### Conservative section routing — exact controlled headings
 
 Routing uses **exact / controlled normalized labels**, same normalization as
-Phase 10 (lowercase, collapsed whitespace, stripped numbering / footnote
+Phase 4.6 (lowercase, collapsed whitespace, stripped numbering / footnote
 markers / leading "the" / trailing punctuation; matching is exact, never
 substring). A heading is one of three categories:
 
@@ -1953,7 +1951,7 @@ substring). A heading is one of three categories:
   a guidance or a policy sentence. A bare qualitative assessment, a personal
   anecdote, biography, ceremonial thanks, history without explicit values and
   quoted authors are never facts. `UNKNOWN` sections are therefore still a
-  source of explicit facts (unlike Phase 10), but strictness keeps precision:
+  source of explicit facts (unlike Phase 4.6), but strictness keeps precision:
   an assertion is never *assumed*.
 
 Heading-less sections (title masthead, publication date) are `CAT_IGNORE`.
@@ -1981,15 +1979,15 @@ sentence produces no fact.
   verbatim text assessment (`MEDIUM`) in known economic sections only; the
   target (`inflation_risk` / `growth_risk` / `risk`) is read from the wording;
 - **financial / inflation / labour / growth** — context-specific anchors,
-  never bare tokens, resolving to the Phase 10 subject vocabulary: inflation
+  never bare tokens, resolving to the Phase 4.6 subject vocabulary: inflation
   (`inflation` / `core_inflation` / `inflation_expectations`), growth
   (qualitative `growth` / quantitative `gdp`), labour market
   (`unemployment` / `wages` / `labour_market`), `financial_conditions`.
-  The Phase 10 GDP near-miss policy applies identically: "GDP deflator",
+  The Phase 4.6 GDP near-miss policy applies identically: "GDP deflator",
   "GDP per capita" and "per capita GDP" never anchor a growth sentence and
   never leak a GDP value ("Real GDP growth held steady while the GDP
   deflator rose by 2.1%" yields no fact).
-  Phase 11 hardening keeps the generic vocabulary out of the anchors: `credit`
+  Phase 4.7 hardening keeps the generic vocabulary out of the anchors: `credit`
   fires only as a contextual credit-conditions marker ("credit growth", "credit
   standards", …), `lending` as `bank lending` / `lending to …` / `lending
   rates|growth|conditions|standards`, `demand` only as a qualified demand
@@ -1999,7 +1997,7 @@ sentence produces no fact.
   steel / automotive), bare `output` is a growth marker, and `recovery`,
   `recession`, `slowdown` and `expansion` were removed entirely.
 
-### Qualitative fact gate — Phase 11 hardening
+### Qualitative fact gate — Phase 4.7 hardening
 
 An anchor only *selects* a candidate sentence; a qualitative fact also requires
 an **explicit economic assertion** (`_is_economic_assertion`). An anchor + a
@@ -2035,7 +2033,7 @@ remain stricter still (no qualitative fact at all).
 
 ### Value gate
 
-Same value gate as Phase 10: explicit value claim verbs only ("projected /
+Same value gate as Phase 4.6: explicit value claim verbs only ("projected /
 expected / forecast to average / stand at / reach / …"), a percentage is only
 kept with an explicit reference period (year / month / quarter from the
 wording), a forecast without a period is under-determined and ignored, share
@@ -2072,22 +2070,22 @@ index), `source_text` (the verbatim supporting sentence), `value.source_text`
 `no_sections` (early return), `no_risk_assessment`, `no_forward_guidance`,
 `quoted_content_skipped`.
 
-### Not covered — Phase 11 boundaries
+### Not covered — Phase 4.7 boundaries
 
 - **No interpretation**: hawkish/dovish, bullish/bearish, market sentiment,
   forex or trading logic — never.
 - **Policy decisions** (wording, rates, changes, votes, effective date) stay
-  Phases 5/8, gated on their own publication types; a speech's *narrative* of
+  Phase 4.1/8, gated on their own publication types; a speech's *narrative* of
   policy is kept verbatim (`monetary_policy / statement`), never priced.
 - **The Q&A of a speech document** (journalist content) is skipped; the
-  press-conference Q&A is Phase 7.
-- **Fiscal analysis** stays Phase 10, **structured projections tables** stay
-  Phases 9/10 — a speech is mined for prose assertions only, and no Phase 5–10
+  press-conference Q&A is Phase 4.3.
+- **Fiscal analysis** stays Phase 4.6, **structured projections tables** stay
+  Phase 4.5/10 — a speech is mined for prose assertions only, and no Phase 4.1–4.6
   subject is ever emitted here.
 - **No LLM** (invariant 8); an absent optional section (no risk assessment, no
   forward guidance) never becomes an invented fact, only a warning.
 
-### Phase 5 / 6 / 7 / 8 / 9 / 10 / 11 boundary
+### Phase 4.1 / 6 / 7 / 8 / 9 / 10 / 11 boundary
 
 The seven extractors are disjoint by **publication type** (classification
 gating): decisions, statements, press conferences, minutes, economic
@@ -2095,9 +2093,9 @@ projections, monetary policy reports and speeches are never cross-mined.
 `get_extractor` dispatches on `central_bank`, and each extractor refuses
 publications whose authoritative classification is not its own type.
 
-### Phase 12 — extraction vs temporal analysis boundary
+### Phase 5 — extraction vs temporal analysis boundary
 
-Phase 12 (`src/argus/changes/`) is **not** an extractor: it never creates
+Phase 5 (`src/argus/changes/`) is **not** an extractor: it never creates
 Facts, never reads source documents, and never invents content. It is a
 strictly **descriptive** analytic layer that compares **existing Facts** over
 time (previous → current) and records *that* an observation changed — never
@@ -2130,7 +2128,7 @@ labour market, financial stability, monetary policy, risks, closing remarks):
   `no_forward_guidance`);
 - `ecb_speech_minimal.html` — a single inflation value, no speaker (1 fact,
   `no_risk_assessment` + `no_forward_guidance`, `speaker = None`);
-- `ecb_speech_adversarial.html` — Phase 11 hardening fixture: explicit
+- `ecb_speech_adversarial.html` — Phase 4.7 hardening fixture: explicit
   assertions and value claims pass (GDP 2.4 / 2027 inflation 2.1 / financial
   conditions 3.0, growth assessments, wages assessment, a guidance statement
   and a downside risk orientation — 8 facts) while platitudes ("The economy is
@@ -2161,15 +2159,15 @@ asserts, per fixture:
   risk orientations only when explicit (verbatim otherwise, in known sections
   only);
 - within-run deduplication, verbatim provenance (`speaker` preserved, `speech:`
-  identity qualifiers, `effective_date` always `None`), no Phase 5–10 subjects,
+  identity qualifiers, `effective_date` always `None`), no Phase 4.1–4.6 subjects,
   no hawkish/dovish interpretation;
-- the Phase 11 hardening matrix: platitudes and topic mentions rejected, generic
+- the Phase 4.7 hardening matrix: platitudes and topic mentions rejected, generic
   anchors removed, preserved assertions still extracted, guidance/policy
   ungated, contextual `credit`, known and unknown sections both precise, and no
   period contamination across sentences;
 - deterministic extraction and idempotent Store persistence (including
   empty-result persistence and the `speech` gating), classification gating and
-  Phase 5/6/7/8/9/10 coexistence.
+  Phase 4.1/6/7/8/9/10 coexistence.
 
 ---
 
@@ -2215,10 +2213,10 @@ hardening pass (commit 96e81de → hardened). The key distinction is:
 - Forward guidance (e.g., "will continue with monetary easing … as long as necessary")
 - Price/growth/risk assessment (quantitative value claims with reference periods, categorical risk orientations)
 
-**Not extracted** (by design, Phase 6 boundary):
+**Not extracted** (by design, Phase 4.2 boundary):
 - No separate `monetary_policy_decision` subject facts are fabricated beyond the vote/decision wording above
-- Outlook for Economic Activity and Prices (projections) → Phase 9
-- Individual member opinions / dissents beyond verbatim vote sentence → Phase 8
+- Outlook for Economic Activity and Prices (projections) → Phase 4.5
+- Individual member opinions / dissents beyond verbatim vote sentence → Phase 4.4
 
 **Reachability (Phase 4.x)**: the current BoJ Statement URL shape is
 `/en/mopo/mpmdeci/mpr_<year>/k<date>.pdf` (the "Statement on Monetary Policy"
@@ -2241,7 +2239,7 @@ dispatches `BojStatementExtractor`. Tests: `tests/test_classification.py`
 | **Real corpus coverage** | Extractor validated against real historical documents |
 | **Historical validation** | End-to-end pipeline tested on multi-year real data |
 
-**Current state**: All 10 banks have **implementation coverage** for their applicable publication types. **Fixture coverage** exists for all implemented extractors (golden tests). **Real corpus coverage** is substantial for ECB (multiple decision/statement/minutes/projection/report fixtures modeled on real documents); other banks have fixture coverage only. **Historical validation** (Phase 16) remains `NOT STARTED`.
+**Current state**: All 10 banks have **implementation coverage** for their applicable publication types. **Fixture coverage** exists for all implemented extractors (golden tests). **Real corpus coverage** is substantial for ECB (multiple decision/statement/minutes/projection/report fixtures modeled on real documents); other banks have fixture coverage only. **Historical validation** (Phase 9) remains `NOT STARTED`.
 
 ### Registry Integration Verified
 
@@ -2298,6 +2296,6 @@ assert get_reports("snb") is None  # not applicable
     later with `tests/test_reports_riksbank.py`)
 - **No regressions**: All existing golden tests, gating tests, idempotence tests, phase coexistence tests pass
 
-### Phase 16 Status
+### Phase 9 Status
 
-Phase 16 (Historical Validation) remains **DEFERRED** — this hardening pass does not mark it complete or started.
+Phase 9 (Historical Validation) remains **DEFERRED** — this hardening pass does not mark it complete or started.

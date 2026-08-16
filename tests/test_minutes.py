@@ -1,4 +1,4 @@
-"""Phase 8 — ECB Minutes / Meeting Account extractor: end-to-end tests using
+"""Phase 4.4 — ECB Minutes / Meeting Account extractor: end-to-end tests using
 the local HTML fixtures and the existing Store (vertical slice).
 
 Covers: classification gating (``minutes`` and ``meeting_account``), section
@@ -7,7 +7,7 @@ ignored), content-first categories A-G, quantitative values with periods,
 discussion wording handled faithfully (theme-only sentences suppressed, explicit
 content mined), attribution traced without inventing speakers or vote counts,
 no invented values / interpretations, deterministic extraction, idempotent and
-empty-result persistence, and Phase 5/6/7 coexistence.
+empty-result persistence, and Phase 4.1/6/7 coexistence.
 """
 
 from __future__ import annotations
@@ -409,7 +409,7 @@ def test_heading_routing_is_exact_identity_not_substring():
 
 
 # ---------------------------------------------------------------------------
-# Phase 8 corrective — controlled IGNORE routing (no substring matching)
+# Phase 4.4 corrective — controlled IGNORE routing (no substring matching)
 # ---------------------------------------------------------------------------
 
 
@@ -682,7 +682,7 @@ def test_no_decision_or_rationale_facts_from_minutes():
         "deposit_facility_rate", "asset_purchase", "vote",
     }
     assert not phase5_subjects & {f.subject for f in result.facts}
-    assert not any(f.predicate == "rationale" for f in result.facts)  # Phase 6 rationale stays in the statement
+    assert not any(f.predicate == "rationale" for f in result.facts)  # Phase 4.2 rationale stays in the statement
     assert not any(f.predicate == "change" for f in result.facts)
     assert not any(f.predicate == "date" for f in result.facts)
     # the verbatim policy statement of the account is kept, never a rate value
@@ -904,14 +904,14 @@ def test_empty_result_persistence_is_idempotent(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Phase 5 / 6 / 7 coexistence
+# Phase 4.1 / 6 / 7 coexistence
 # ---------------------------------------------------------------------------
 
 
 def test_other_extractors_do_not_overlap_with_minutes(tmp_path):
     """A minutes publication never feeds the decision, statement or press
-    conference extractors (gating on classification), and Phase 8 never emits
-    Phase 5/6 fact subjects."""
+    conference extractors (gating on classification), and Phase 4.4 never emits
+    Phase 4.1/6 fact subjects."""
     store = _store_minutes(tmp_path)
     pub = minutes_publication()
     store.set_classification(
@@ -926,7 +926,7 @@ def test_other_extractors_do_not_overlap_with_minutes(tmp_path):
     assert extract_decision(store, pub) == []
     assert extract_statement(store, pub) == []
     assert extract_press_conference(store, pub) == []
-    # Phase 8 extraction produces its own facts only
+    # Phase 4.4 extraction produces its own facts only
     extract_minutes(store, pub)
     persisted = store.get_facts(publication_id="pub-ecb-accounts")
     phase5_subjects = {
@@ -934,7 +934,7 @@ def test_other_extractors_do_not_overlap_with_minutes(tmp_path):
         "deposit_facility_rate", "asset_purchase", "vote",
     }
     assert not phase5_subjects & {f.subject for f in persisted}
-    assert not any(f.predicate == "rationale" for f in persisted)  # Phase 6 rationale is not a Phase 8 category
+    assert not any(f.predicate == "rationale" for f in persisted)  # Phase 4.2 rationale is not a Phase 4.4 category
     assert not any(f.predicate == "change" for f in persisted)
     assert not any(f.predicate == "date" for f in persisted)
     assert all(f.extraction_version == EcbMinutesExtractor.extraction_version for f in persisted)

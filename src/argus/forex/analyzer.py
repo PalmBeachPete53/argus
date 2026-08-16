@@ -1,4 +1,4 @@
-"""Phase 15 — forex fundamentals analysis.
+"""Phase 8 — forex fundamentals analysis.
 
 The analyzer is **pure** (``ForexFundamentalsAnalyzer.analyze`` works on
 in-memory ``MonetaryPolicyState`` / ``Fact`` objects + a currencies mapping +
@@ -7,7 +7,7 @@ never touches a store) and strictly deterministic.
 
 Fundamental rules (documented in ``docs/FOREX_FUNDAMENTALS.md``):
 
-1. A ``MonetaryPolicyState`` (Phase 14) is a monetary fundamental when its
+1. A ``MonetaryPolicyState`` (Phase 7) is a monetary fundamental when its
    ``subject`` is in ``MONETARY_SUBJECTS`` and its value is a real observed
    level. The value is copied verbatim — never invented, never converted.
 2. A ``Fact`` (Phase 4) is a macro fundamental when its ``subject`` is in
@@ -107,8 +107,7 @@ class ForexFundamentalsAnalyzer:
         """Synthesize the forex fundamentals and differentials of the given
         monetary states and macro facts.
 
-        ``states`` are the ``MonetaryPolicyState`` entries produced by Phase
-        14 (monetary dimensions); ``facts`` are the ``Fact`` objects produced
+        ``states`` are the ``MonetaryPolicyState`` entries produced by Phase 7 (monetary dimensions); ``facts`` are the ``Fact`` objects produced
         by Phase 4 (macro dimensions). ``currencies`` maps ``central_bank →
         ISO currency`` (the canonical ``CentralBank.currency`` mapping) and is
         the only place an economy is resolved from a bank.
@@ -117,7 +116,7 @@ class ForexFundamentalsAnalyzer:
         temporal reference (``meeting_date`` else ``publication_date``) of each
         macro fact's publication. ``classifications`` maps ``publication_id →
         publication_type`` and is the **authoritative** source of the lineage's
-        publication-type discriminator (exactly as in Phases 12/13/14). When
+        publication-type discriminator (exactly as in Phase 5/6/7). When
         provided, a publication absent from the mapping has no canonical
         classification and its facts are skipped (``missing_classification``
         warning). When ``classifications`` is ``None`` (standalone in-memory
@@ -152,7 +151,7 @@ class ForexFundamentalsAnalyzer:
         return result
 
     # ------------------------------------------------------------------
-    # fundamentals — monetary (Phase 14 states)
+    # fundamentals — monetary (Phase 7 states)
     # ------------------------------------------------------------------
     def _monetary(
         self,
@@ -430,11 +429,11 @@ def analyze_forex_fundamentals(
 ) -> ForexFundamentalResult:
     """Recompute the forex fundamentals and differentials of a bank's currency
     (or the whole store) from the current ``monetary_policy_states`` table
-    (Phase 14 output) and the ``facts`` table (Phase 4 output), persist them
+    (Phase 7 output) and the ``facts`` table (Phase 4 output), persist them
     idempotently, and return the result (fundamentals + differentials +
     observability warnings).
 
-    Phase 15 consumes Phase 14 states and Phase 4 facts; both must be present.
+    Phase 8 consumes Phase 7 states and Phase 4 facts; both must be present.
     Differentials need both sides of every pair, so the analyzer always reads
     the **full** dataset (all states, all facts, all publications,
     classifications) — the ``bank`` scope only limits what is persisted. The

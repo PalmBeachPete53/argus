@@ -1,4 +1,4 @@
-"""ECB — Monetary Policy Statement extractor (Phase 6).
+"""ECB — Monetary Policy Statement extractor (Phase 4.2).
 
 Extracts the facts of an ECB Monetary Policy Statement from the normalized
 document text, answering "what does the Governing Council explicitly state about
@@ -18,12 +18,12 @@ the economy and its policy stance in the statement?":
 - explicit quantitative values ("projected to average 2.2% in 2027") with the
   verbatim reference period (year / month), and never without source wording.
 
-Deliberately NOT extracted (Phase 6 boundary):
+Deliberately NOT extracted (Phase 4.2 boundary):
 
-- the decision itself (wording/rates) — that is Phase 5 territory, gated on
+- the decision itself (wording/rates) — that is Phase 4.1 territory, gated on
   decision publications
 - votes, hawkish/dovish interpretation, forex fundamentals, formulation-change
-  analysis (Phase 12) — none of these is ever invented here
+  analysis (Phase 5) — none of these is ever invented here
 
 Design rules
 
@@ -73,8 +73,8 @@ from .base import StatementExtractor
 EXTRACTION_VERSION = "6.0.0"
 
 # ---------------------------------------------------------------------------
-# Canonical Phase 6 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
-# ``policy_guidance`` is shared with Phase 5: statement-level guidance is the
+# Canonical Phase 4.2 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
+# ``policy_guidance`` is shared with Phase 4.1: statement-level guidance is the
 # same content type, only the publication type differs.
 # ---------------------------------------------------------------------------
 SUBJECT_MONETARY_POLICY = "monetary_policy"

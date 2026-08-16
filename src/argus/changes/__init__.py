@@ -1,4 +1,4 @@
-"""Phase 12 — temporal / cross-publication change analysis.
+"""Phase 5 — temporal / cross-publication change analysis.
 
 This package derives ``FactChange`` relations between existing Facts over time.
 It is strictly descriptive (never an economic interpretation) and never

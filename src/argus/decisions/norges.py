@@ -12,12 +12,12 @@ Committee explicitly decide?":
 - the decision wording ("… decided to lower the policy rate …"), verbatim
 - forward guidance / policy-path sentences, verbatim
 
-Deliberately NOT extracted (Phase 5 boundary):
+Deliberately NOT extracted (Phase 4.1 boundary):
 
 - the rationale / outlook narrative ("A restrictive monetary policy stance …")
   — later phases
-- the Monetary Policy Report — Phase 10
-- votes / dissents — Phase 8; hawkish-dovish / forex — never
+- the Monetary Policy Report — Phase 4.6
+- votes / dissents — Phase 4.4; hawkish-dovish / forex — never
 
 Design rules
 

@@ -7,8 +7,7 @@ Governors and MPC members explicitly state during the press conference?":
 
 - the Q&A answers of the MPC officials on the panel, with the verbatim speaker
   label preserved (``Fact.speaker``) and the Q&A position preserved in
-  ``identity_qualifier`` (``answer:<turn>:<n>`` vs ``remarks:<n>`` — the Phase
-  7 attribution contract);
+  ``identity_qualifier`` (``answer:<turn>:<n>`` vs ``remarks:<n>`` — the Phase 4.3 attribution contract);
 - any official turn before the first journalist label is the collective
   remarks tail (``Fact.speaker = None``), exactly as for the Fed.
 
@@ -58,9 +57,9 @@ helpers in ``_shared.py``):
   "quantitative tightening", "balance sheet", "reserves");
 - BoE risk vocabulary ("distribution of risk", "on the upside/downside").
 
-Deliberately NOT extracted (Phase 7 / press-conference boundary): the decision
-itself (wording, rates, changes, effective date) — Phase 5, gated on decision
-publications; decision rationale — Phase 6; journalist question content;
+Deliberately NOT extracted (Phase 4.3 / press-conference boundary): the decision
+itself (wording, rates, changes, effective date) — Phase 4.1, gated on decision
+publications; decision rationale — Phase 4.2; journalist question content;
 hawkish/dovish or stance interpretation, market expectations, forex
 fundamentals — none of these is ever invented here.
 """
@@ -166,7 +165,7 @@ def _is_label_line(line: str, prev_line: str) -> bool:
 
 # ---------------------------------------------------------------------------
 # BoE forward-guidance phrasing — BoE vernacular, distinct vocabulary, same
-# structural "guidance" slot as Phase 7.
+# structural "guidance" slot as Phase 4.3.
 # ---------------------------------------------------------------------------
 _GUIDANCE_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\bstand(?:s|ing)?\s+ready\s+to\b", re.IGNORECASE),

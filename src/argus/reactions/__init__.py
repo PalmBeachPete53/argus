@@ -1,6 +1,6 @@
-"""Phase 13 — empirical policy reaction analysis.
+"""Phase 6 — empirical policy reaction analysis.
 
-This package derives ``PolicyReaction`` relations between existing Phase 12
+This package derives ``PolicyReaction`` relations between existing Phase 5
 ``FactChange`` objects: a condition-side change temporally followed (within a
 documented window) by a policy-side change. It is strictly **inferred** (never
 a Fact, never causal, never a stance/trading signal) and never mutates the

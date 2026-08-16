@@ -1,4 +1,4 @@
-"""Phase 6 — type-specific monetary policy statement extraction public API."""
+"""Phase 4.2 — type-specific monetary policy statement extraction public API."""
 
 from .base import (
     STATEMENT_PUBLICATION_TYPE,

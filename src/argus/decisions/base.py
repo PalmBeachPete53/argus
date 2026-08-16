@@ -1,4 +1,4 @@
-"""Phase 5 — type-specific decision extractors.
+"""Phase 4.1 — type-specific decision extractors.
 
 An extractor converts a ``NormalizedDocument`` of a monetary policy decision
 into a list of provenance-carrying ``Fact`` assertions, following the

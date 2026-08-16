@@ -12,11 +12,11 @@ announce as part of the decision?":
 - the decision wording ("… voted to maintain Bank Rate at 5.25%"), verbatim
 - forward guidance as part of the decision, verbatim
 
-Deliberately NOT extracted (Phase 5 boundary):
+Deliberately NOT extracted (Phase 4.1 boundary):
 
-- the vote split / individual preferences of MPC members — Phase 8 (minutes);
+- the vote split / individual preferences of MPC members — Phase 4.4 (minutes);
   never fabricated here
-- the Macroeconomic Projections / Monetary Policy Report — Phase 9 / Phase 10
+- the Macroeconomic Projections / Monetary Policy Report — Phase 4.5 / Phase 4.6
 - a monetary "risk assessment" — not part of the Bank Rate decision release
 
 Design rules
@@ -55,7 +55,7 @@ from .base import DecisionExtractor
 
 EXTRACTION_VERSION = "5.4.0"
 
-# Canonical BoE instrument subject (Phase 5 vocabulary extension).
+# Canonical BoE instrument subject (Phase 4.1 vocabulary extension).
 SUBJECT_BANK_RATE = "bank_rate"
 SUBJECT_DECISION = "monetary_policy_decision"
 SUBJECT_POLICY_GUIDANCE = "policy_guidance"

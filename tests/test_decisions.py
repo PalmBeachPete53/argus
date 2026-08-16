@@ -1,4 +1,4 @@
-"""Phase 5 — ECB Monetary Policy Decision extractor: end-to-end tests using the
+"""Phase 4.1 — ECB Monetary Policy Decision extractor: end-to-end tests using the
 local HTML fixture and the existing Store (vertical slice)."""
 
 from __future__ import annotations
@@ -168,7 +168,7 @@ GOLDEN = {
             "The Governing Council today decided to lower the three key ECB interest rates by 25 basis points.",
             "Against this background, the Governing Council decided to lower the deposit facility rate to 1.75 per cent.",
         ],
-        "guidance": [],  # "stands ready …" sits in the Monetary-policy-statement section → Phase 6 boundary
+        "guidance": [],  # "stands ready …" sits in the Monetary-policy-statement section → Phase 4.2 boundary
         "assets": [
             ("app:0", "Under the APP, the Governing Council intends to stop reinvesting the proceeds from maturing securities.", None),
             ("pepp:0", "The Governing Council intends to reinvest the principal payments from maturing securities purchased under the PEPP during the first half of 2027.", "semester:2027-H1"),
@@ -388,7 +388,7 @@ def test_fixture_increase_order_reads_source_naming():
 def test_guidance_in_statement_section_is_not_extracted():
     """The identical "stands ready …" sentence sits in the decision body of the
     increase fixture (extracted) but in the Monetary-policy-statement section of
-    ecb_decision.html (NOT extracted — Phase 6 boundary)."""
+    ecb_decision.html (NOT extracted — Phase 4.2 boundary)."""
     increased = extract_fixture("ecb_decision_increase.html")
     assert any(f.subject == SUBJECT_POLICY_GUIDANCE for f in increased.facts)
     baseline = extract_fixture("ecb_decision.html")
@@ -398,7 +398,7 @@ def test_guidance_in_statement_section_is_not_extracted():
 def test_risk_assessment_is_not_extracted_from_decisions():
     """The full fixture carries explicit risk wording ("Risks to the economic
     outlook … tilted to the upside") inside its Monetary policy statement
-    section. That belongs to Phase 6 and must never surface as a decision fact."""
+    section. That belongs to Phase 4.2 and must never surface as a decision fact."""
     result = extract_fixture("ecb_decision_full.html")
     assert not any(f.subject == "risk_assessment" for f in result.facts)
     assert not any(f.subject == "inflation_risk" for f in result.facts)
@@ -592,7 +592,7 @@ def test_gating_decision_classification_wins_over_contradictory_cache(tmp_path):
 
 def test_gating_decision_cache_cannot_override_minutes_classification(tmp_path):
     """The cache saying `monetary_policy_decision` can never bypass a `minutes`
-    classification — extraction is refused and no Phase 5 fact is produced."""
+    classification — extraction is refused and no Phase 4.1 fact is produced."""
     store = _store_ecb(tmp_path)
     classify_decision(store, publication_type="minutes")
     assert extract_decision(store, ecb_publication(publication_type="monetary_policy_decision")) == []
@@ -612,7 +612,7 @@ def test_gating_unknown_classification_with_decision_cache_is_refused(tmp_path):
 def test_gating_refusal_never_deletes_existing_facts(tmp_path):
     """A classification that refuses extraction must NOT delete facts that an
     earlier authorized extraction persisted — pipeline-wide classification
-    changes are not Phase 5's concern."""
+    changes are not Phase 4.1's concern."""
     store = _store_ecb(tmp_path)
     classify_decision(store)
     assert len(extract_decision(store, ecb_publication())) == 1

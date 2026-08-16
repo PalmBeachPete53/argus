@@ -15,8 +15,8 @@ wording, and there is no ``if bank == "…":`` dispatch. Reusing these helpers
 across banks is the "genuinely structural operations" the phase contract
 allows; encoding bank wording here is forbidden.
 
-The canonical Phase 7 subjects are reused verbatim — no subject is added for a
-press conference family. The ``PressConferenceReporter`` carries the Phase 7
+The canonical Phase 4.3 subjects are reused verbatim — no subject is added for a
+press conference family. The ``PressConferenceReporter`` carries the Phase 4.3
 attribution contract deterministically: ``identity_qualifier`` is
 ``remarks:{n}`` for a collective remarks fact and ``answer:{turn}:{n}`` for an
 individual Q&A answer fact (``turn`` = 1-based Q&A turn, ``n`` = per-turn
@@ -46,7 +46,7 @@ from ..facts import (
 )
 from ..normalize import normalize_title
 
-# Canonical Phase 7 press conference subjects (controlled vocabulary, the same
+# Canonical Phase 4.3 press conference subjects (controlled vocabulary, the same
 # set the ECB reference extractor uses — reused verbatim).
 SUBJECT_INFLATION = "inflation"
 SUBJECT_CORE_INFLATION = "core_inflation"
@@ -184,7 +184,7 @@ def sentence_label(match: re.Match) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Qualitative fact gate (structural) — Phase 11-style hardening. A qualitative
+# Qualitative fact gate (structural) — Phase 4.7-style hardening. A qualitative
 # assessment (financial / inflation / labour / growth verbatim text) is only
 # emitted when the sentence states an explicit economic assertion; economic
 # vocabulary alone is never enough. The gate is layered:
@@ -356,7 +356,7 @@ class PressConferenceReporter:
 
     One instance per extractor run. ``extraction_version`` is the structural
     configuration supplied by the bank-specific extractor. Every emitted Fact
-    carries ``identity_qualifier`` according to the Phase 7 attribution
+    carries ``identity_qualifier`` according to the Phase 4.3 attribution
     contract: ``remarks:{n}`` for a remarks fact and ``answer:{turn}:{n}`` for
     a Q&A answer fact (the ``context`` is supplied per emission by the bank
     extractor as ``"remarks"`` or ``f"answer:{turn}"``). ``Fact.speaker`` is

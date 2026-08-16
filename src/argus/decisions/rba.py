@@ -11,10 +11,10 @@ release, answering "what did the Reserve Bank Board explicitly decide?":
 - the decision wording ("The Board decided to …"), verbatim
 - forward guidance / policy-condition sentences, verbatim
 
-Deliberately NOT extracted (Phase 5 boundary):
+Deliberately NOT extracted (Phase 4.1 boundary):
 
 - the embedded "Statement on Monetary Policy" narrative (inflation/growth
-  outlook) — Phase 10
+  outlook) — Phase 4.6
 - votes / hawkish-dovish / forex — never
 
 Design rules

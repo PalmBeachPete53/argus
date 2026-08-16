@@ -5,7 +5,7 @@ is a large narrative publication: it sets out the MPC's assessment of the
 economic outlook, inflation (CPI), demand and output (GDP), the labour market,
 wages, financial conditions, risks and the policy rationale.
 
-This extractor follows the Phase 10/11 **precision-over-recall** rule shared by
+This extractor follows the Phase 4.6/11 **precision-over-recall** rule shared by
 the Report family:
 
 - sections are routed deterministically by normalized heading — a known
@@ -19,8 +19,8 @@ the Report family:
 - risks are categorical orientations (upside / downside / balanced) when the
   source states one, verbatim otherwise.
 
-Deliberately NOT extracted (Phase 5/8/9 boundary): the Bank Rate decision and
-votes (Phases 5/8), the structured projection fan-charts (Phase 9), and
+Deliberately NOT extracted (Phase 4.1/8/9 boundary): the Bank Rate decision and
+votes (Phase 4.1/8), the structured projection fan-charts (Phase 4.5), and
 hawkish/dovish interpretation.
 """
 

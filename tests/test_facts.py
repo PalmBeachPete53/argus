@@ -402,7 +402,7 @@ def test_factvalue_round_trip_range():
 
 
 # ---------------------------------------------------------------------------
-# 11+12+13. identity, persistence, idempotence
+# 11+5+13. identity, persistence, idempotence
 # ---------------------------------------------------------------------------
 
 

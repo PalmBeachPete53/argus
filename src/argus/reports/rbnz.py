@@ -5,7 +5,7 @@ publication: it sets out the outlook for the New Zealand economy (GDP), the
 labour market, inflation, financial conditions, risks to the outlook and the
 monetary policy stance. In the Argus taxonomy the MPS is classified as
 ``monetary_policy_report`` (its canonical report-family type), distinct from the
-shorter OCR decision (Phase 5) and the press statements.
+shorter OCR decision (Phase 4.1) and the press statements.
 
 This extractor follows the Report-family **precision-over-recall** rule:
 
@@ -19,8 +19,8 @@ This extractor follows the Report-family **precision-over-recall** rule:
   verb with a percentage and, for a forecast, an explicit reference period;
 - risks are categorical orientations when stated, verbatim otherwise.
 
-Deliberately NOT extracted (Phase 5/8/9 boundary): the OCR decision itself
-(Phase 5), the structured OCR-path / projection tables (Phases 9) and
+Deliberately NOT extracted (Phase 4.1/8/9 boundary): the OCR decision itself
+(Phase 4.1), the structured OCR-path / projection tables (Phase 4.5) and
 hawkish/dovish interpretation. The narrative observations allowed by the
 Report contract — growth, inflation, labour market, financial conditions,
 policy rationale and risks — are extracted.

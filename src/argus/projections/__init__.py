@@ -1,4 +1,4 @@
-"""Phase 9 — type-specific economic projections extraction public API."""
+"""Phase 4.5 — type-specific economic projections extraction public API."""
 
 from .base import (
     PROJECTIONS_PUBLICATION_TYPES,

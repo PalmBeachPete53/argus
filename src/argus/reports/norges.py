@@ -1,10 +1,10 @@
-"""Norges Bank — Monetary Policy Report + mixed-content extractor (Phase 10).
+"""Norges Bank — Monetary Policy Report + mixed-content extractor (Phase 4.6).
 
 Norges Bank's "Monetary Policy Report" (MPR) is a **mixed-content** document: it
 carries both the macroeconomic narrative (inflation, growth, labour market,
 risks) and the published **policy-rate path** — the projected future level of
 the policy rate used in the projections. This extractor handles both faces of
-the document, following the Phase 10 rule of **precision over recall**:
+the document, following the Phase 4.6 rule of **precision over recall**:
 
 - economic sections are routed deterministically by normalized heading; an
   unknown section is never mined for bare assessments
@@ -16,12 +16,12 @@ the document, following the Phase 10 rule of **precision over recall**:
   in 2028")
 - risks are categorical orientations (upside / downside / balanced) or verbatim
 
-Deliberately NOT extracted (Phase 5/9 boundary):
+Deliberately NOT extracted (Phase 4.1/9 boundary):
 
-- the current policy-rate decision and its date (Phase 5, gated on decision
+- the current policy-rate decision and its date (Phase 4.1, gated on decision
   publications) — the *current* "the policy rate is …" sentence never becomes a
   ``policy_rate_projection`` fact (projections require a future reference year)
-- the full projection tables (Phase 9 tables), individual votes (Phase 8),
+- the full projection tables (Phase 4.5 tables), individual votes (Phase 4.4),
   hawkish/dovish interpretation
 """
 

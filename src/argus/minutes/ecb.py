@@ -1,4 +1,4 @@
-"""ECB — Minutes / Meeting Account extractor (Phase 8).
+"""ECB — Minutes / Meeting Account extractor (Phase 4.4).
 
 Extracts the facts of an ECB "Account of the monetary policy meeting" from the
 normalized document text, answering "what did the Governing Council explicitly
@@ -20,11 +20,11 @@ substring coincidence is never used. An unknown section is never assumed to be
 economic, so a future appendix / glossary / disclaimer section yields no fact.
 
 Content is classified sentence-by-sentence with the same deterministic
-precedence as Phase 7 (guidance > policy > risk > financial > inflation >
+precedence as Phase 4.3 (guidance > policy > risk > financial > inflation >
 labour > growth); the section heading only gates whether the section is mined
 at all. A sentence matching no category produces no fact.
 
-Phase 8 specifics — discussion wording and attribution:
+Phase 4.4 specifics — discussion wording and attribution:
 
 - **Discussion wording is handled faithfully.** A sentence that only names the
   theme of the discussion without stating a position ("The discussion focused
@@ -38,21 +38,21 @@ Phase 8 specifics — discussion wording and attribution:
   ``one_member``, ``some_members``, ``members``, ``council`` or ``collective`` —
   is preserved in ``identity_qualifier`` (``minutes:{attribution}:{n}``), so
   individual positions and dissents are distinguished and traced without
-  fabricating identities (roadmap Phase 8 criterion). An unmarked sentence is a
+  fabricating identities (roadmap Phase 4.4 criterion). An unmarked sentence is a
   collective statement of the account, never a named individual's.
 
-Deliberately NOT extracted (Phase 8 boundary):
+Deliberately NOT extracted (Phase 4.4 boundary):
 
-- the decision itself (wording, rates, changes, effective date) — Phase 5,
+- the decision itself (wording, rates, changes, effective date) — Phase 4.1,
   gated on decision publications
-- the decision rationale / macro analysis as a *statement* rationale — Phase 6
+- the decision rationale / macro analysis as a *statement* rationale — Phase 4.2
   territory
 - votes: the ECB accounts do not report a formal vote count; a dissent is kept
   as the verbatim policy statement it is part of, with the ``dissent``
   attribution — never as an invented "n:y" count
 - hawkish/dovish or stance interpretation, market expectations, forex
   fundamentals, probability conversion — none of these is ever invented here
-- Phases 9–11 (projections, reports, speeches) — the qualitative economic
+- Phases 4.5–4.7 (projections, reports, speeches) — the qualitative economic
   discussion of the meeting account is mined, never a separate projection
   table.
 
@@ -95,8 +95,8 @@ from .base import MinutesExtractor
 EXTRACTION_VERSION = "8.0.0"
 
 # ---------------------------------------------------------------------------
-# Canonical Phase 8 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
-# Reuses the Phase 5/6/7 subjects verbatim: the meeting account discusses the
+# Canonical Phase 4.4 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
+# Reuses the Phase 4.1/6/7 subjects verbatim: the meeting account discusses the
 # same content types, only the publication type differs.
 # ---------------------------------------------------------------------------
 SUBJECT_INFLATION = "inflation"
@@ -119,7 +119,7 @@ PREDICATE_STATEMENT = "statement"
 PREDICATE_VALUE = "value"
 
 # ---------------------------------------------------------------------------
-# Section routing — CONSERVATIVE (Phase 8). A heading is mined only when it is
+# Section routing — CONSERVATIVE (Phase 4.4). A heading is mined only when it is
 # a known economic section; an unknown heading and the known non-economic ones
 # (title, legal notice, statistical annex, copyright, imprint, disclaimer,
 # external monetary policy) are ignored. "Absence of proof → absence of
@@ -283,7 +283,7 @@ _META_DISCUSSION = re.compile(
 )
 
 # ---------------------------------------------------------------------------
-# Category anchors (same precedence as Phase 7, content-first). Guidance (G) >
+# Category anchors (same precedence as Phase 4.3, content-first). Guidance (G) >
 # policy stance (D) > risks (E) > financial conditions (F) > inflation (A) >
 # labour market (C) > growth (B).
 # ---------------------------------------------------------------------------
@@ -402,7 +402,7 @@ _GROWTH_ANCHORS: tuple[re.Pattern, ...] = (
 )
 
 # ---------------------------------------------------------------------------
-# Quantitative values — same value gate as Phases 6/7: only explicit value
+# Quantitative values — same value gate as Phase 4.2/7: only explicit value
 # claims ("projected / expected … to average / stand at …", "stood at …").
 # ---------------------------------------------------------------------------
 _RATE_ITEM = r"[0-9]+(?:\.[0-9]+)?"

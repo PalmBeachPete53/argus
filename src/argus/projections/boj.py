@@ -1,4 +1,4 @@
-"""BoJ — Outlook for Economic Activity and Prices extractor (Phase 9).
+"""BoJ — Outlook for Economic Activity and Prices extractor (Phase 4.5).
 
 Extracts the official numerical projections of the Bank of Japan's Policy Board
 from the normalized document **tables**, answering "what does the Policy Board
@@ -26,15 +26,15 @@ Structure handled (DocumentTable):
 Variables mined: real GDP (→ ``gdp``), the CPI / "consumer price index"
 (→ ``inflation``), the core CPI / "excluding fresh food" (→ ``core_inflation``)
 and, when published, the unemployment rate (→ ``unemployment``). Any other row
-is ignored (precision over recall, Phase 9).
+is ignored (precision over recall, Phase 4.5).
 
-Deliberately NOT extracted (Phase 9 boundary):
+Deliberately NOT extracted (Phase 4.5 boundary):
 
 - interpretation (hawkish/dovish, which policy is "projected") — never;
 - the ranges / fan-chart text, prose ("The Policy Board discussed …"),
   methodology and disclaimer sections;
-- the decision / statement content (rates, guidance) — Phases 5/6;
-- the minutes — Phase 8.
+- the decision / statement content (rates, guidance) — Phase 4.1/6;
+- the minutes — Phase 4.4.
 """
 
 from __future__ import annotations

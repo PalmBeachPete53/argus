@@ -424,7 +424,7 @@ def test_classification_speech_url_or_title(bank):
 @pytest.mark.parametrize("bank", list(URL_SIGNAL_BANKS))
 def test_classification_non_speech_not_mined_as_speech(bank):
     """A collective decision URL (same bank) is not classified as a speech —
-    it belongs to Phases 5/8 decision types, gated on their own types."""
+    it belongs to Phase 4.1/8 decision types, gated on their own types."""
     url = {
         "fed": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260318a.htm",
         "boe": "https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes",

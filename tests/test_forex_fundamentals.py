@@ -1,4 +1,4 @@
-"""Phase 15 — forex fundamentals analysis.
+"""Phase 8 — forex fundamentals analysis.
 
 Tests the pure ``ForexFundamentalsAnalyzer`` and the store integration
 (``analyze_forex_fundamentals`` + ``forex_fundamentals`` /
@@ -6,15 +6,15 @@ Tests the pure ``ForexFundamentalsAnalyzer`` and the store integration
 
 Coverage:
 
-- **Vocabulary**: fundamental dimensions == Phase 13 condition subjects ∪
-  Phase 14 state subjects; excluded (projection/change/date) predicates
+- **Vocabulary**: fundamental dimensions == Phase 6 condition subjects ∪
+  Phase 7 state subjects; excluded (projection/change/date) predicates
   documented; monetary and macro vocabularies reused from the canonical layers.
 - **Model**: ``synthesized`` is always ``True``; formulation is purely
   descriptive (never stance/forecast/fair value/forex signal); deterministic;
   serialization round-trip for both fundamentals and differentials.
 - **Identity**: deterministic, currency+source specific ``fundamental_id``;
   deterministic, orientation-specific ``differential_id`` (EUR/USD ≠ USD/EUR).
-- **Monetary fundamentals**: Phase 14 states are the monetary source (never
+- **Monetary fundamentals**: Phase 7 states are the monetary source (never
   reconstructed from documents); several instruments are separate dimensions;
   unknown currency / valueless skipped with warnings.
 - **Macro fundamentals**: Phase 4 facts are the macro source;
@@ -349,7 +349,7 @@ class TestIdentity:
 
 
 # ---------------------------------------------------------------------------
-# monetary fundamentals (Phase 14 states)
+# monetary fundamentals (Phase 7 states)
 # ---------------------------------------------------------------------------
 class TestMonetaryFundamentals:
     def test_state_is_one_fundamental(self):

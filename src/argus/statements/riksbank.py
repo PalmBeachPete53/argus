@@ -1,6 +1,6 @@
-"""Riksbank — Sveriges Riksbank monetary policy report extractor (Phase 6).
+"""Riksbank — Sveriges Riksbank monetary policy report extractor (Phase 4.2).
 
-Encapsulates the Riksbank's vocabulary on top of the shared Phase 6 engine.
+Encapsulates the Riksbank's vocabulary on top of the shared Phase 4.2 engine.
 Riksbank language uses "per cent"; the reference date is the "Press release —
 25 June 2026" style release date. Section headings mirror the Monetary Policy
 Report structure (inflation, economic activity, the labour market, monetary

@@ -1,4 +1,4 @@
-"""Bank of Japan — Minutes of the Monetary Policy Meeting extractor (Phase 8).
+"""Bank of Japan — Minutes of the Monetary Policy Meeting extractor (Phase 4.4).
 
 Extracts the facts of a Bank of Japan "Minutes of the Monetary Policy Meeting"
 from the normalized document, answering "what did the Policy Board explicitly
@@ -10,7 +10,7 @@ say or discuss during the meeting?":
   developments and on monetary policy;
 - forward guidance, verbatim.
 
-Phase 8 specifics — attribution (BoJ vocabulary):
+Phase 4.4 specifics — attribution (BoJ vocabulary):
 
 - ``Fact.speaker`` stays ``None``; the attribution the minutes state —
   ``dissent`` / ``one_member`` / ``some_members`` / ``most_members`` /
@@ -24,14 +24,14 @@ economic activity" states no position and produces no fact; "Some members
 pointed out that the year-on-year rate of change in the CPI was expected to be
 around 2 percent in fiscal 2026" is mined.
 
-Deliberately NOT extracted (Phase 8 boundary):
+Deliberately NOT extracted (Phase 4.4 boundary):
 
 - the decision itself — the uncollateralized overnight call rate target, the
   decision wording and the vote are the Statement's own content (BoJ fuses
-  decision + statement) and are Phase 6 territory
-- the Outlook for Economic Activity and Prices (projections) — Phase 9
+  decision + statement) and are Phase 4.2 territory
+- the Outlook for Economic Activity and Prices (projections) — Phase 4.5
 - hawkish/dovish interpretation
-- Phases 5/7/10/11 (decisions, press conferences, reports, speeches)
+- Phase 4.1/7/10/11 (decisions, press conferences, reports, speeches)
 
 An unknown section is never assumed to be economic: "absence of proof →
 absence of extraction".

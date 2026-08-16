@@ -1,4 +1,4 @@
-"""ECB — Press Conference extractor (Phase 7).
+"""ECB — Press Conference extractor (Phase 4.3).
 
 Extracts the facts of an ECB press conference transcript from the normalized
 document text, answering "what did the central bank explicitly say during the
@@ -20,17 +20,17 @@ otherwise the section is **ignored** ("absence of proof → absence of
 extraction"). An unknown section is never assumed to be remarks, so a future
 appendix / biography / legal notice / closing-remarks section yields no fact.
 
-Content is classified sentence-by-sentence into the Phase 7 categories
+Content is classified sentence-by-sentence into the Phase 4.3 categories
 (A–G) with a deterministic precedence: forward guidance (G) > policy stance
 (D) > risks (E) > financial conditions (F) > inflation (A) > labour market (C)
 > growth (B). A sentence matching no category produces no fact — reliability is
 preferred over coverage.
 
-Deliberately NOT extracted (Phase 7 boundary):
+Deliberately NOT extracted (Phase 4.3 boundary):
 
-- the decision itself (wording, rates, changes, effective date) — Phase 5,
+- the decision itself (wording, rates, changes, effective date) — Phase 4.1,
   gated on decision publications
-- the decision rationale — Phase 6 territory (monetary policy statement)
+- the decision rationale — Phase 4.2 territory (monetary policy statement)
 - journalist question content: the questions are never mined, so a market-fact
   sentence in a question is never attributed to the bank unless the official's
   answer restates it
@@ -90,12 +90,12 @@ from .base import PressConferenceExtractor
 EXTRACTION_VERSION = "7.0.0"
 
 # ---------------------------------------------------------------------------
-# Canonical Phase 7 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
-# Overlapping content types reuse the Phase 5/6 subjects (``policy_guidance``,
+# Canonical Phase 4.3 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
+# Overlapping content types reuse the Phase 4.1/6 subjects (``policy_guidance``,
 # ``inflation``, ``core_inflation``, ``inflation_expectations``, ``growth``,
 # ``gdp``, ``labour_market``, ``unemployment``, ``wages``,
 # ``financial_conditions``, ``risk``, ``inflation_risk``, ``growth_risk``).
-# New in Phase 7: ``inflation_driver`` (A — factors behind inflation) and the
+# New in Phase 4.3: ``inflation_driver`` (A — factors behind inflation) and the
 # ``monetary_policy`` / ``statement`` predicate pair (D — policy stance and
 # conditions discussed at the press conference, kept verbatim).
 # ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ PREDICATE_VALUE = "value"
 # Remarks vs Q&A. A section is routed by its normalized heading; when the
 # heading carries no signal the mode is inferred from the text (Q&A markers).
 #
-# Routing is CONSERVATIVE (Phase 7 hardening): a section whose mode cannot be
+# Routing is CONSERVATIVE (Phase 4.3 hardening): a section whose mode cannot be
 # determined with sufficient certainty is IGNORED rather than assumed to be
 # remarks. "Absence of proof → absence of extraction": an unknown heading
 # without a reliable Q&A signal never becomes remarks, so a future section
@@ -367,7 +367,7 @@ _INFLATION_DRIVER = re.compile(
 
 # ---------------------------------------------------------------------------
 # Quantitative values. A sentence is mined for percentages only when it states
-# an explicit value claim (Phase 6 value-gate principle), so "the 2% target",
+# an explicit value claim (Phase 4.2 value-gate principle), so "the 2% target",
 # "close to 2%" or "converging towards 2%" is never read as a value.
 # ---------------------------------------------------------------------------
 _RATE_ITEM = r"[0-9]+(?:\.[0-9]+)?"

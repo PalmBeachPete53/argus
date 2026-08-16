@@ -1,4 +1,4 @@
-"""Phase 10 — type-specific monetary policy report extraction public API."""
+"""Phase 4.6 — type-specific monetary policy report extraction public API."""
 
 from .base import (
     REPORT_PUBLICATION_TYPES,

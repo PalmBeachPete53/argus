@@ -1,4 +1,4 @@
-"""Phase 8 — type-specific minutes / meeting account extractors.
+"""Phase 4.4 — type-specific minutes / meeting account extractors.
 
 An extractor converts a ``NormalizedDocument`` of a monetary policy meeting
 account (the ECB "Account of the monetary policy meeting", the Fed
@@ -18,12 +18,12 @@ encapsulated, invariant 10); the generic engine in this module only dispatches
 on ``central_bank``.
 
 Minutes and meeting accounts record the **discussion** of the monetary policy
-body, not a single collective decision. The Phase 8 extractors therefore keep,
+body, not a single collective decision. The Phase 4.4 extractors therefore keep,
 per Fact, the attribution context the source itself states — the collective
 ("the Governing Council"), a group ("members", "some members") or a dissent —
 in ``identity_qualifier`` (``minutes:{attribution}:{n}``). ``Fact.speaker`` is
 never populated: the minutes rarely name individual governors, and a name is
-never invented (roadmap Phase 8 criterion: individual positions and dissents
+never invented (roadmap Phase 4.4 criterion: individual positions and dissents
 are distinguished and traced without fabricating identities).
 """
 
@@ -87,7 +87,7 @@ def extract_minutes(
     state: ``rebuild_facts_for_document`` (delete + insert) runs for every
     valid normalized document, **including when the result is empty**, so a
     re-extraction that now yields no facts clears the stale facts of that
-    document instead of leaving them behind (same guarantee as Phases 5–7).
+    document instead of leaving them behind (same guarantee as Phases 4.1–4.3).
 
     Returns the list of ``ExtractionResult`` (empty if no extractor applies or
     the publication is not classified as ``minutes`` / ``meeting_account``).
@@ -124,7 +124,7 @@ def _is_minutes_publication(store, publication, *, expected_types: tuple[str, ..
     """Gate extraction to minutes / meeting account publications.
 
     The ``classifications`` table is the **single source of truth** (same strict
-    mechanism as Phases 5–7): extraction is authorized only when an
+    mechanism as Phases 4.1–4.3): extraction is authorized only when an
     authoritative classification record exists for the publication and its
     ``publication_type`` is one of the ``expected_types`` (``minutes`` or
     ``meeting_account``). The denormalized ``publication.publication_type``

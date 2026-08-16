@@ -16,12 +16,12 @@ decide or announce as part of the decision?":
 - forward guidance as part of the decision, verbatim (never classified, never
   interpreted)
 
-Deliberately NOT extracted (Phase 5 boundary):
+Deliberately NOT extracted (Phase 4.1 boundary):
 
 - individual governors' dissents — a separate matter handled in the FOMC
-  minutes (Phase 8); never fabricated as a vote
+  minutes (Phase 4.4); never fabricated as a vote
 - the macro-economic justification / projections — separate publications
-  (Phase 6 / Phase 9)
+  (Phase 4.2 / Phase 4.5)
 - the FOMC's "Implementation Note" (reserve balances / balance sheet) — a
   distinct publication
 
@@ -62,7 +62,7 @@ from .base import DecisionExtractor
 
 EXTRACTION_VERSION = "5.3.0"
 
-# Canonical Fed instrument subject (Phase 5 vocabulary extension, documented in
+# Canonical Fed instrument subject (Phase 4.1 vocabulary extension, documented in
 # docs/EXTRACTORS.md): the federal funds *target range*.
 SUBJECT_POLICY_RATE = "policy_rate"
 SUBJECT_DECISION = "monetary_policy_decision"

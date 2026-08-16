@@ -1,4 +1,4 @@
-"""Phase 8 — type-specific minutes / meeting account extraction public API."""
+"""Phase 4.4 — type-specific minutes / meeting account extraction public API."""
 
 from .base import (
     MINUTES_PUBLICATION_TYPES,

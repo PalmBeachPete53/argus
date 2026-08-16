@@ -1,4 +1,4 @@
-# Data Model — Fact Changes (Phase 12)
+# Data Model — Fact Changes (Phase 5)
 
 This document is the authoritative reference for the **temporal /
 cross-publication change layer** of Argus (`src/argus/changes/`). It defines
@@ -8,18 +8,18 @@ analyzer, the identity scheme and the persistence.
 ## Where Fact Changes sit in the pipeline
 
 ```
-Type-Specific Extractor                 ← Phases 5–11
+Type-Specific Extractor                 ← Phases 4.1–4.7
     ↓
 Fact                                    ← Phase 4 (src/argus/facts/)
     ↓
-Temporal / Cross-Publication Analysis   ← Phase 12 (src/argus/changes/, THIS layer)
+Temporal / Cross-Publication Analysis   ← Phase 5 (src/argus/changes/, THIS layer)
     ↓
-Policy Reaction Function                ← Phase 13
-Monetary Policy State                   ← Phase 14
-Forex Fundamentals                      ← Phase 15
+Policy Reaction Function                ← Phase 6
+Monetary Policy State                   ← Phase 7
+Forex Fundamentals                      ← Phase 8
 ```
 
-Phase 12 is an **analysis layer**, not an extractor. It consumes the existing
+Phase 5 is an **analysis layer**, not an extractor. It consumes the existing
 Fact history, relates Facts over time, and persists the relations. It never
 creates Facts, never reads source documents and never mutates the Facts it
 compares.

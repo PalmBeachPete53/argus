@@ -3,11 +3,11 @@
 > **Phase boundary.** This document describes the **Phase 4.x — Multi-Bank
 > Press Conference Extraction Extension** of the **Phase 4 — Fact Extraction**
 > layer. It is **not** a new standalone phase: Argus is not gaining a
-> "Phase 17/18", and no existing phase is renumbered. Press conference is a
+> "Phase 10/11", and no existing phase is renumbered. Press conference is a
 > **publication type** (`press_conference`), not a `Fact`. This work extends the
-> Phase 7 press-conference family (ECB, the reference implementation) with the
+> Phase 4.3 press-conference family (ECB, the reference implementation) with the
 > **Fed** press conference extractor. It is document-to-`Fact` extraction that
-> lives entirely **upstream** of the Phase 12+ derived layers
+> lives entirely **upstream** of the Phase 5+ derived layers
 > (`FactChange` → `PolicyReaction` → `MonetaryPolicyState` →
 > `ForexFundamentals`). This work ends at canonical `Fact`s.
 
@@ -16,10 +16,10 @@ Official publications
         ↓ Classification (classifications table = single source of truth)
         ↓ Phase 4 Fact Extraction (Press Conference extractor family)
         ↓ canonical Facts
-        ↓ Phase 12+ (separate, downstream, never touched here)
+        ↓ Phase 5+ (separate, downstream, never touched here)
 ```
 
-Phase 16 — Historical Validation — remains **DEFERRED**. Nothing here adds a
+Phase 9 — Historical Validation — remains **DEFERRED**. Nothing here adds a
 synthetic historical corpus or claims real historical coverage.
 
 ---
@@ -30,11 +30,11 @@ Argus extracts **observable factual claims** from official central-bank press
 conference transcripts. A press conference transcript differs from a
 decision/statement: it mixes the collective **introductory statement / opening
 remarks** with the **individual answers** of officials to journalists'
-questions. The Phase 7 extractors therefore keep, per `Fact`, the attribution
+questions. The Phase 4.3 extractors therefore keep, per `Fact`, the attribution
 context (remarks vs Q&A answer, the Q&A turn, and the verbatim official speaker
 when the document labels one) in `identity_qualifier` and the `Fact.speaker`
 attribute — an individual's words are never presented as a collective decision
-(roadmap Phase 7 criterion).
+(roadmap Phase 4.3 criterion).
 
 The **ECB press conference extractor** (`src/argus/press_conferences/ecb.py`,
 `EcbPressConferenceExtractor` v7.0.0) is the **reference implementation** and is
@@ -72,7 +72,7 @@ Press conference extraction MUST **never** infer, emit, or label:
 - implied policy reaction.
 
 A press conference is **evidence**, not interpreted policy. It is never
-converted into a Phase 13 reaction, a Phase 14 state dimension, or a Phase 15
+converted into a Phase 6 reaction, a Phase 7 state dimension, or a Phase 8
 forex fundamental. The boundary is hard:
 
 ```
@@ -144,15 +144,14 @@ Rules:
   communication — never attributed to an individual chair).
 
 Attribution context is carried deterministically in `identity_qualifier`
-mirroring the Phase 7 ECB contract:
+mirroring the Phase 4.3 ECB contract:
 
 - `remarks:{n}` for remarks facts (`n` = ordinal within the remarks);
 - `answer:{turn}:{n}` for Q&A answer facts (`turn` = 1-based Q&A turn, `n` =
   per-turn ordinal).
 
 This is what distinguishes *"what the FOMC communicated"* (remarks) from
-*"what one official said to a journalist"* (individual attribution) — the Phase
-7 validation criterion.
+*"what one official said to a journalist"* (individual attribution) — the Phase 4.3 validation criterion.
 
 ## 5. Classification
 
@@ -186,7 +185,7 @@ authoritative classification is not `press_conference`.
 ## 6. Supported facts
 
 The Fed extractor emits the same canonical subjects / predicates as the ECB
-Phase 7 extractor:
+Phase 4.3 extractor:
 
 | subject | predicate | value | source |
 |---|---|---|---|
@@ -205,12 +204,12 @@ Phase 7 extractor:
 | `growth_risk` | `assessment` | categorical (upside/downside/balanced) or text | same |
 
 Content is classified sentence-by-sentence with the same deterministic
-precedence as Phase 7 (guidance > policy > risk > financial > inflation >
+precedence as Phase 4.3 (guidance > policy > risk > financial > inflation >
 labour > growth). An unmatched sentence produces no fact (reliability over
 coverage). No `rationale`, no `change`, no decision facts, no other phase's
 subjects.
 
-Value facts follow the identical gate to Phases 6/7/8/11: a percentage becomes
+Value facts follow the identical gate to Phase 4.2/7/8/11: a percentage becomes
 a `Fact` only behind an **explicit value-claim** verb ("projected / expected /
 forecast to average / stand at / be …", "stood at …"), so "the 2 percent
 target" / "close to 2 percent" is never read as a value; a percentage with an
@@ -228,7 +227,7 @@ never becomes an invented orientation — it is surfaced as a
 ## 7. Fed guidance & policy vocabulary
 
 The Fed uses its own forward-guidance vernacular (same structural "guidance"
-slot as Phase 7). Fed guidance anchors (bank-specific, in `fed.py`):
+slot as Phase 4.3). Fed guidance anchors (bank-specific, in `fed.py`):
 
 - `as appropriate`
 - `will be patient` / `will be patient in considering`
@@ -297,7 +296,7 @@ convention, no code import graph between families):
   inflation / labour / growth verbatim-assessment paths;
 - a deterministic, provenance-carrying `PressConferenceReporter` with within-run
   deduplication and the `remarks:` / `answer:` ordinal qualifiers;
-- the canonical Phase 7 subject/predicate constants and the generic English
+- the canonical Phase 4.3 subject/predicate constants and the generic English
   financial / inflation / labour / growth / risk anchor sets.
 
 Bank-specific semantics live **only** in `fed.py` and `boe.py` (bank transcript
@@ -378,7 +377,7 @@ is only guaranteed to be contiguous in the **full document text** (whitespace
 normalized), not in a single page section — the provenance contract for BoE
 tests normalizes whitespace accordingly.
 
-`identity_qualifier` follows the Phase 7 contract: `remarks:{n}` and
+`identity_qualifier` follows the Phase 4.3 contract: `remarks:{n}` and
 `answer:{turn}:{n}`.
 
 ### 12.4 BoE vocabulary
@@ -439,6 +438,6 @@ synthetic documents. A live-source verification was run against the real July
 ## 13. Final output
 
 The Press Conference family (ECB conserved + Fed and BoE added) emits canonical
-`Fact`s only. Nothing here introduces Phases 12–15 semantics, no LLM, no network
-calls, no fuzzy inference, and no new top-level roadmap phase. Phase 16 remains
-`DEFERRED`; nothing here starts Phase 17.
+`Fact`s only. Nothing here introduces Phases 5–8 semantics, no LLM, no network
+calls, no fuzzy inference, and no new top-level roadmap phase. Phase 9 remains
+`DEFERRED`; nothing here starts Phase 10.

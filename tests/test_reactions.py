@@ -1,4 +1,4 @@
-"""Phase 13 — empirical policy reaction analysis (deep hardening).
+"""Phase 6 — empirical policy reaction analysis (deep hardening).
 
 Tests the pure ``PolicyReactionAnalyzer`` and the store integration
 (``analyze_reactions`` + ``policy_reactions`` persistence).

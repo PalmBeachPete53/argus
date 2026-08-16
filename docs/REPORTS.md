@@ -2,10 +2,10 @@
 
 > **Phase boundary.** This document describes the **Phase 4.x — Multi-Bank
 > Report Extraction Extension** of the **Phase 4 — Fact Extraction** layer.
-> It is **not** a new standalone phase: Argus is not gaining a "Phase 17/18",
+> It is **not** a new standalone phase: Argus is not gaining a "Phase 10/11",
 > and no existing phase is renumbered. Report extraction is
 > document-to-`Fact` extraction — it lives entirely **upstream** of the
-> Phase 12+ derived layers (`FactChange` → `PolicyReaction` →
+> Phase 5+ derived layers (`FactChange` → `PolicyReaction` →
 > `MonetaryPolicyState` → `ForexFundamentals`). This work ends at canonical
 > `Fact`s.
 
@@ -14,10 +14,10 @@ Official publications
         ↓ Classification (classifications table = single source of truth)
         ↓ Phase 4 Fact Extraction (Report extractor family)
         ↓ canonical Facts
-        ↓ Phase 12+ (separate, downstream, never touched here)
+        ↓ Phase 5+ (separate, downstream, never touched here)
 ```
 
-Phase 16 — Historical Validation — remains **DEFERRED**. Nothing here adds a
+Phase 9 — Historical Validation — remains **DEFERRED**. Nothing here adds a
 synthetic historical corpus or claims real historical coverage.
 
 ---
@@ -55,9 +55,9 @@ A report extractor may capture, only when the source states it explicitly:
 Report extraction MUST **never** infer, emit, or label:
 
 - hawkish / dovish stance, sentiment or market expectations;
-- a policy **decision** (level, change, votes) — Phases 5/8, gated on
+- a policy **decision** (level, change, votes) — Phase 4.1/8, gated on
   `monetary_policy_decision` / minutes publications;
-- structured economic projection **tables** — Phase 9, gated on
+- structured economic projection **tables** — Phase 4.5, gated on
   `economic_projections`;
 - causal relationships, trading signals, ranking, conviction;
 - a policy-rate **path** for banks other than Norges (no artificial symmetry:
@@ -66,7 +66,7 @@ Report extraction MUST **never** infer, emit, or label:
 Precision over recall: prefer **no Fact** over an **invented Fact**.
 `UNKNOWN ≠ ECONOMIC`. "Absence of proof → absence of extraction."
 
-## 3. Phase 5 / 9 boundaries inside a report
+## 3. Phase 4.1 / 9 boundaries inside a report
 
 A report is a large narrative that may *mention* decisions and projections
 without being them. The family keeps the boundaries hard:
@@ -74,9 +74,9 @@ without being them. The family keeps the boundaries hard:
 - the **decision narrative** ("The Executive Board decided to cut the policy
   rate by 0.25 percentage points to 2.5 per cent") is preserved **verbatim**
   as a `monetary_policy/statement` and **never priced** (no `policy_rate`
-  value Fact) — the current level/change is Phase 5 territory;
+  value Fact) — the current level/change is Phase 4.1 territory;
 - the **forecast/statistical tables** sections (Riksbank "Forecast tables",
-  ECB macroeconomic data captions) belong to Phase 9; a prose footnote about
+  ECB macroeconomic data captions) belong to Phase 4.5; a prose footnote about
   them is not mined. Prose **forecasts** inside a report are kept as value
   Facts only when they carry an explicit reference period; a forecast without
   a period is under-determined and ignored;
@@ -92,7 +92,7 @@ without being them. The family keeps the boundaries hard:
 
 ## 4. Canonical subjects & predicates
 
-Subjects (controlled vocabulary — reuses the Phase 6/7/8 vocabulary, with
+Subjects (controlled vocabulary — reuses the Phase 4.2/7/8 vocabulary, with
 `fiscal_policy` and, for the Riksbank, the shared `core_inflation`):
 
 ```
@@ -138,7 +138,7 @@ become a decision/projection fact. A real-source integration check on bulletin
 → persistence; live extraction is conservative (0 facts) because the live HTML
 landing page is a JS-rendered single-section page and the linked PDFs carry
 uncontrolled section headings — no fact is invented (`UNKNOWN ≠ ECONOMIC`).
-This is real-source verification, not Phase 16 historical validation.
+This is real-source verification, not Phase 9 historical validation.
 
 ### BoC — `BocReportExtractor` (v10.3.0)
 
@@ -165,7 +165,7 @@ Publication: the Riksbank quarterly **Monetary Policy Report**. Its
 distinctive vocabulary is the **CPIF** (target measure → `inflation`),
 underlying inflation / CPIF excluding energy (→ `core_inflation`), the
 Executive Board as decision body, and the `Forecast tables` section (never
-mined — Phase 9 boundary). Mined sections include `summary`, `monetary policy
+mined — Phase 4.5 boundary). Mined sections include `summary`, `monetary policy
 in sweden — the riksbank's strategy`, `the economic outlook for the coming
 years`, `the labour market`, `inflation`, `financial conditions`, `monetary
 policy analysis`, `uncertainty, risks and alternative scenarios`. Section-title

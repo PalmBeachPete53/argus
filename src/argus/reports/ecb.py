@@ -1,4 +1,4 @@
-"""ECB — Monetary Policy Report extractor (Phase 10).
+"""ECB — Monetary Policy Report extractor (Phase 4.6).
 
 Extracts the facts of an ECB monetary policy report (the euro area's
 report-like publication being the ECB "Economic Bulletin") from the normalized
@@ -16,7 +16,7 @@ and about monetary policy?":
 - explicit **policy statements** and **forward guidance**, verbatim, never
   interpreted.
 
-Phase 10 is the most over-extraction-prone phase: a monetary policy report is a
+Phase 4.6 is the most over-extraction-prone phase: a monetary policy report is a
 large narrative document full of economic language. Its cardinal rule is
 **precision over recall** — ``known section + explicit assertion + sufficient
 identity + provenance → Fact``, and ``unknown section + economic-looking
@@ -32,15 +32,15 @@ classified sentence-by-sentence with a fixed precedence (guidance > policy >
 risk > financial > inflation > labour > growth > fiscal); the heading only
 gates whether the section is mined at all.
 
-Deliberately NOT extracted (Phase 10 boundary):
+Deliberately NOT extracted (Phase 4.6 boundary):
 
 - hawkish/dovish, bullish/bearish or any market interpretation — never
-- policy decisions/rates/votes — Phases 5–8, gated on their own publication
+- policy decisions/rates/votes — Phases 4.1–4.4, gated on their own publication
   types; the report's *narrative* of policy is kept verbatim, never priced
-- the structured economic projections tables — Phase 9, gated on
+- the structured economic projections tables — Phase 4.5, gated on
   ``economic_projections``; prose forecasts inside a report are kept as value
   claims only when they carry an explicit reference period
-- Phases 11 (speeches) — not this layer.
+- Phase 4.7 (speeches) — not this layer.
 
 Design rules
 
@@ -95,8 +95,8 @@ from .base import ReportsExtractor
 EXTRACTION_VERSION = "10.0.0"
 
 # ---------------------------------------------------------------------------
-# Canonical Phase 10 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
-# Reuses the Phase 6/7/8 subjects verbatim; ``fiscal_policy`` is added for the
+# Canonical Phase 4.6 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
+# Reuses the Phase 4.2/7/8 subjects verbatim; ``fiscal_policy`` is added for the
 # fiscal developments section.
 # ---------------------------------------------------------------------------
 SUBJECT_INFLATION = "inflation"
@@ -120,7 +120,7 @@ PREDICATE_STATEMENT = "statement"
 PREDICATE_VALUE = "value"
 
 # ---------------------------------------------------------------------------
-# Section routing — CONSERVATIVE (Phase 10). A heading is mined only when it is
+# Section routing — CONSERVATIVE (Phase 4.6). A heading is mined only when it is
 # a known economic section; an unknown heading and the known non-economic ones
 # (title, foreword, legal notice, statistics, annexes, methodology, contents,
 # boxes) are ignored. "Absence of proof → absence of extraction": an unknown
@@ -453,7 +453,7 @@ _SHARE_UNIT = re.compile(
 )
 
 # ---------------------------------------------------------------------------
-# Tables — same value-gate philosophy as Phase 9: a cell becomes a Fact only
+# Tables — same value-gate philosophy as Phase 4.5: a cell becomes a Fact only
 # when its table carries an explicit percentage unit, its row is a recognised
 # economic variable and its columns are years. The unit is read from the
 # table's own caption, never borrowed from another table.
@@ -904,7 +904,7 @@ class EcbReportsExtractor(ReportsExtractor):
         return float(re.match(r"[0-9.]+", token).group(0))
 
     # ------------------------------------------------------------------
-    # tables — variable × period × value × unit (Phase 9 philosophy)
+    # tables — variable × period × value × unit (Phase 4.5 philosophy)
     # ------------------------------------------------------------------
     @classmethod
     def _process_table(

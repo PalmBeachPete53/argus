@@ -1,4 +1,4 @@
-# Data Model — Forex Fundamentals (Phase 15)
+# Data Model — Forex Fundamentals (Phase 8)
 
 This document is the authoritative reference for the **forex fundamentals
 layer** of Argus (`src/argus/forex/`). It defines what a `ForexFundamental`
@@ -6,35 +6,35 @@ and a `ForexDifferential` are, what they are **not**, and every design decision
 behind the analyzer, the identity scheme, the comparability rules, the temporal
 semantics and the persistence.
 
-It was written **before** the implementation (Phases 13 and 14 are frozen;
-Phases 16+ are not started). Anything in this document is normative; any
+It was written **before** the implementation (Phase 6 and 14 are frozen;
+Phase 9+ are not started). Anything in this document is normative; any
 divergence found during implementation must be resolved here first.
 
 ## Where Forex Fundamentals sit in the pipeline
 
 ```
-Type-Specific Extractor                 ← Phases 5–11
+Type-Specific Extractor                 ← Phases 4.1–4.7
     ↓
 Fact                                    ← Phase 4 (src/argus/facts/)
     ↓
-Temporal / Cross-Publication Analysis   ← Phase 12 (src/argus/changes/)
+Temporal / Cross-Publication Analysis   ← Phase 5 (src/argus/changes/)
     ↓
-Policy Reaction Function                ← Phase 13 (src/argus/reactions/)  [FROZEN]
+Policy Reaction Function                ← Phase 6 (src/argus/reactions/)  [FROZEN]
     ↓
-Monetary Policy State                   ← Phase 14 (src/argus/states/)     [FROZEN]
+Monetary Policy State                   ← Phase 7 (src/argus/states/)     [FROZEN]
     ↓
-Forex Fundamentals                      ← Phase 15 (src/argus/forex/, THIS layer)
+Forex Fundamentals                      ← Phase 8 (src/argus/forex/, THIS layer)
     ↓
-Historical Validation / Trading Layer   ← Phases 16–17 (NOT STARTED)
+Historical Validation / Trading Layer   ← Phases 9–10 (NOT STARTED)
 ```
 
-Phase 15 is the **first cross-economy layer**. It transforms the already
-structured monetary states (Phase 14) and the macro observations (Phase 4
+Phase 8 is the **first cross-economy layer**. It transforms the already
+structured monetary states (Phase 7) and the macro observations (Phase 4
 `Fact`s) of each economy into a layer of **structured, comparable, traceable
 forex fundamentals**, and it is the first place where a **descriptive
 comparison between two central banks / economies is allowed**.
 
-The central question Phase 15 answers:
+The central question Phase 8 answers:
 
 > **Quels sont les fondamentaux macroéconomiques observables d'une devise, et
 > comment leur état peut-il être comparé à celui d'une autre devise ?**
@@ -48,11 +48,11 @@ positioning engine.
 ```
 SOURCE                      observed     (official publication / document)
 → OBSERVED FACT             observed     (Phase 4)
-→ OBSERVED CHANGE           observed     (Phase 12)
-→ TEMPORAL RELATIONSHIP     INFERRED     (Phase 13)
-→ MONETARY POLICY STATE     SYNTHESIZED  (Phase 14)
-→ FOREX FUNDAMENTAL         SYNTHESIZED  (Phase 15 — THIS layer)
-→ FOREX DIFFERENTIAL        SYNTHESIZED  (Phase 15 — THIS layer)
+→ OBSERVED CHANGE           observed     (Phase 5)
+→ TEMPORAL RELATIONSHIP     INFERRED     (Phase 6)
+→ MONETARY POLICY STATE     SYNTHESIZED  (Phase 7)
+→ FOREX FUNDAMENTAL         SYNTHESIZED  (Phase 8 — THIS layer)
+→ FOREX DIFFERENTIAL        SYNTHESIZED  (Phase 8 — THIS layer)
 ```
 
 - `Fact` / `FactChange` are **observed**.
@@ -69,20 +69,20 @@ constant, never `False`) and a purely descriptive `formulation`.
 
 ## Sources — what feeds this layer
 
-Phase 15 consumes **two** existing sources and nothing else:
+Phase 8 consumes **two** existing sources and nothing else:
 
-1. **Monetary dimensions** come from **`MonetaryPolicyState`** (Phase 14) —
+1. **Monetary dimensions** come from **`MonetaryPolicyState`** (Phase 7) —
    the observable monetary policy state. The policy rates are **never
-   reconstructed from documents**, and Phase 14's logic is **never
+   reconstructed from documents**, and Phase 7's logic is **never
    duplicated**.
 2. **Macro dimensions** come from **`Fact`** (Phase 4) — the canonical
    observed macro data (latest-known-observation model).
 
 **Never** used as a value source:
 
-- `PolicyReaction` (Phase 13) — an inferred temporal relation, never a
+- `PolicyReaction` (Phase 6) — an inferred temporal relation, never a
   fundamental value.
-- `FactChange` (Phase 12) deltas — a change is a variation, not a level; the
+- `FactChange` (Phase 5) deltas — a change is a variation, not a level; the
   state layer already consumes them.
 - Raw documents / network / LLM / fuzzy / semantic logic.
 
@@ -90,7 +90,7 @@ Phase 15 consumes **two** existing sources and nothing else:
 
 The canonical bank→currency relation already exists and is **reused**:
 `CentralBank.currency` (defined in `src/argus/adapters/`), exposed by
-`SourceRegistry`. A bank maps to exactly one ISO currency code, and in Phase 15
+`SourceRegistry`. A bank maps to exactly one ISO currency code, and in Phase 8
 the **currency is the economy identifier** (e.g. `EUR` = Euro area). The store
 entry point builds the mapping from `SourceRegistry`; the pure analyzer takes
 it as a parameter (never hardcoded, never duplicated).
@@ -127,31 +127,31 @@ the fundamental at `T` is the latest one with `observed_at ≤ T`.
 ### Dimensions
 
 ```
-MONETARY (from MonetaryPolicyState — Phase 14 STATE_SUBJECTS):
+MONETARY (from MonetaryPolicyState — Phase 7 STATE_SUBJECTS):
     policy_rate, main_refinancing_rate, deposit_facility_rate,
     marginal_lending_rate, policy_guidance, asset_purchase,
     risk, inflation_risk, growth_risk
 
-MACRO (from Facts — Phase 13 CONDITION_SUBJECTS):
+MACRO (from Facts — Phase 6 CONDITION_SUBJECTS):
     inflation, core_inflation, inflation_expectations, gdp, growth,
     unemployment, wages, labour_market, financial_conditions, fiscal_policy
 ```
 
 `FUNDAMENTAL_SUBJECTS = MACRO_SUBJECTS ∪ MONETARY_SUBJECTS`, both re-exported
-from the canonical Phase 13/14 vocabularies so the layers never drift.
+from the canonical Phase 6/7 vocabularies so the layers never drift.
 
 **Excluded observation kinds** (macro facts): predicate in
 `FUNDAMENTAL_EXCLUDED_PREDICATES = {"projection", "change", "date"}`.
 
 - `projection` — an expectation of a future value, not the current observed
-  level (same rationale as Phase 14's `STATE_EXCLUDED_PREDICATES`).
+  level (same rationale as Phase 7's `STATE_EXCLUDED_PREDICATES`).
 - `change` — a delta (variation), not an absolute level.
 - `date` — a meta observation, not a level.
 
 **Documented gaps (not structured by current data, never invented):**
 `consumption`, `investment`, `trade`, `current_account`, `productivity`,
 `labour_risk`, `fiscal_stance`, `yield_curves`, `market_pricing`,
-`expectations` beyond `inflation_expectations`. Phase 15 records these as
+`expectations` beyond `inflation_expectations`. Phase 8 records these as
 gaps; it never approximates them.
 
 ## What a ForexDifferential is
@@ -172,7 +172,7 @@ quote_observation (currency Q, dimension D)  ← latest known ≤ base.observed_
 - **Both sides declare their dimension explicitly** (`subject`, `predicate`,
   `value_kind`, `qualifier`, `period`, `publication_type` on the differential).
   The two observations are never merged, and a "unique policy rate" is never
-  implied — Phase 14's instruments stay distinct.
+  implied — Phase 7's instruments stay distinct.
 - `differential = base_value − quote_value`, an **arithmetic difference in the
   same unit/kind**, with both source values preserved (no conversion, no
   interpretation).
@@ -198,8 +198,8 @@ documented property, not an error).
 ### Cross-instrument comparisons
 
 Comparing `deposit_facility_rate` (ECB) against `policy_rate` (Fed) is
-**not** derived by Phase 15: the two sides do not share a dimension lineage,
-and Phase 15 never merges instruments implicitly or explicitly. Such
+**not** derived by Phase 8: the two sides do not share a dimension lineage,
+and Phase 8 never merges instruments implicitly or explicitly. Such
 comparisons require an explicit, economy-neutral instrument-family mapping,
 which is deliberately **not pre-implemented** (documented gap, future phase).
 
@@ -207,7 +207,7 @@ which is deliberately **not pre-implemented** (documented gap, future phase).
 
 - The **observation time** of a fundamental is the temporal reference of the
   source publication: `meeting_date` when set, else `publication_date` (the
-  exact reference Phases 12/13/14 use).
+  exact reference Phase 5/6/7 use).
 - **`effective_date` and `period` are never observation times.** They are kept
   separate. A value about a period is **not** treated as known during that
   period: it is known from its observation/publication date.
@@ -259,7 +259,7 @@ are part of the differential identity, so `EUR/USD` never collides with
 ```
 ForexFundamental
     ↓  source_id + source_kind
-MonetaryPolicyState (Phase 14)  or  Fact (Phase 4)
+MonetaryPolicyState (Phase 7)  or  Fact (Phase 4)
     ↓
 Publication → Document
 
@@ -286,7 +286,7 @@ Two dedicated tables mirroring `monetary_policy_states` conventions:
   whole store.
 - Rebuilds are **idempotent**, an **empty result clears the scope**, and no
   derived row can survive the disappearance of the observation it summarizes.
-- Deletion surface mirrors Phases 13/14: by bank/currency, by document, by
+- Deletion surface mirrors Phase 6/7: by bank/currency, by document, by
   publication.
 - `created_at` is preserved across upserts; `rebuild` restores the scope in
   one transaction.
@@ -305,9 +305,9 @@ Two dedicated tables mirroring `monetary_policy_states` conventions:
   `delete_forex_fundamentals`, `rebuild_forex_fundamentals`, and the
   differential equivalents including `get_differential_as_of(pair, subject, as_of=None)`.
 
-## What Phase 15 is NOT
+## What Phase 8 is NOT
 
-Phase 15 produces: observed values, arithmetic differentials, temporal
+Phase 8 produces: observed values, arithmetic differentials, temporal
 alignment, comparability metadata, provenance. It does **not** produce:
 
 - hawkish / dovish, bullish / bearish, strong / weak currency;
@@ -323,7 +323,7 @@ Even when an economic relation "seems obvious", it is not emitted.
 
 Only normalizations that are deterministic, mathematically explicit,
 documented, reversible/traceable and economically unambiguous are allowed.
-Phase 15 implements **one**: the arithmetic difference of two observed values
+Phase 8 implements **one**: the arithmetic difference of two observed values
 (same unit/kind). Percentage changes, annualization, z-scores, rankings,
 weighted scores and unit conversions are **not** implemented (documented
 scope; not justified by the current data).
@@ -338,15 +338,15 @@ scope; not justified by the current data).
 - Relative/percentage differentials, annualization, any normalization beyond
   the arithmetic difference.
 - Any forecast, expectation, fair value, ranking, conviction, positioning or
-  trading signal (Phases 16–17).
+  trading signal (Phases 9–10).
 
-## Validation criteria (Phase 15 is COMPLETE only if)
+## Validation criteria (Phase 8 is COMPLETE only if)
 
-1. The Phase 15 test suite is green and deterministic (run twice).
+1. The Phase 8 test suite is green and deterministic (run twice).
 2. The full suite (Phases 0–15) is green twice; compileall passes; Phases 0–14
    are functionally unchanged (`git diff` audited).
-3. `reactions/` and `states/` receive no Phase 15 logic; `store.py` changes are
-   exclusively Phase 15 additions.
+3. `reactions/` and `states/` receive no Phase 8 logic; `store.py` changes are
+   exclusively Phase 8 additions.
 4. No forbidden content exists: no hawkish/dovish/bullish/bearish, no
    forecast/fair value/signal/conviction/ranking, no mutation of sources, no
    LLM/network/fuzzy/semantic logic.

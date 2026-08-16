@@ -18,13 +18,13 @@ announce as part of the decision?":
 - explicit forward guidance as part of the decision, verbatim (never classified
   hawkish/dovish, never interpreted)
 
-Deliberately NOT extracted (Phase 5 boundary):
+Deliberately NOT extracted (Phase 4.1 boundary):
 
 - votes — ECB Monetary Policy Decisions do not report individual votes; the
   extractor never fabricates a ``vote`` fact
 - a full risk assessment — the decision document carries none; risk language
-  belongs to the separate Monetary Policy Statement (Phase 6)
-- macro-economic justification (inflation/growth/employment analysis) — Phase 6
+  belongs to the separate Monetary Policy Statement (Phase 4.2)
+- macro-economic justification (inflation/growth/employment analysis) — Phase 4.2
 
 Design rules
 
@@ -74,7 +74,7 @@ from .base import DecisionExtractor
 EXTRACTION_VERSION = "5.2.0"
 
 # ---------------------------------------------------------------------------
-# Canonical Phase 5 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
+# Canonical Phase 4.1 subjects (controlled vocabulary, see docs/EXTRACTORS.md).
 # ---------------------------------------------------------------------------
 SUBJECT_DECISION = "monetary_policy_decision"
 SUBJECT_DEPOSIT_FACILITY = "deposit_facility_rate"
@@ -156,7 +156,7 @@ _PROGRAMME_SECTIONS: tuple[tuple[str, str], ...] = (
 
 # Explicit forward-guidance anchors: prospective *policy* statements about the
 # governing council's own instruments/rates, part of the decision. Anchors are
-# intentionally narrow — they never match economic analysis (Phase 6).
+# intentionally narrow — they never match economic analysis (Phase 4.2).
 _GUIDANCE_ANCHORS: tuple[re.Pattern, ...] = (
     re.compile(r"\bstands?\s+ready\s+to\s+adjust\b", re.IGNORECASE),
     re.compile(r"\bwill\s+not\s+hesitate\s+to\s+adjust\b", re.IGNORECASE),
@@ -623,7 +623,7 @@ class EcbDecisionExtractor(DecisionExtractor):
     def _forward_guidance(cls, document) -> list[tuple[int, int, str]]:
         """Explicit prospective policy statements that are part of the decision,
         verbatim. Only decision-level sections are considered — the separate
-        "Monetary policy statement" is Phase 6 territory. Returns (ordinal,
+        "Monetary policy statement" is Phase 4.2 territory. Returns (ordinal,
         section index, sentence)."""
         found: list[tuple[int, int, str]] = []
         for index, section in enumerate(document.sections):

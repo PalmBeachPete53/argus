@@ -1,4 +1,4 @@
-"""Phase 12 — the Fact Changes model.
+"""Phase 5 — the Fact Changes model.
 
 A ``FactChange`` is an **analytic relation between two existing Facts**
 (previous → current), produced by the temporal / cross-publication analysis

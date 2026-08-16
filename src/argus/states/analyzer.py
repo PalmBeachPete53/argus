@@ -1,4 +1,4 @@
-"""Phase 14 — monetary policy state analysis.
+"""Phase 7 — monetary policy state analysis.
 
 The analyzer is **pure** (``MonetaryPolicyStateAnalyzer.analyze`` works on
 in-memory ``FactChange`` objects + a publications mapping + an optional
@@ -8,7 +8,7 @@ deterministic.
 State rules (documented in ``docs/MONETARY_POLICY_STATE.md``):
 
 1. A ``FactChange`` is a state observation when its ``subject`` is in
-   ``STATE_SUBJECTS`` (Phase 13's reaction-side vocabulary). A change with no
+   ``STATE_SUBJECTS`` (Phase 6's reaction-side vocabulary). A change with no
    such subject is irrelevant and silently skipped.
 2. The observed value is the change's **current side** (the newest known level
    of the dimension), copied verbatim — never invented, never converted.
@@ -71,14 +71,14 @@ class MonetaryPolicyStateAnalyzer:
         """Synthesize the monetary policy state observations of the given
         changes.
 
-        ``changes`` are the ``FactChange`` relations produced by Phase 12;
+        ``changes`` are the ``FactChange`` relations produced by Phase 5;
         ``publications`` maps ``publication_id → Publication`` and supplies the
         temporal reference (``meeting_date`` else ``publication_date``) of each
         change's current-side publication.
 
         ``classifications`` maps ``publication_id → publication_type`` and is
         the **authoritative** source of the publication type (the lineage
-        discriminator, exactly as in Phase 12). When provided, a publication
+        discriminator, exactly as in Phase 5). When provided, a publication
         absent from the mapping has no canonical classification and is skipped
         (``missing_classification`` warning). When ``classifications`` is
         ``None`` (standalone in-memory use), the analyzer falls back to the
@@ -211,13 +211,13 @@ def analyze_policy_state(
     persist: bool = True,
 ) -> MonetaryPolicyStateResult:
     """Recompute the monetary policy state of a bank (or the whole store) from
-    the current ``fact_changes`` table (Phase 12 output), persist it
+    the current ``fact_changes`` table (Phase 5 output), persist it
     idempotently, and return the result (states + observability warnings).
 
-    Phase 14 consumes Phase 12 output: the changes are read from the persisted
-    ``fact_changes`` table; Phase 12 must be run first. The publication type is
+    Phase 7 consumes Phase 5 output: the changes are read from the persisted
+    ``fact_changes`` table; Phase 5 must be run first. The publication type is
     taken from the authoritative ``classifications`` table (never from the
-    denormalized ``publications.publication_type`` cache), matching Phase 12.
+    denormalized ``publications.publication_type`` cache), matching Phase 5.
 
     The ``monetary_policy_states`` table is derived data:
     ``analyze_policy_state`` recomputes the full bank scope and *replaces* it

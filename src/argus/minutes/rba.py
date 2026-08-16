@@ -1,4 +1,4 @@
-"""Reserve Bank of Australia — Board Minutes extractor (Phase 8).
+"""Reserve Bank of Australia — Board Minutes extractor (Phase 4.4).
 
 Extracts the facts of an RBA "Minutes of the Monetary Policy Meeting of the
 Board" / "Minutes of the Monetary Policy Board Meeting" from the normalized
@@ -25,11 +25,11 @@ RBA-specific structural vocabulary:
   ``None`` (a name is never invented); the stated attribution is preserved in
   ``identity_qualifier`` (``minutes:{attribution}:{n}``).
 - the cash-rate decision itself — the target level, the change and the vote in
-  "The Decision" — is Phase 5 territory (RBA ``monetary_policy_decision``) and
+  "The Decision" — is Phase 4.1 territory (RBA ``monetary_policy_decision``) and
   is never priced here; the decision section is routed to IGNORE.
 
-Deliberately NOT extracted (Phase 8 boundary): the policy decision and rate
-level/vote, hawkish/dovish interpretation, and any Phase 6/7/9/10/11 content
+Deliberately NOT extracted (Phase 4.4 boundary): the policy decision and rate
+level/vote, hawkish/dovish interpretation, and any Phase 4.2/7/9/10/11 content
 (statements, press conferences, projections, reports, speeches).
 """
 

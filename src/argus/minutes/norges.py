@@ -1,5 +1,5 @@
 """Norges Bank — Monetary Policy & Financial Stability Committee assessment
-extractor (Phase 8).
+extractor (Phase 4.4).
 
 Extracts the facts of a Norges Bank "Summary of the Committee's assessment" (the
 written account following a monetary policy meeting) from the normalized
@@ -9,7 +9,7 @@ document, answering "what did the Committee explicitly say or discuss?":
   financial conditions, risks and the monetary policy assessment;
 - forward guidance, verbatim.
 
-Phase 8 specifics — attribution (Norges vocabulary):
+Phase 4.4 specifics — attribution (Norges vocabulary):
 
 - ``Fact.speaker`` stays ``None``; the attribution the assessment states —
   ``dissent`` / ``one_member`` / ``some_members`` / ``most_members`` /
@@ -23,15 +23,15 @@ for the Norwegian economy" states no position and produces no fact; "The
 majority of the Committee pointed out that inflation was expected to be 2.5
 per cent in 2027" is mined normally.
 
-Deliberately NOT extracted (Phase 8 boundary):
+Deliberately NOT extracted (Phase 4.4 boundary):
 
 - the decision itself — the policy rate, the rate change and the vote are the
-  policy-rate-decision content and are Phase 5 territory (Norges
+  policy-rate-decision content and are Phase 4.1 territory (Norges
   ``monetary_policy_decision``); the assessment extractor never produces
   decision/rate/vote facts
-- the detailed Monetary Policy Report narrative and projections — Phases 10/9
+- the detailed Monetary Policy Report narrative and projections — Phase 4.6/9
 - hawkish/dovish interpretation
-- Phases 6/7/11 (statements, press conferences, speeches)
+- Phase 4.2/7/11 (statements, press conferences, speeches)
 
 An unknown section is never assumed to be economic: "absence of proof →
 absence of extraction".

@@ -3,7 +3,7 @@
 Extracts the facts of a Bank of England speech (Governor, Deputy Governors,
 MPC members, staff) published under ``/speech/…``. Each BoE speech has an
 explicit speaker and sections; the Bank's collective decision documents are
-Phases 5/8 (gated on their own publication types), never mined here.
+Phase 4.1/8 (gated on their own publication types), never mined here.
 
 Bank-specific knowledge kept here:
 

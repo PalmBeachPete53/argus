@@ -9,8 +9,11 @@ Les statuts sont : `NOT STARTED`, `IN PROGRESS`, `COMPLETE`, `BLOCKED`.
 > Extraction** en sous-phases `4.1`–`4.7`. Les anciennes Phases 0–2 deviennent
 > `1`–`3` (Foundation, Source Discovery, Document Pipeline) et la Phase 3
 > (classification) devient un **prérequis** de la Phase 4. Les phases
-> analytiques ultérieures conservent leur numérotation (`12`–`17`) ;
-> **la Phase 16 (Historical Validation) reste `DEFERRED`.** Aucun contenu
+> analytiques ultérieures ont été **renumérotées** : ancienne Phase 12 →
+> `5` (FactChanges), 13 → `6` (PolicyReaction), 14 → `7` (Monetary Policy
+> State), 15 → `8` (Forex Fundamentals), 16 → `9` (Historical Validation),
+> 17 → `10` (Trading / Signal Layer) ;
+> **la Phase 9 (Historical Validation) reste `DEFERRED`.** Aucun contenu
 > historique n'a été supprimé : chaque sous-phase 4.y conserve les versions
 > d'extracteurs, la couverture et les correctifs déjà livrés. Les anciens
 > numéros sont indiqués entre parenthèses `(ex-Phase N)`.
@@ -200,7 +203,7 @@ La couche d'extraction est **strictement descriptive** :
 - pas de logique Forex/trading ;
 - pas d'interprétation sémantique dépendante d'un LLM dans la couche cœur.
 
-Ces interprétations relèvent des couches analytiques ultérieures (Phases 12+),
+Ces interprétations relèvent des couches analytiques ultérieures (Phase 5+),
 si/when planifiées.
 
 ### Prérequis — Publication Classification (ex-Phase 3)
@@ -238,7 +241,7 @@ si/when planifiées.
   non extrait (document-only), et la classification `minutes` bloque
   l'extracteur Décision SNB (gating) qui produisait auparavant des faits
   `policy_rate`/date de décision erronés. Tests :
-  `tests/test_classification_snb_summaries.py` ; Phase 16 reste `DEFERRED`.
+  `tests/test_classification_snb_summaries.py` ; Phase 9 reste `DEFERRED`.
 - **Statut** : `COMPLETE`.
 
 ### Modèle Fact (ex-Phase 4)
@@ -324,7 +327,7 @@ couverture, pas de nouveau family. Tests `test_boj_statement_*` ajoutés.
 
 **Validation** : 1420 tests verts, 3 runs `pytest` consécutifs,
 `compileall` propre, grep sémantique interdit propre, gaps précédemment fermés
-toujours verts, **Phase 16 reste `DEFERRED`.**
+toujours verts, **Phase 9 reste `DEFERRED`.**
 
 ---
 
@@ -443,7 +446,7 @@ toujours verts, **Phase 16 reste `DEFERRED`.**
   faits déjà persistés) et persistance idempotente résultats vides compris
   (une ré-extraction vide efface les faits périmés du document, sans toucher
   aux autres documents ni aux autres publications). La frontière avec la
-  Phase 4.1 (décision, taux) et avec la Phase 12 (analyse des changements de
+  Phase 4.1 (décision, taux) et avec la Phase 5 (analyse des changements de
   formulation, seulement préservés verbatim) est mise en œuvre et testée.
   Tests de dispatch générique ajoutés pour toutes les 9 banques.
 
@@ -486,8 +489,8 @@ dialogue par tours (labels ALL-CAPS) : premier tour Fed = remarks (collectif,
 verbatim, e.g. `CHAIRMAN WARSH`), tout label non Fed (journalistes, `MR./MS.`)
 = frontière de tour jamais exploitée. Mêmes sujets, gating, valeurs (avec
 `GDP_NEAR_MISS`) et boundary que Phase 4.3 ; pas de sémantique
-Phase 4.1/4.2/12/13/14/15. 1 fixture + tests synthétiques
-(`tests/test_press_conferences_fed.py`, 33 tests) ; la Phase 16 reste
+Phase 4.1/4.2/5/6/7/8. 1 fixture + tests synthétiques
+(`tests/test_press_conferences_fed.py`, 33 tests) ; la Phase 9 reste
 `DEFERRED`.
 
 **Extension multi-banque** — extracteur BoE `BoEPressConferenceExtractor`
@@ -509,11 +512,11 @@ normalisé en blanc). Vocabulaire BoE (membres MPC, guidance `there will be a
 decision` / `will form the judgment`, composé politique Bank Rate/MPC, CPI,
 QT/term premia) ; le `_VALUE_GATE` partagé accepte désormais les qualificatifs
 d'approximation (`was about 0.1%`). Mêmes sujets, gating et boundary que
-Phase 4.3 ; pas de sémantique Phase 4.1/4.2/12/13/14/15. 1 fixture + tests
+Phase 4.3 ; pas de sémantique Phase 4.1/4.2/5/6/7/8. 1 fixture + tests
 synthétiques (`tests/test_press_conferences_boe.py`, 36 tests) ; vérification
 live de bout en bout sur la transcription réelle de juillet 2026 (discovery →
 fetch → normalize → classify → extract → persist, 27 faits, 0 warning) ; la
-Phase 16 reste `DEFERRED`.
+Phase 9 reste `DEFERRED`.
 
 ### Phase 4.4 — Minutes / Meeting Accounts (ex-Phase 8)
 
@@ -528,7 +531,7 @@ Phase 16 reste `DEFERRED`.
   `src/argus/minutes/`). Implémenté : routage conservateur par titre de section
   (titres économiques connus extraits ; titre du compte, notice légale, annexe
   statistique, « external monetary policy » et titres inconnus ignorés —
-  `UNKNOWN ≠ ECONOMIC`), **correction pré-Phase 13** : les headings non
+  `UNKNOWN ≠ ECONOMIC`), **correction pré-Phase 6** : les headings non
   économiques connus sont routés par **identité exacte** (`_IGNORE_HEADINGS`)
   plus les familles de titre explicites (« Account of the monetary policy
   meeting … », « Minutes of … ») — **plus aucun routage par sous-chaîne**
@@ -587,7 +590,7 @@ Phase 16 reste `DEFERRED`.
   (publication → classification → extracteur → faits → persistance →
   récupération) dans `tests/test_minutes_multibank.py`.
 - 58+ tests verts et déterministes, `compileall` propre.
-  **Phase 16 (validation historique) reste `DEFERRED`.**
+  **Phase 9 (validation historique) reste `DEFERRED`.**
 
 ### Phase 4.5 — Economic Projections (ex-Phase 9)
 
@@ -737,7 +740,7 @@ Phase 16 reste `DEFERRED`.
 - 67 nouveaux tests verts et déterministes (957 → 1024), `compileall` propre.
   **Extension Riksbank** : 25 nouveaux tests dédiés
   (`tests/test_reports_riksbank.py`), dispatch générique mis à jour (7 banques).
-  **Phase 16 (validation historique) reste `DEFERRED`.**
+  **Phase 9 (validation historique) reste `DEFERRED`.**
 - **Correctif de coverage BoC MPR (reachability multi-banques)** : le Monetary Policy Report de
   la Banque du Canada était découvrable seulement indirectement via la page
   `key-interest-rate` (`boc_key_interest_rate_schedule`, typée
@@ -757,7 +760,7 @@ Phase 16 reste `DEFERRED`.
   persistance de bout en bout), vérification d'intégration live sur le MPR
   officiel de juillet 2026 (découverte → fetch → normalize → classification →
   extraction → persistance, 7 faits canoniques, provenance verbatim).
-  **Phase 16 (validation historique) reste `DEFERRED`.**
+  **Phase 9 (validation historique) reste `DEFERRED`.**
 - **Correctif de classification ECB Economic Bulletin (reachability multi-banques)** : le
   bulletin économique de l'ECB (`/press/economic-bulletin/html/eb<YYYYMM>.en.html`),
   publication de type Rapport pour la zone euro, était découvert via
@@ -779,7 +782,7 @@ Phase 16 reste `DEFERRED`.
   persistance ; l'extraction live est conservative (0 fait : la page HTML réelle
   est un écran JS et les PDF liés ont des titres de section non contrôlés —
   `UNKNOWN ≠ ECONOMIC`, aucun fait inventé). Ceci n'est PAS une validation
-  historique Phase 16. **Phase 16 (validation historique) reste `DEFERRED`.**
+  historique Phase 9. **Phase 9 (validation historique) reste `DEFERRED`.**
 
 ### Phase 4.7 — Speeches & Interviews (ex-Phase 11)
 
@@ -821,7 +824,7 @@ Phase 16 reste `DEFERRED`.
 
 ---
 
-## Phase 12 — Temporal / Cross-Publication Analysis
+## Phase 5 — Temporal / Cross-Publication Analysis
 
 - **Objectif** : comparer les faits dans le temps : « Qu'est-ce qui a changé
   depuis la précédente réunion/publication ? ».
@@ -834,7 +837,7 @@ Phase 16 reste `DEFERRED`.
   faits sources.
 - **Statut** : `COMPLETE`.
 
-### Phase 12 — Livré (validation finale)
+### Phase 5 — Livré (validation finale)
 
 - **Module** : `src/argus/changes/` — `FactChange`, `ChangeType`
   (`numeric_changed` / `qualitative_changed` / `text_changed`),
@@ -890,7 +893,7 @@ Phase 16 reste `DEFERRED`.
   avertissements, persistance et coexistence Phase 4.1–4.7. **Suite complète :
   685 tests verts et déterministes.**
 
-## Phase 13 — Policy Reaction Function
+## Phase 6 — Policy Reaction Function
 
 - **Objectif** : reconstruire empiriquement la réaction observable de la banque
   centrale à inflation, croissance, emploi, conditions financières,
@@ -898,12 +901,12 @@ Phase 16 reste `DEFERRED`.
 - **Périmètre** : ne jamais présenter cette reconstruction comme une « fonction
   de réaction vraie » : il s'agit d'une reconstruction empirique/inférée.
 - **Livrables** : module d'analyse, tests, documentation.
-- **Dépendances** : Phase 12.
+- **Dépendances** : Phase 5.
 - **Critères de validation** : le caractère inféré est explicite et non
   présenté comme factuel.
 - **Statut** : `COMPLETE` (durcissement validé — voir « Current Position »).
 
-## Phase 14 — Monetary Policy State
+## Phase 7 — Monetary Policy State
 
 - **Objectif** : construire un état synthétique et historisé de la politique
   monétaire.
@@ -920,28 +923,28 @@ Phase 16 reste `DEFERRED`.
 - **Déviations documentées** : le modèle cible initial listait `stance`,
   `direction`, `rate_expectation`, `labour_risk`, `confidence`. Ces dimensions
   ne sont **pas structurées par les données actuelles** (aucun sujet/fait
-  observé correspondant) → exclues de la Phase 14, listées comme gaps explicites
+  observé correspondant) → exclues de la Phase 7, listées comme gaps explicites
   (`unknown > invention`), jamais inventées.
 - **Livrables** : constructeur d'état, historisation, tests, documentation.
-- **Dépendances** : Phase 12 (source des `FactChange`) et vocabulaire de la
-  Phase 13 (`STATE_SUBJECTS = REACTION_SUBJECTS`).
+- **Dépendances** : Phase 5 (source des `FactChange`) et vocabulaire de la
+  Phase 6 (`STATE_SUBJECTS = REACTION_SUBJECTS`).
 - **Critères de validation** : chaque état est daté (`observed_at`), historisé,
   remontable aux faits, sans look-ahead ni interprétation.
 - **Statut** : `COMPLETE` (voir « Current Position »).
 
-## Phase 15 — Forex Fundamentals
+## Phase 8 — Forex Fundamentals
 
-- **Objectif** : transformer les états monétaires (Phase 14) et les observations
+- **Objectif** : transformer les états monétaires (Phase 7) et les observations
   macro (Facts, Phase 4) en une couche de **fondamentaux Forex structurés,
   comparables, traçables**, avec différentiels inter-économies **descriptifs,
   déterministes, explicables, temporels, traçables** — jamais trading/signal/
   forecast/fair value/conviction.
-- **Dimensions** : `FUNDAMENTAL_SUBJECTS = MACRO_SUBJECTS (Phase 13 condition)
-  ∪ MONETARY_SUBJECTS (Phase 14 state)`. Une dimension = lineage indépendant de
+- **Dimensions** : `FUNDAMENTAL_SUBJECTS = MACRO_SUBJECTS (Phase 6 condition)
+  ∪ MONETARY_SUBJECTS (Phase 7 state)`. Une dimension = lineage indépendant de
   la devise : subject, predicate, value_kind, période canonique, qualifier,
   publication_type. Prédicats exclus (macro) : `projection`, `change`, `date`.
 - **Sources** : les fondamentaux monétaires viennent des `MonetaryPolicyState`
-  (Phase 14) — jamais reconstruits depuis les documents — et les fondamentaux
+  (Phase 7) — jamais reconstruits depuis les documents — et les fondamentaux
   macro des `Fact` (Phase 4) — modèle latest-known-observation. La devise est
   résolue via la relation canonique `CentralBank.currency` (une économie = une
   devise ; `unknown_currency` sinon).
@@ -972,7 +975,7 @@ Phase 16 reste `DEFERRED`.
   idempotent par devise, résultat vide = scope vidé, provenance complète des
   deux côtés), `tests/test_forex_fundamentals.py` (89 tests), contrat
   `docs/FOREX_FUNDAMENTALS.md`, documentation.
-- **Dépendances** : Phase 14 (états), Phase 4 (faits), Phase 12/13 (vocabulaires
+- **Dépendances** : Phase 7 (états), Phase 4 (faits), Phase 5/6 (vocabulaires
   canoniques), `CentralBank.currency` (adapters/registry).
 - **Critères de validation** : chaque fondamental est daté, historisé, remontable
   à son observation source ; chaque différentiel est même-dimension,
@@ -981,7 +984,7 @@ Phase 16 reste `DEFERRED`.
   ranking).
 - **Statut** : `COMPLETE` (voir « Current Position »).
 
-## Phase 16 — Historical Validation
+## Phase 9 — Historical Validation
 
 - **Objectif** : tester Argus sur l'historique : Historical publications →
   facts → states → changes.
@@ -989,11 +992,22 @@ Phase 16 reste `DEFERRED`.
   de duplication, provenance complète, reproductibilité, stabilité des
   classifications et des extractions.
 - **Livrables** : jeu de validation historique, tests, documentation.
-- **Dépendances** : Phase 4 (extraction), Phases 12–15.
+- **Dépendances** : Phase 4 (extraction), Phases 5–8.
 - **Critères de validation** : aucun look-ahead ; résultats reproductibles.
 - **Statut** : `DEFERRED`.
 
-## Phase 17 — Trading / Signal Layer
+  **État partiel (campagne 2025)** : la campagne E2E historique réelle sur 2025
+  (banques actives, mécanismes existants) a validé une partie du périmètre —
+  cohérence temporelle, absence de look-ahead, absence de duplication,
+  provenance complète, idempotence sur `facts → FactChanges → PolicyReactions`
+  (1654 publications, 1627 Facts, 1061 FactChanges, 19585 PolicyReactions,
+  0 erreur restante). Elle ne couvre **pas** encore la chaîne complète
+  `facts → states → changes` (états Phase 7 et fondamentaux Phase 8 non
+  rejoués sur les données historiques) et n'a pas produit le **jeu de
+  validation historique reproductible et versionné** (suite + données + tests
+  dédiés) que requiert la Phase 9. Statut conservé `DEFERRED`.
+
+## Phase 10 — Trading / Signal Layer
 
 - **Objectif** : couche volontairement séparée du cœur d'Argus.
 - **Périmètre** : Fundamental Data → Forex Analysis → éventuellement valuation /
@@ -1003,7 +1017,7 @@ Phase 16 reste `DEFERRED`.
   normalisation, de classification ou d'extraction.
 - **Livrables** : non planifiés en détail ; tout signal doit rester distinct du
   cœur.
-- **Dépendances** : Phase 15.
+- **Dépendances** : Phase 8.
 - **Critères de validation** : l'isolation stricte avec le cœur est vérifiée.
 - **Statut** : `NOT STARTED`.
 
@@ -1061,10 +1075,10 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   RSS, sitemap/sitemap index et HTML archives avec pagination ; les APIs
   officielles et calendriers ne sont pas encore mobilisés pour toutes les
   banques. Cela reste du périmètre Phase 2 sans réouverture d'architecture.
-- **Vocabulaire** : « state » (Phase 14) est maintenant implémenté
+- **Vocabulaire** : « state » (Phase 7) est maintenant implémenté
   (`src/argus/states/`, `docs/MONETARY_POLICY_STATE.md`) : il consomme les
   types de valeur explicites déjà définis dès la Phase 4 (`value.kind`,
-  `unit`, `FactPeriod`) et le vocabulaire de dimension de la Phase 13 ; les
+  `unit`, `FactPeriod`) et le vocabulaire de dimension de la Phase 6 ; les
   dimensions cible non structurées par les données (`stance`, `direction`,
   `rate_expectation`, `labour_risk`, `confidence`) restent des gaps
   documentés, jamais inventés.
@@ -1106,7 +1120,7 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   BoC MPR → `monetary_policy_report`, ECB Economic Bulletin →
   `monetary_policy_report`, BoJ Statement → `monetary_policy_statement` (URL
   `mpr_\d{4}/k`). **1420 tests verts et déterministes.**
-- **Phase 12 (Temporal / Cross-Publication Analysis)** : `src/argus/changes/`
+- **Phase 5 (Temporal / Cross-Publication Analysis)** : `src/argus/changes/`
   validé (**durcissement profond**) — `FactChangeAnalyzer` pur et déterministe,
   trois types de changement, matching exact (jamais de comparateur flou/LLM),
   **classification source de vérité** (table `classifications`, cache périmé
@@ -1114,8 +1128,8 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   observation incomparable, provenance exhaustive aux deux faits sources,
   `fact_changes` persistée de façon idempotente, reconstruisible et isolée par
   banque, aucun contenu économique ; 100 tests dédiés.
-- **PRE-PHASE-13 HARDENING** (Phase 4.1–4.7, avant Phase 13) : durcissement de
-  précision des extracteurs existants, sans Phase 13 — ancres de risque des
+- **PRE-PHASE-13 HARDENING** (Phase 4.1–4.7, avant Phase 6) : durcissement de
+  précision des extracteurs existants, sans Phase 6 — ancres de risque des
   Phase 4.1/4.2/4.3/4.4 alignées sur la norme contrôlée des Phase 4.6/4.7 (plus
   de `\brisk` nu : « risky », « risk-free », « riskiness » ne sont jamais des
   ancres) ; routage des titres converti en **identité exacte sur titre nettoyé**
@@ -1127,12 +1141,12 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   un marqueur) ; ancrage `gdp` protégé des near-misses « GDP deflator », « GDP
   per capita », « per capita GDP » ; gates de refus testés (un refus ne
   supprime jamais les faits d'une extraction antérieure autorisée) ; surface
-  API Phase 12 complétée (`persist=False`, `limit`,
+  API Phase 5 complétée (`persist=False`, `limit`,
   `delete_changes_for_document` / `delete_changes_for_publication`, `created_at`
   préservé, deltas CURRENCY / DATE, entrée vide) ; attributions minutes
   `one_member` / `voted against` testées. **674 tests verts et déterministes**
   (documenté dans `docs/CHANGES.md`).
-- **PHASE 4.4 CORRECTIVE** (avant Phase 13) : routage IGNORE des Minutes rendu
+- **PHASE 4.4 CORRECTIVE** (avant Phase 6) : routage IGNORE des Minutes rendu
   explicite — les headings non économiques connus sont routés par **identité
   exacte** sur le titre nettoyé (`_IGNORE_HEADINGS`) plus les **familles de
   titre** « Account of the monetary policy meeting … » et « Minutes of … »
@@ -1144,7 +1158,7 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   économiques contrôlés restent intacts (testé : identité exacte IGNORE,
   near-misses, familles, déterminisme catégoriel). **680 tests verts et
   déterministes**.
-- **PHASES 4.5–12 — DERNIER PASS DE DURCISSEMENT** (avant Phase 13) : la garde
+- **PHASES 4.5–5 — DERNIER PASS DE DURCISSEMENT** (avant Phase 6) : la garde
   near-miss GDP des discours (Phase 4.7) est alignée sur les rapports
   (Phase 4.6) — « GDP deflator », « GDP per capita » et « per capita GDP » ne
   sont jamais des ancres de croissance et ne fuient jamais en valeur `gdp`,
@@ -1155,11 +1169,11 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   faits d'une extraction antérieure autorisée) ; audits vérifiés
   (gating A–E, tables/unités, near-misses variables, déterminisme,
   routage par identité exacte, ancres de contenu, gate de valeur, attribution
-  orateur explicite, dédup intra-run, clé de matching Phase 12 exacte,
+  orateur explicite, dédup intra-run, clé de matching Phase 5 exacte,
   chaînage consécutif F1→F2→F3 sans pont, règles delta, provenance verbatim,
   persistance idempotente, isolation par banque). **685 tests verts et
   déterministes**.
-- **PHASE 13 — POLICY REACTION FUNCTION (COMPLETE / FROZEN)** : `src/argus/reactions/`
+- **PHASE -2 — POLICY REACTION FUNCTION (COMPLETE / FROZEN)** : `src/argus/reactions/`
   validé — `PolicyReactionAnalyzer` pur et déterministe (v13.0.0), relation
   **dérivée et inférée** `condition change → policy change` (`inferred=True`
   constant, jamais un `Fact`, formulation explicitement **non-causale**) ;
@@ -1190,15 +1204,15 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   aucune causalité, aucun look-ahead ; 8 fixtures golden/adversarial, tests
   négatifs explicites, isolation cross-banque, déterminisme ×2. **65 tests
   dédiés — suite complète : 750 tests verts et déterministes.**
-- **PHASE 14 — MONETARY POLICY STATE (COMPLETE)** : `src/argus/states/`
+- **PHASE -1 — MONETARY POLICY STATE (COMPLETE)** : `src/argus/states/`
   validé — `MonetaryPolicyStateAnalyzer` pur et déterministe (v14.0.0), état
   **dérivé, daté et synthétisé** des dimensions de politique monétaire
   observables (`synthesized=True` constant, jamais un `Fact`, jamais une
-  interprétation) ; dimensions = vocabulaire réaction Phase 13
+  interprétation) ; dimensions = vocabulaire réaction Phase 6
   (`STATE_SUBJECTS = REACTION_SUBJECTS` : policy_rate,
   main_refinancing_rate, deposit_facility_rate, marginal_lending_rate,
   policy_guidance, asset_purchase, risk, inflation_risk, growth_risk) ;
-  **source = Phase 12** — chaque `FactChange` de dimension produit exactement
+  **source = Phase 5** — chaque `FactChange` de dimension produit exactement
   un état, la valeur = côté courant du changement (verbatim, jamais inventée,
   jamais convertie, les taux ne sont jamais réduits à un seul) ; règle
   temporelle `meeting_date` sinon `publication_date`, **`effective_date` et
@@ -1223,16 +1237,16 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   cible documentés (`stance`, `direction`, `rate_expectation`, `labour_risk`,
   `confidence` non structurés par les données → exclus, jamais inventés) ; 74
   tests dédiés — **suite complète : 827 tests verts et déterministes.**
-- **PHASE 15 — FOREX FUNDAMENTALS (COMPLETE)** : `src/argus/forex/` validé —
+- **PHASE 0 — FOREX FUNDAMENTALS (COMPLETE)** : `src/argus/forex/` validé —
   `ForexFundamentalsAnalyzer` pur et déterministe (v15.0.0), couche
   **dérivée, datée et synthétisée** de fondamentaux + différentiels
   inter-économies (`synthesized=True` constant, jamais un `Fact`, jamais une
-  interprétation) ; **dimensions = vocabulaire condition Phase 13 ∪ vocabulaire
-  réaction Phase 14** (`FUNDAMENTAL_SUBJECTS = MACRO_SUBJECTS ∪
+  interprétation) ; **dimensions = vocabulaire condition Phase 6 ∪ vocabulaire
+  réaction Phase 7** (`FUNDAMENTAL_SUBJECTS = MACRO_SUBJECTS ∪
   MONETARY_SUBJECTS`, réutilisés des couches canoniques, jamais re-déclarés) ;
   une dimension = lineage indépendant de la devise (subject, predicate,
   value_kind, période canonique, qualifier, publication_type), `dimension_key`
-  scopé devise + `lineage_key` indépendant ; **sources = Phase 14
+  scopé devise + `lineage_key` indépendant ; **sources = Phase 7
   (`MonetaryPolicyState`, dimensions monétaires — jamais reconstruites depuis
   les documents) + Phase 4 (`Fact`, dimensions macro — modèle
   latest-known-observation)** ; devise résolue via la relation canonique
@@ -1314,17 +1328,17 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 - **Validation E2E historique 2025 (données réelles)** — campagne sur les
   banques actives (fenêtre 2025, mécanismes existants uniquement) : 1654
   publications, 375 documents, **1627 Facts, 1061 FactChanges, 19585
-  PolicyReactions**, 0 erreur restante ; invariants Phases 12/13 vérifiés
+  PolicyReactions**, 0 erreur restante ; invariants Phase 5/6 vérifiés
   (matching exact, même banque, ordre temporel, provenance des deux côtés,
   no-look-ahead, lag ≤ 180 j, ids déterministes, idempotence). **3 bugs réels
   trouvés et corrigés** : collision de `fact_id` (change facts sans
   `identity_qualifier` dans les extracteurs decision riksbank/snb/boc/rba/
   norges) et reconstruction `FactPeriod.kind` en chaîne dans le Store
   (`_fact_from_row`, `_change_from_row`, `_reaction_from_row`, `_state_from_row`,
-  `_fundamental_from_row`, `_differential_from_row`) qui cassait Phases 12/13.
+  `_fundamental_from_row`, `_differential_from_row`) qui cassait Phase 5/6.
 - **Suite complète** : **1529 tests verts et déterministes** (+2 skipped :
   scénarios E2E RBNZ désactivés par configuration).
-- **Prochaine phase autorisée : Phase 16 — Historical Validation** (statut
+- **Prochaine phase autorisée : Phase 9 — Historical Validation** (statut
   `DEFERRED`).
 
 ## Out of Scope
@@ -1335,8 +1349,8 @@ Fonctionnalités qui ne doivent pas être implémentées prématurément :
   sur le modèle `Fact`, la provenance et le contrat `ExtractionResult` définis
   en Phase 4.
 - Analyse temporelle, fonction de réaction, état de politique monétaire et
-  fondamentaux Forex avant les Phases 12–15.
-- **Couche de trading / signaux** (Phase 17) tant que le cœur (collecte,
+  fondamentaux Forex avant les Phases 5–8.
+- **Couche de trading / signaux** (Phase 10) tant que le cœur (collecte,
   normalisation, classification, extraction de faits) n'est pas stabilisé et
   isolé.
 - Utilisation d'un LLM comme source de vérité (interdit par l'invariant 8).

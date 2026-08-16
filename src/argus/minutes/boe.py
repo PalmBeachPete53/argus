@@ -1,4 +1,4 @@
-"""Bank of England — Minutes of the MPC meeting extractor (Phase 8).
+"""Bank of England — Minutes of the MPC meeting extractor (Phase 4.4).
 
 Extracts the facts of a Bank of England "Minutes of the Monetary Policy
 Committee meeting" from the normalized document, answering "what did the MPC
@@ -9,7 +9,7 @@ explicitly say or discuss during the meeting?":
   policy assessment;
 - forward guidance, verbatim.
 
-Phase 8 specifics — attribution (BoE vocabulary):
+Phase 4.4 specifics — attribution (BoE vocabulary):
 
 - ``Fact.speaker`` stays ``None``; the attribution the minutes state — ``dissent``
   / ``one_member`` / ``some_members`` / ``members`` / ``committee`` /
@@ -22,14 +22,14 @@ possibility of further rate increases" states no position and produces no fact;
 "Some members noted that CPI inflation was expected to average 3.0 per cent in
 2027" is mined normally.
 
-Deliberately NOT extracted (Phase 8 boundary):
+Deliberately NOT extracted (Phase 4.4 boundary):
 
 - the decision itself — the Bank Rate level, the vote tally and the policy
-  action are Phase 5 territory (BoE MPCD "Monetary Policy Summary and Minutes"
+  action are Phase 4.1 territory (BoE MPCD "Monetary Policy Summary and Minutes"
   is classified as ``monetary_policy_decision``); the minutes extractor never
   produces decision/rate/vote facts
 - hawkish/dovish interpretation, membership changes (external appointments)
-- Phases 6/9–11 (the statement rationale, projections, reports, speeches)
+- Phase 4.2/9–11 (the statement rationale, projections, reports, speeches)
 
 An unknown section is never assumed to be economic: "absence of proof →
 absence of extraction".

@@ -2,9 +2,9 @@
 
 > **Phase boundary.** This document describes the **Phase 4.x — Multi-Bank
 > Speech Extraction Extension** of the **Phase 4 — Fact Extraction** layer.
-> It is **not** a new standalone phase: Argus is not gaining a "Phase 17/18",
+> It is **not** a new standalone phase: Argus is not gaining a "Phase 10/11",
 > and no existing phase is renumbered. Speech extraction is document-to-`Fact`
-> extraction — it lives entirely **upstream** of the Phase 12+ derived layers
+> extraction — it lives entirely **upstream** of the Phase 5+ derived layers
 > (`FactChange` → `PolicyReaction` → `MonetaryPolicyState` →
 > `ForexFundamentals`). This work ends at canonical `Fact`s.
 
@@ -13,10 +13,10 @@ Official publications
         ↓ Classification (classifications table = single source of truth)
         ↓ Phase 4 Fact Extraction (Speech extractor family)
         ↓ canonical Facts
-        ↓ Phase 12+ (separate, downstream, never touched here)
+        ↓ Phase 5+ (separate, downstream, never touched here)
 ```
 
-Phase 16 — Historical Validation — remains **DEFERRED**. Nothing here adds a
+Phase 9 — Historical Validation — remains **DEFERRED**. Nothing here adds a
 synthetic historical corpus or claims real historical coverage.
 
 ---
@@ -58,7 +58,7 @@ Speech extraction MUST **never** infer, emit, or label:
 - implied policy reaction.
 
 A speech is **evidence**, not interpreted policy. It is never converted into a
-Phase 13 reaction, a Phase 14 state dimension, or a Phase 15 forex
+Phase 6 reaction, a Phase 7 state dimension, or a Phase 8 forex
 fundamental. The boundary is hard:
 
 ```
@@ -104,7 +104,7 @@ quotation.
 
 Speech extractors **reuse the existing canonical Fact vocabulary** — the same
 subjects, predicates, value kinds, periods and qualifiers already used by
-Phases 6–10: `inflation`, `core_inflation`, `inflation_expectations`, `growth`,
+Phases 4.2–4.6: `inflation`, `core_inflation`, `inflation_expectations`, `growth`,
 `gdp`, `labour_market`, `unemployment`, `wages`, `financial_conditions`,
 `risk`, `inflation_risk`, `growth_risk`, `monetary_policy`,
 `policy_guidance`; predicates `value` / `assessment` / `statement`;
@@ -193,5 +193,5 @@ identical parsing forced onto structurally different sources.
 ## 11. Final output
 
 The Speech family (ECB + the 9 other applicable banks) emits canonical `Fact`s
-only. Nothing here introduces Phases 12–15 semantics, no LLM, no network calls,
+only. Nothing here introduces Phases 5–8 semantics, no LLM, no network calls,
 no fuzzy inference, and no new top-level roadmap phase.

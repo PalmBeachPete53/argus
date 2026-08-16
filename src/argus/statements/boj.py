@@ -1,4 +1,4 @@
-"""BOJ — Bank of Japan Statement on Monetary Policy extractor (Phase 6).
+"""BOJ — Bank of Japan Statement on Monetary Policy extractor (Phase 4.2).
 
 Extracts the facts of a Bank of Japan "Statement on Monetary Policy" from the
 normalized document, answering "what does the Policy Board explicitly state or
@@ -15,14 +15,14 @@ decide in the statement?":
 - the statement's price / growth / risk assessment: quantitative value claims
   (explicit reference period) and explicit risk orientations, or verbatim text
 
-Deliberately NOT extracted (Phase 6 boundary):
+Deliberately NOT extracted (Phase 4.2 boundary):
 
 - the decision is the statement's own (the BoJ fuses decision + statement) — no
-  separate Phase 5 decision subject is fabricated beyond the vote/decision
+  separate Phase 4.1 decision subject is fabricated beyond the vote/decision
   wording above
-- the Outlook for Economic Activity and Prices (projections) — Phase 9
+- the Outlook for Economic Activity and Prices (projections) — Phase 4.5
 - individual member opinions / dissents beyond the verbatim vote sentence —
-  Phase 8
+  Phase 4.4
 - hawkish/dovish interpretation, forex, trading — never
 
 Design rules

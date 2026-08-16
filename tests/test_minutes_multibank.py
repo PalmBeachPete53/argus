@@ -1,4 +1,4 @@
-"""Phase 8.x — multi-bank Minutes extractors (BoE, BoJ, Norges, RBA, Riksbank):
+"""Phase 4.4.x — multi-bank Minutes extractors (BoE, BoJ, Norges, RBA, Riksbank):
 golden + contract + dispatch + integration tests.
 
 Covers: per-bank extractor identity and registration, golden facts over the new
@@ -6,7 +6,7 @@ fixtures, the canonical Fact contract (provenance, `minutes:` qualifier with
 attribution, `speaker=None`), deterministic and order-independent extraction,
 source immutability, unknown-heading refusal, classification gating via the
 `classifications` table, idempotent persistence and empty-result persistence,
-and Phase 5/6/7 coexistence.
+and Phase 4.1/6/7 coexistence.
 
 The five banks are the second half of the minutes family: they join ECB/Fed
 (so all seven minutes-classified banks have an extractor).

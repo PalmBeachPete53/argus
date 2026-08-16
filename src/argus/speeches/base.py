@@ -1,4 +1,4 @@
-"""Phase 11 — type-specific speech extractors.
+"""Phase 4.7 — type-specific speech extractors.
 
 An extractor converts a ``NormalizedDocument`` of a speech / remarks / address
 (the ECB "Speech" publication) into a list of provenance-carrying ``Fact``
@@ -17,11 +17,11 @@ encapsulated, invariant 10); the generic engine in this module only dispatches
 on ``central_bank``.
 
 A speech is the **individual** communication of one central bank official.
-Phase 11 therefore preserves, in provenance, the individual nature of the
+Phase 4.7 therefore preserves, in provenance, the individual nature of the
 content: the explicit speaker label is kept on every Fact (``Fact.speaker``,
 verbatim, never inferred) and a speech is never mistaken for a collective
-decision (no Phase 5–10 subjects, gated on ``speech`` publications). Its
-cardinal rule, like Phase 10, is **precision over recall**: a Fact is only
+decision (no Phase 4.1–4.6 subjects, gated on ``speech`` publications). Its
+cardinal rule, like Phase 4.6, is **precision over recall**: a Fact is only
 produced from an explicit economic assertion with sufficient identity (subject
 + predicate + value + unit + period when applicable) + provenance, and the
 speaker's own words are never confused with personal anecdote, biography,
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 # this type is skipped by the store integration helper, so a decision, a
 # statement or a report document is never mistakenly mined for speech facts.
 # Interviews (``interview``) are a separate publication type with their own
-# treatment — out of Phase 11 scope.
+# treatment — out of Phase 4.7 scope.
 SPEECH_PUBLICATION_TYPES = ("speech",)
 
 
@@ -90,7 +90,7 @@ def extract_speech(
     state: ``rebuild_facts_for_document`` (delete + insert) runs for every
     valid normalized document, **including when the result is empty**, so a
     re-extraction that now yields no facts clears the stale facts of that
-    document instead of leaving them behind (same guarantee as Phases 5–10).
+    document instead of leaving them behind (same guarantee as Phases 4.1–4.6).
 
     Returns the list of ``ExtractionResult`` (empty if no extractor applies or
     the publication is not classified as ``speech``).
@@ -127,7 +127,7 @@ def _is_speech_publication(store, publication, *, expected_types: tuple[str, ...
     """Gate extraction to speech publications.
 
     The ``classifications`` table is the **single source of truth** (same strict
-    mechanism as Phases 5–10): extraction is authorized only when an
+    mechanism as Phases 4.1–4.6): extraction is authorized only when an
     authoritative classification record exists for the publication and its
     ``publication_type`` is ``speech``. The denormalized
     ``publication.publication_type`` cache is never used to infer

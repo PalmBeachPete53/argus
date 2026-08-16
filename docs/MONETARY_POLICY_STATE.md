@@ -1,39 +1,40 @@
-# Data Model — Monetary Policy State (Phase 14)
+# Data Model — Monetary Policy State (Phase 7)
 
 This document is the authoritative reference for the **monetary policy state
 layer** of Argus (`src/argus/states/`). It defines what a `MonetaryPolicyState`
 is, what it is **not**, and every design decision behind the analyzer, the
 identity scheme, the temporal semantics and the persistence.
 
-It was written **before** the implementation (Phase 13 is frozen; Phase 15 is
-not started). Anything in this document is normative; any divergence found
+It was written **before** the implementation (Phase 6 is frozen; Phase 8
+(Forex Fundamentals) was not started at the time — it is now implemented).
+Anything in this document is normative; any divergence found
 during implementation must be resolved here first.
 
 ## Where the Monetary Policy State sits in the pipeline
 
 ```
-Type-Specific Extractor                 ← Phases 5–11
+Type-Specific Extractor                 ← Phases 4.1–4.7
     ↓
 Fact                                    ← Phase 4 (src/argus/facts/)
     ↓
-Temporal / Cross-Publication Analysis   ← Phase 12 (src/argus/changes/)
+Temporal / Cross-Publication Analysis   ← Phase 5 (src/argus/changes/)
     ↓
-Policy Reaction Function                ← Phase 13 (src/argus/reactions/)
+Policy Reaction Function                ← Phase 6 (src/argus/reactions/)
     ↓
-Monetary Policy State                   ← Phase 14 (src/argus/states/, THIS layer)
+Monetary Policy State                   ← Phase 7 (src/argus/states/, THIS layer)
     ↓
-Forex Fundamentals                      ← Phase 15 (NOT STARTED)
+Forex Fundamentals                      ← Phase 8 (COMPLETE)
 ```
 
-Phase 14 is an **analysis layer over the output of Phase 12** (and reuses the
-**dimension vocabulary** established by Phase 13). It consumes existing
+Phase 7 is an **analysis layer over the output of Phase 5** (and reuses the
+**dimension vocabulary** established by Phase 6). It consumes existing
 `FactChange` relations (which in turn point to existing `Fact`s) and
 synthesizes, for each central bank, a **historised, dated state** of the
 **observable policy dimensions** over time. It never creates Facts, never reads
 source documents, never calls any network, model or fuzzy/semantic comparator,
 and never mutates the `FactChange` / `Fact` / `Publication` objects it consumes.
 
-The question Phase 14 answers, for any instant `T`:
+The question Phase 7 answers, for any instant `T`:
 
 > **Quel est l'état observable de la politique monétaire d'une banque centrale
 > à un instant donné ?** — "What is the observable state of a central bank's
@@ -44,18 +45,18 @@ next-decision prediction, and **not** a forex/trading signal.
 
 ## Epistemic boundary (the core principle)
 
-There are exactly four levels, and Phase 14 never collapses them:
+There are exactly four levels, and Phase 7 never collapses them:
 
 ```
 SOURCE                      observed     (official publication / document)
 → OBSERVED FACT             observed     (Phase 4 — explicit in source)
-→ OBSERVED CHANGE           observed     (Phase 12 — descriptive delta)
-→ TEMPORAL RELATIONSHIP     INFERRED     (Phase 13 — empirical, non-causal)
-→ MONETARY POLICY STATE     SYNTHESIZED  (Phase 14 — THIS layer)
+→ OBSERVED CHANGE           observed     (Phase 5 — descriptive delta)
+→ TEMPORAL RELATIONSHIP     INFERRED     (Phase 6 — empirical, non-causal)
+→ MONETARY POLICY STATE     SYNTHESIZED  (Phase 7 — THIS layer)
 ```
 
 - `Fact` / `FactChange` are **observed**.
-- A `PolicyReaction` (Phase 13) is **inferred** (`inferred=True` constant).
+- A `PolicyReaction` (Phase 6) is **inferred** (`inferred=True` constant).
 - A `MonetaryPolicyState` is **synthesized**: `synthesized` is always `True`.
   It is a derived, dated summary of the observable policy dimensions — a
   **state synthesis is authorized** (ordering, selecting, dating, historising
@@ -66,10 +67,10 @@ Every `MonetaryPolicyState` carries `synthesized=True` (a constant, never
 new observation, never as a stance, never as an anticipation, never as a
 trading/forex signal.
 
-### Phase 13's contribution is the vocabulary, not the values
+### Phase 6's contribution is the vocabulary, not the values
 
-The state's *dimensions* are exactly Phase 13's reaction-side subjects
-(`REACTION_SUBJECTS`, re-exported here as `STATE_SUBJECTS`). Phase 13 is the
+The state's *dimensions* are exactly Phase 6's reaction-side subjects
+(`REACTION_SUBJECTS`, re-exported here as `STATE_SUBJECTS`). Phase 6 is the
 documented owner of that vocabulary and of the role assignment (risk
 assessments are policy-side). The state's *values*, however, come **only from
 observed `FactChange` current sides**. `PolicyReaction` objects themselves (the
@@ -135,13 +136,13 @@ as "the current policy state"). They are skipped with an explicit
 
 Changes whose `subject` is not in `STATE_SUBJECTS` (e.g. inflation, gdp) are
 simply **irrelevant** to the state and are silently ignored (they are not
-policy dimensions — same policy as Phase 13 for vocabulary outsiders).
+policy dimensions — same policy as Phase 6 for vocabulary outsiders).
 
 ## Temporal semantics
 
 - The **observation time** of a state entry is the temporal reference of the
   current-side publication: `meeting_date` when set, else `publication_date`
-  (the exact reference Phase 12 uses to order observations and Phase 13 uses to
+  (the exact reference Phase 5 uses to order observations and Phase 6 uses to
   date reactions).
 - **`effective_date` is never an observation time**: it is the date the value
   *takes effect*, a separate concept preserved verbatim on the entry. It is
@@ -187,7 +188,7 @@ An entry is not produced, with an observability warning, when:
 - the change's current side has no value → `valueless_change:<change_id>`
 - the change is a forecast lineage → `out_of_scope_change:<change_id>`
 - (authoritative mode) the current publication has no canonical classification
-  → `missing_classification:<publication_id>` (mirrors Phase 12)
+  → `missing_classification:<publication_id>` (mirrors Phase 5)
 
 A dimension never observed is simply **absent** from the state (no entry, no
 warning — absence is information).
@@ -223,7 +224,7 @@ summarizes).
   authoritative classifications, and **replaces** that scope
   (`rebuild_policy_states`): idempotent, an empty result clears the scope, and
   no state can survive the disappearance of the change it summarizes.
-- Deletion surface mirrors Phase 13: by bank, by document, by publication.
+- Deletion surface mirrors Phase 6: by bank, by document, by publication.
 - `created_at` is preserved across upserts; `rebuild` restores the scope in one
   transaction.
 - Sources (`facts`, `fact_changes`, `policy_reactions`, `publications`) are
@@ -251,12 +252,12 @@ summarizes).
 - **Not a forecast / expectation** — no next-decision prediction, no expected
   path, no surprise; projection lineages are excluded.
 - **Not a forex/trading signal** — no cross-bank comparison, no differentials,
-  no yield/rate spreads, no entries/exits, no recommendation (Phase 15/17).
+  no yield/rate spreads, no entries/exits, no recommendation (Phase 8/10).
 - **Not a causal claim** — the `formulation` is descriptive only.
 - **Not produced by fuzzy/semantic/LLM/network logic** — synthesis is exact,
   deterministic and explainable.
 - **Not a re-slice of raw facts** — it is a historised, dated synthesis of the
-  *analysis* layer (Phase 12 changes), reusing Phase 13's dimension vocabulary.
+  *analysis* layer (Phase 5 changes), reusing Phase 6's dimension vocabulary.
 
 ## Documented gaps vs the roadmap target model
 
@@ -266,12 +267,12 @@ The roadmap's target "Policy State" lists `stance`, `direction`,
 current data** — there is no observed subject or fact for a stance, a
 direction, a rate expectation or a labour risk, and no confidence level is
 collected. Per the project invariants (`unknown > invention`, no silent
-interpretation), they are **not synthesized in Phase 14** and are recorded here
+interpretation), they are **not synthesized in Phase 7** and are recorded here
 as explicit gaps for later phases, not invented here.
 
-## Validation criteria (Phase 14 is COMPLETE only if)
+## Validation criteria (Phase 7 is COMPLETE only if)
 
-1. The suite of Phase 14 tests is green and deterministic (run twice).
+1. The suite of Phase 7 tests is green and deterministic (run twice).
 2. The full suite (Phases 0–14) is green twice; compileall passes; Phases 0–13
    are functionally unchanged (`git diff` audited).
 3. Explicit test count before/after is reported.

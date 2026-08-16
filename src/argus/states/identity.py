@@ -1,4 +1,4 @@
-"""Phase 14 — deterministic identity of a ``MonetaryPolicyState``.
+"""Phase 7 — deterministic identity of a ``MonetaryPolicyState``.
 
 A ``state_id`` is derived solely from the relationship itself — the central
 bank and the source change id — so the *same change observed the same way

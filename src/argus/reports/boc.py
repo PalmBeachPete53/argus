@@ -17,8 +17,8 @@ This extractor follows the Report-family **precision-over-recall** rule:
   verb with a percentage and, for a forecast, an explicit reference period;
 - risks are categorical orientations when stated, verbatim otherwise.
 
-Deliberately NOT extracted (Phase 5/8/9 boundary): the policy interest-rate
-decision (Phase 5), the projection tables (Phase 9) and hawkish/dovish
+Deliberately NOT extracted (Phase 4.1/8/9 boundary): the policy interest-rate
+decision (Phase 4.1), the projection tables (Phase 4.5) and hawkish/dovish
 interpretation.
 """
 

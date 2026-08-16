@@ -3,7 +3,7 @@
 Extracts the facts of a Bank of Canada speech by the Governor, Senior Deputy
 Governor or Governing Council members, published under ``/en/speeches/``. Each
 BoC speech has an explicit speaker and sections. BoC collective decisions and
-MPR are Phases 5/8 (gated), never mined here.
+MPR are Phase 4.1/8 (gated), never mined here.
 
 Bank-specific knowledge kept here:
 

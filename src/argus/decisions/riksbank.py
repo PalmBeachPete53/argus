@@ -10,11 +10,11 @@ release, answering "what did the Executive Board explicitly decide?":
 - the decision wording ("… decided to lower the policy rate …"), verbatim
 - forward guidance / the published policy-rate path, verbatim
 
-Deliberately NOT extracted (Phase 5 boundary):
+Deliberately NOT extracted (Phase 4.1 boundary):
 
 - the planned future path ("the policy rate is expected to be cut …") — a
   forecast, kept only inside a verbatim guidance statement, never a fact value
-- the monetary policy minutes — Phase 8
+- the monetary policy minutes — Phase 4.4
 - hawkish-dovish / forex / trading — never
 
 Design rules

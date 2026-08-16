@@ -6,7 +6,7 @@ conditions, risks and alternative scenarios, and the monetary policy analysis
 and strategy. Its distinctive vocabulary is the **CPIF** (the Riksbank's
 target inflation measure), the **policy-rate path** and the Executive Board as
 the decision body — the MPR also embeds the *narrative* of the latest policy
-decision without ever being that decision (which stays Phase 5, gated on
+decision without ever being that decision (which stays Phase 4.1, gated on
 ``monetary_policy_decision`` publications).
 
 This extractor follows the Report-family **precision-over-recall** rule shared
@@ -17,7 +17,7 @@ with the other Report extractors:
   non-economic headings (contents, glossary, annex, appendix, methodology,
   legal notice, boxes) and **unknown** headings are ignored
   (`UNKNOWN ≠ ECONOMIC`); the "forecast tables" section is deliberately not
-  mined (the structured projection tables stay Phase 9);
+  mined (the structured projection tables stay Phase 4.5);
 - sentence classification is content-first with a fixed precedence:
   guidance > policy > risk > financial > inflation > labour > growth;
 - a quantitative value Fact is produced only behind an explicit value-claim
@@ -25,13 +25,13 @@ with the other Report extractors:
 - risks are categorical orientations (`upside` / `downside` / `balanced`) only
   when the source states one, verbatim otherwise.
 
-Deliberately NOT extracted (Phase 5/9 boundary):
+Deliberately NOT extracted (Phase 4.1/9 boundary):
 
-- the current policy-rate decision, its level and its change — Phase 5, gated
+- the current policy-rate decision, its level and its change — Phase 4.1, gated
   on ``monetary_policy_decision`` publications; the MPR's *narrative* of policy
   is kept verbatim (``monetary_policy/statement``), never priced
 - the structured forecast tables ("Policy rate forecast", "CPIF forecast",
-  "GDP forecast", …) — Phase 9; prose forecasts inside a report are kept as
+  "GDP forecast", …) — Phase 4.5; prose forecasts inside a report are kept as
   value Facts only when they carry an explicit reference period
 - hawkish/dovish interpretation
 """

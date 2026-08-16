@@ -14,7 +14,7 @@ assessment?":
 - forward guidance, verbatim (e.g. the "conditional on the SNB policy rate"
   commitment)
 
-Deliberately NOT extracted (Phase 5 boundary):
+Deliberately NOT extracted (Phase 4.1 boundary):
 
 - the economic conditions / inflation-outlook analysis — narrative sections
   belong to later phases

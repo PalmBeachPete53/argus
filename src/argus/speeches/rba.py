@@ -3,7 +3,7 @@
 Extracts the facts of an RBA speech by the Governor, Deputy Governor or
 Assistant Governors, published under ``/speeches/…``. Each RBA speech has an
 explicit speaker and sections. RBA statement-on-monetary-policy and decision
-documents are Phases 5/8 (gated), never mined here.
+documents are Phase 4.1/8 (gated), never mined here.
 
 Bank-specific knowledge kept here:
 

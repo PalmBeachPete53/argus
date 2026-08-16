@@ -1,4 +1,4 @@
-"""Phase 13 — the Policy Reaction Function model.
+"""Phase 6 — the Policy Reaction Function model.
 
 A ``PolicyReaction`` is a **derived, inferred relation between two existing
 ``FactChange`` objects**: a condition-side change (an observed change in an
@@ -7,7 +7,7 @@ policy-side change (an observable monetary-policy response).
 
 Epistemic boundary (see ``docs/REACTIONS.md``):
 
-- ``Fact`` / ``FactChange`` are **observed** (Phases 4 / 12).
+- ``Fact`` / ``FactChange`` are **observed** (Phases 4 /5).
 - A ``PolicyReaction`` is **inferred**: ``inferred`` is always ``True``, its
   ``formulation`` is explicitly non-causal, and it is never presented as a
   fact, as a "true" structural reaction function, or as causality.
@@ -26,7 +26,7 @@ from ..facts.base import FactPeriod, FactValue
 from ..normalize import from_iso, iso, now_utc
 
 # ---------------------------------------------------------------------------
-# Condition-side vocabulary — observed economic conditions (Phases 5–11 subjects).
+# Condition-side vocabulary — observed economic conditions (Phases 4.1–4.7 subjects).
 # A FactChange on one of these subjects is a candidate *antecedent*.
 # ---------------------------------------------------------------------------
 CONDITION_SUBJECTS = frozenset(
@@ -45,7 +45,7 @@ CONDITION_SUBJECTS = frozenset(
 )
 
 # ---------------------------------------------------------------------------
-# Reaction-side vocabulary — observable monetary-policy responses (Phases 5–11
+# Reaction-side vocabulary — observable monetary-policy responses (Phases 4.1–4.7
 # subjects). Risk assessments are assigned the reaction role (documented choice,
 # see docs/REACTIONS.md) — they are never used as a condition in this phase.
 # ---------------------------------------------------------------------------

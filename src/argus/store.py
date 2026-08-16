@@ -181,7 +181,7 @@ CREATE INDEX IF NOT EXISTS idx_facts_subject
 CREATE INDEX IF NOT EXISTS idx_facts_bank_subject
     ON facts(central_bank, subject);
 CREATE TABLE IF NOT EXISTS fact_changes (
-    -- Phase 12 — analytic relations between two existing Facts over time
+    -- Phase 5 — analytic relations between two existing Facts over time
     -- (previous → current). `change_id` is a deterministic SHA-256 over the
     -- two source fact ids + the change kind, so re-running the analysis
     -- updates the row instead of duplicating it, and a change can never be
@@ -227,7 +227,7 @@ CREATE INDEX IF NOT EXISTS idx_fact_changes_publications
     ON fact_changes(previous_publication_id, current_publication_id);
 
 CREATE TABLE IF NOT EXISTS policy_reactions (
-    -- Phase 13 — empirical, INFERRED temporal associations between a
+    -- Phase 6 — empirical, INFERRED temporal associations between a
     -- condition-side change and a policy-side change (condition → policy).
     -- `reaction_id` is a deterministic SHA-256 over the relationship
     -- (central_bank + condition_change_id + policy_change_id), so re-running
@@ -283,7 +283,7 @@ CREATE INDEX IF NOT EXISTS idx_policy_reactions_publications
     ON policy_reactions(condition_publication_id, policy_publication_id);
 
 CREATE TABLE IF NOT EXISTS monetary_policy_states (
-    -- Phase 14 — derived, dated monetary policy state observations. Each row
+    -- Phase 7 — derived, dated monetary policy state observations. Each row
     -- is ONE policy dimension of ONE central bank established by ONE
     -- FactChange: the current side of the change is the newest known value of
     -- the dimension, known at `observed_at` (meeting_date else
@@ -330,9 +330,9 @@ CREATE INDEX IF NOT EXISTS idx_policy_states_publication
     ON monetary_policy_states(publication_id);
 
 CREATE TABLE IF NOT EXISTS forex_fundamentals (
-    -- Phase 15 — derived, dated forex fundamentals. Each row is ONE fundamental
+    -- Phase 8 — derived, dated forex fundamentals. Each row is ONE fundamental
     -- dimension of ONE economy (currency) established by ONE source
-    -- observation: a MonetaryPolicyState (Phase 14, source_kind
+    -- observation: a MonetaryPolicyState (Phase 7, source_kind
     -- 'monetary_state') or a Fact (Phase 4, source_kind 'fact'). `currency` is
     -- the ISO code of the economy (CentralBank.currency, canonical). The
     -- dimension is the currency-independent lineage `lineage_key` (subject,
@@ -382,7 +382,7 @@ CREATE INDEX IF NOT EXISTS idx_forex_fundamentals_publication
     ON forex_fundamentals(publication_id);
 
 CREATE TABLE IF NOT EXISTS forex_differentials (
-    -- Phase 15 — derived, dated forex differentials. Each row is ONE
+    -- Phase 8 — derived, dated forex differentials. Each row is ONE
     -- arithmetic comparison of two fundamentals of two different economies on
     -- an explicitly declared shared dimension (`dimension_key` = the
     -- currency-independent lineage). The pair is ordered (base_currency /
@@ -1424,7 +1424,7 @@ class Store:
         )
 
     # ------------------------------------------------------------------
-    # Phase 12 — fact changes
+    # Phase 5 — fact changes
     # ------------------------------------------------------------------
     def save_change(self, change) -> None:
         """Persist one ``FactChange``, upserting by its deterministic id.
@@ -1747,7 +1747,7 @@ class Store:
         )
 
     # ------------------------------------------------------------------
-    # Phase 13 — policy reactions
+    # Phase 6 — policy reactions
     # ------------------------------------------------------------------
     def save_reaction(self, reaction) -> None:
         """Persist one ``PolicyReaction``, upserting by its deterministic id.
@@ -2115,7 +2115,7 @@ class Store:
             analyzed_at=from_iso(row["analyzed_at"]),
         )
     # ------------------------------------------------------------------
-    # Phase 14 — monetary policy states
+    # Phase 7 — monetary policy states
     # ------------------------------------------------------------------
     def save_policy_state(self, state) -> None:
         """Persist one ``MonetaryPolicyState``, upserting by its deterministic
@@ -2428,7 +2428,7 @@ class Store:
             analyzed_at=from_iso(row["analyzed_at"]),
         )
     # ------------------------------------------------------------------
-    # Phase 15 — forex fundamentals
+    # Phase 8 — forex fundamentals
     # ------------------------------------------------------------------
     def save_forex_fundamental(self, fundamental) -> None:
         """Persist one ``ForexFundamental``, upserting by its deterministic id.
@@ -2763,7 +2763,7 @@ class Store:
         )
 
     # ------------------------------------------------------------------
-    # Phase 15 — forex differentials
+    # Phase 8 — forex differentials
     # ------------------------------------------------------------------
     def save_forex_differential(self, differential) -> None:
         """Persist one ``ForexDifferential``, upserting by its deterministic id.

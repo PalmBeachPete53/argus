@@ -1,4 +1,4 @@
-"""Phase 9 — type-specific economic projections extractors.
+"""Phase 4.5 — type-specific economic projections extractors.
 
 An extractor converts a ``NormalizedDocument`` of a macroeconomic projections
 publication (the ECB/Eurosystem "staff macroeconomic projections for the euro
@@ -18,7 +18,7 @@ on ``central_bank``.
 
 Economic projections are **table documents**: the projection values live in
 structured tables whose columns are years and whose rows are variables. The
-Phase 9 extractor therefore works on ``NormalizedDocument.tables``
+Phase 4.5 extractor therefore works on ``NormalizedDocument.tables``
 (``DocumentTable``: ``headers`` / ``rows``), preserving the
 variable × year × value × unit integrity of the source table — it never
 re-parses a flattened text blob. A cell is only ever turned into a Fact when it
@@ -88,7 +88,7 @@ def extract_projections(
     state: ``rebuild_facts_for_document`` (delete + insert) runs for every
     valid normalized document, **including when the result is empty**, so a
     re-extraction that now yields no facts clears the stale facts of that
-    document instead of leaving them behind (same guarantee as Phases 5–8).
+    document instead of leaving them behind (same guarantee as Phases 4.1–4.4).
 
     Returns the list of ``ExtractionResult`` (empty if no extractor applies or
     the publication is not classified as ``economic_projections``).
@@ -125,7 +125,7 @@ def _is_projections_publication(store, publication, *, expected_types: tuple[str
     """Gate extraction to economic projections publications.
 
     The ``classifications`` table is the **single source of truth** (same strict
-    mechanism as Phases 5–8): extraction is authorized only when an
+    mechanism as Phases 4.1–4.4): extraction is authorized only when an
     authoritative classification record exists for the publication and its
     ``publication_type`` is ``economic_projections``. The denormalized
     ``publication.publication_type`` cache is never used to infer

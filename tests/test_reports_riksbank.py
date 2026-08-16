@@ -5,7 +5,7 @@ The Riksbank MPR is the report-family publication type for Sweden. It is
 already classified ``monetary_policy_report`` by the generic ``url_pattern``
 rule; this suite verifies the bank-specific ``RiksbankReportExtractor``
 (v10.6.0): generic registry dispatch, the canonical Fact contract,
-provenance, deterministic output, source immutability, the Phase 5/9
+provenance, deterministic output, source immutability, the Phase 4.1/9
 boundaries (the decision narrative is kept verbatim and never priced; the
 "forecast tables" section is never mined) and the full publication →
 classification → extractor → Fact → persistence → retrieval vertical slice.
@@ -228,7 +228,7 @@ def test_forecast_tables_section_is_never_mined():
 def test_decision_narrative_is_never_priced():
     """The MPR's narrative of the latest policy decision stays verbatim
     ``monetary_policy/statement`` — it is never priced as a policy-rate value
-    (Phase 5 boundary)."""
+    (Phase 4.1 boundary)."""
     result = _extract()
     assert not any(f.subject == "policy_rate" for f in result.facts)
     assert not any(f.predicate == "value"

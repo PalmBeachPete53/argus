@@ -1,4 +1,4 @@
-"""Fed — FOMC minutes extractor (Phase 8).
+"""Fed — FOMC minutes extractor (Phase 4.4).
 
 Extracts the facts of a Federal Reserve "Minutes of the Federal Open Market
 Committee" from the normalized document text, answering "what did the FOMC
@@ -10,7 +10,7 @@ explicitly say or discuss during the meeting?":
   considerations;
 - forward guidance, verbatim.
 
-Phase 8 specifics — attribution (Fed vocabulary):
+Phase 4.4 specifics — attribution (Fed vocabulary):
 
 - Attribution is what the source states, never invented. ``Fact.speaker`` stays
   ``None``; the attribution the minutes do state — ``dissent`` / ``one_member``
@@ -24,14 +24,14 @@ Phase 8 specifics — attribution (Fed vocabulary):
   fact; "Several participants noted that inflation was expected to average
   2.0 percent in 2027" is mined normally.
 
-Deliberately NOT extracted (Phase 8 boundary):
+Deliberately NOT extracted (Phase 4.4 boundary):
 
 - the decision itself — the "Committee's Policy Actions" section (the target
-  range, rate changes, the effective date and the vote record) is Phase 5
+  range, rate changes, the effective date and the vote record) is Phase 4.1
   territory and is routed to ``CAT_IGNORE``; the minutes extractor never
   produces decision/rate facts
 - hawkish/dovish interpretation, market expectations, probability conversion
-- Phases 9–11 (the SEP projections, the reports, speeches)
+- Phases 4.5–4.7 (the SEP projections, the reports, speeches)
 
 An unknown section is never assumed to be economic: "absence of proof →
 absence of extraction".
@@ -100,7 +100,7 @@ _MINE_HEADINGS = frozenset({
     "discussion of the economic outlook and monetary policy",
     "discussion of the economic outlook and monetary policy and the committee's policy actions",
 })
-# Decision / vote-record / communications sections — the Phase 5 decision, the
+# Decision / vote-record / communications sections — the Phase 4.1 decision, the
 # record of the policy action and the meeting logistics are never mined here.
 _IGNORE_HEADING_PREFIXES = (
     "minutes of",

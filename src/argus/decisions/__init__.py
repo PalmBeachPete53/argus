@@ -1,4 +1,4 @@
-"""Phase 5 — type-specific decision extraction public API."""
+"""Phase 4.1 — type-specific decision extraction public API."""
 
 from .base import (
     DECISION_PUBLICATION_TYPE,
