@@ -1279,6 +1279,51 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   produisent des faits → différentiels réels ECB-vs-Fed impossibles aujourd'hui,
   gap documenté, jamais contourné**) ; 89 tests dédiés — **suite complète :
   916 tests verts et déterministes.**
+- **Search Discovery fallback (SearXNG)** — `src/argus/search/`
+  (`SearchProvider`, `SearxngSearchProvider`) + `src/argus/discovery/search.py`
+  (`SearchDiscovery`) : fallback de discovery **par source**, configurable
+  (`search_query`/`search_domain` sur le `DiscoverySpec`), qui ne produit que
+  des candidats (URLs officielles) et ne récupère jamais le contenu
+  documentaire — le Fetcher reste la voie unique d'accès aux documents.
+  Provenance `discovery_method=search` conservée, déduplication existante
+  réutilisée. Configuré pour **RBA** (`rba_media_releases_rss`) et **RBNZ**
+  (`rbnz_ocr_decisions`). Documenté dans `docs/SEARCH_DISCOVERY.md`.
+- **Bank Enable/Disable Toggle** — `src/argus/config.py` (`BANKS_ENABLED`,
+  `is_bank_enabled`, `enabled_banks`, `filter_enabled`) + surcharges
+  `ARGUS_BANKS_DISABLED` / `ARGUS_BANKS_ENABLED` : mécanisme générique par
+  banque ; une banque OFF reste connue du Registry et entièrement implémentée
+  mais est exclue de toutes les exécutions intégrées (discovery/fetch/normalize/
+  classify/extract), `--bank` ne contourne pas le toggle ; E2E paramétrés
+  skipped proprement. **RBNZ est actuellement OFF par défaut** (source
+  officielle inaccessible depuis l'environnement d'exécution — WAF/Cloudflare),
+  réactivable par configuration sans modification de code métier. Documenté
+  dans `docs/BANKS.md`.
+- **Golden corpus réel (9/10)** — `tests/golden/` + `scripts/capture_golden.py`
+  (modes native / search / manual) + `tests/test_golden_corpus.py` : captures
+  réelles versionnées (discovery + document, SHA-256, provenance dans
+  `manifest.json`) pour **Fed, ECB, BoE, BoJ (PDF), SNB, BoC, RBA (via Search
+  Discovery), Norges, Riksbank**, rejouées hors-ligne dans le harness L4 avec
+  idempotence. **RBNZ n'a pas de golden réel** (document officiel non
+  récupérable depuis l'environnement de capture) — aucun golden synthétique ;
+  le corpus reste 9/10.
+- **Harness L4 paramétrable + idempotence E2E** — `tests/l4_harness.py`
+  (`run_l4_end_to_end`, `run_l4_end_to_end_twice`, snapshots d'identité métier)
+  + `tests/test_pipeline_end_to_end.py` (10 slices, skip par toggle) +
+  `tests/test_pipeline_idempotence.py` : deux exécutions complètes du pipeline
+  produisent la même identité persistée, sans doublon.
+- **Validation E2E historique 2025 (données réelles)** — campagne sur les
+  banques actives (fenêtre 2025, mécanismes existants uniquement) : 1654
+  publications, 375 documents, **1627 Facts, 1061 FactChanges, 19585
+  PolicyReactions**, 0 erreur restante ; invariants Phases 12/13 vérifiés
+  (matching exact, même banque, ordre temporel, provenance des deux côtés,
+  no-look-ahead, lag ≤ 180 j, ids déterministes, idempotence). **3 bugs réels
+  trouvés et corrigés** : collision de `fact_id` (change facts sans
+  `identity_qualifier` dans les extracteurs decision riksbank/snb/boc/rba/
+  norges) et reconstruction `FactPeriod.kind` en chaîne dans le Store
+  (`_fact_from_row`, `_change_from_row`, `_reaction_from_row`, `_state_from_row`,
+  `_fundamental_from_row`, `_differential_from_row`) qui cassait Phases 12/13.
+- **Suite complète** : **1529 tests verts et déterministes** (+2 skipped :
+  scénarios E2E RBNZ désactivés par configuration).
 - **Prochaine phase autorisée : Phase 16 — Historical Validation** (statut
   `DEFERRED`).
 

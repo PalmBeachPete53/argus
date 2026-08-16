@@ -1,82 +1,121 @@
-# Argus — Official G10 central bank publication collector
+# Argus — Official G10 central bank monetary-policy pipeline
 
-Infrastructure for discovering, registering and retrieving official monetary-policy
-publications from the G10 central banks, up to the "raw documents", normalization,
-classification and fact-extraction layers of the analytical pipeline. No economic
-interpretation or LLM analysis is performed at this stage.
+Argus collects, normalizes, classifies and extracts **canonical, provenance-carrying
+Facts** from the official monetary-policy communications of the 10 initial G10
+central banks, then derives temporal **FactChanges** and **PolicyReactions**.
+No economic interpretation, trading logic, sentiment or LLM-based analysis is
+performed: every conclusion is traceable to an official source.
 
-The authoritative evolution plan is `docs/ROADMAP.md`; phases 0–5 are complete,
-phase 6 (Monetary Policy Statement) is next.
+The authoritative evolution plan is `docs/ROADMAP.md`.
 
-## Pipeline scope
-
-Status follows `docs/ROADMAP.md` (`COMPLETE` / `NEXT` / `NOT STARTED`):
+## Pipeline
 
 ```
 Official Sources
       ↓
-Source Registry        ✅  (Phase 1)
+SourceRegistry (10 banks, Bank Toggle)
       ↓
-Publication Discovery  ✅  (Phase 1)
+Discovery
+      ├── Native Discovery   (RSS / HTML / sitemap) — primary
+      └── Search Discovery   (fallback, per source) — SearXNG, discovery only
       ↓
-Publication Metadata   ✅  (Phase 1)
+Publication upsert / deduplication (deterministic identity)
       ↓
-Document Fetching      ✅  (Phase 1)
+Fetcher  (the only way document content is retrieved)
       ↓
-Raw Documents          ✅  (Phase 1)
+Raw Document → Normalization (HTML/PDF/DOCX/XLSX/CSV/TXT)
       ↓
-Document Normalization ✅  (Phase 2: PDF/DOCX/XLSX/CSV/TXT/HTML → structured text+tables)
+Classification (deterministic evidence-tier engine → canonical publication_type)
       ↓
-Publication Classification ✅  (Phase 3: deterministic evidence-tier engine)
+Gated dispatch → Extractor (per bank, per publication family)
       ↓
-Fact Model                   ✅  (Phase 4: typed, provenance-carrying facts)
+Facts (typed, provenance-carrying) → Store
       ↓
-ECB Decision Extraction      ✅  (Phase 5: EcbDecisionExtractor v5.2.0)
+FactChanges (Phase 12 — temporal comparisons)
       ↓
-Type-Specific Extraction          (Phases 6–11 — NEXT for Phase 6)
-Temporal / Analysis               (Phases 12–16 — NOT STARTED)
-Trading / Signal Layer            (Phase 17 — out of scope for now)
+PolicyReactions (Phase 13 — temporal relations between condition and response changes)
 ```
 
-Stage note: **normalization** (`documents/`) turns raw bytes into structured,
-traceable text. **classification** (`classification/`) assigns a canonical
-`publication_type` from an explainable rule engine — no model calls, no fabricated
-labels. **facts** (`facts/`) are typed, provenance-carrying assertions extracted
-from normalized documents; future extractors return an `ExtractionResult`.
+Key responsibilities:
+- **discovery** (`discovery/`) produces publication candidates from official sources.
+- **fetcher** (`fetcher.py`) retrieves raw documents — and is the *only* mechanism
+  that ever fetches document content.
+- **normalization** (`documents/`) turns raw bytes into structured, traceable text.
+- **classification** (`classification/`) assigns a canonical `publication_type`
+  from an explainable rule engine — no model calls.
+- **facts** (`facts/`) are typed, provenance-carrying assertions extracted by
+  per-bank extractors.
+- **store** (`store.py`) persists publications, documents, classifications,
+  facts and the derived `fact_changes` / `policy_reactions` tables.
 
-### Roadmap status
+## Banks
 
-Per `docs/ROADMAP.md` (statuses: `COMPLETE` / `NEXT` / `NOT STARTED`):
+All 10 banks are registered in the `SourceRegistry`; a generic **Bank Toggle**
+(`docs/BANKS.md`) decides which participate in operational executions:
 
-| Phase | Name | Status |
-|---|---|---|
-| 0 | Architecture & Specification | `COMPLETE` |
-| 1 | Source Registry & Collection | `COMPLETE` |
-| 2 | Document Normalization | `COMPLETE` |
-| 3 | Publication Classification | `COMPLETE` |
-| 4 | Fact Model | `COMPLETE` |
-| 5 | Monetary Policy Decision | `COMPLETE` — ECB extractor (v5.2.0) |
-| 6 | Monetary Policy Statement | `NEXT` |
-| 7–11 | Press conferences, minutes, projections, reports, speeches | `NOT STARTED` |
-| 12–16 | Temporal analysis, policy reaction, policy state, forex fundamentals, historical validation | `NOT STARTED` |
-| 17 | Trading / Signal Layer | `NOT STARTED` — out of scope for now |
+| Bank | State |
+|---|---|
+| Fed | ON |
+| ECB | ON |
+| BoE | ON |
+| BoJ | ON |
+| SNB | ON |
+| BoC | ON |
+| RBA | ON |
+| RBNZ | OFF (official source `rbnz.govt.nz` currently inaccessible from the execution environment; bank fully implemented, not removed) |
+| Norges | ON |
+| Riksbank | ON |
 
-Current position: Argus sits at the start of **Phase 6 (Monetary Policy
-Statement)**. Phase 5 delivered the `EcbDecisionExtractor` (decision date,
-policy rates, rate changes, effective date, decision wording, asset-purchase /
-balance-sheet decisions, forward guidance — with verbatim provenance and no
-invented facts; votes and risk assessment documented as absent from ECB
-decision documents).
+A disabled bank keeps its adapter, sources, discovery, classification,
+extractors, fixtures and unit tests — it is simply excluded from integrated
+runs and parametrized E2E scenarios. See `docs/BANKS.md`.
+
+## Discovery
+
+Native discovery (RSS / HTML / sitemap) is the primary mechanism and is
+unchanged. **Search Discovery** (`docs/SEARCH_DISCOVERY.md`) is an optional,
+per-source **fallback** that uses a `SearchProvider` (SearXNG) to produce
+official publication candidates when native discovery is unavailable:
+
+- it only yields candidate URLs, never document content;
+- it is configured per source (`search_query`, `search_domain`);
+- it preserves discovery provenance and reuses existing deduplication;
+- the Fetcher remains the single document-ingestion path.
+
+SearXNG is optional: Argus works entirely without it for native sources.
+Configuration via environment: `SEARCH_PROVIDER=searxng`,
+`SEARXNG_BASE_URL`, `SEARXNG_ENGINES`.
+
+## Bank Toggle
+
+`src/argus/config.py` is the single source of truth (`BANKS_ENABLED`).
+Environment overrides: `ARGUS_BANKS_DISABLED` and `ARGUS_BANKS_ENABLED`
+(allow-list, authoritative). Explicit bank selection (`--bank`) never bypasses
+the toggle — the only way to run a disabled bank is to re-enable it via
+`ARGUS_BANKS_ENABLED`. See `docs/BANKS.md`.
+
+## What Argus produces
+
+- **Facts** — canonical typed assertions (policy rates, changes, dates,
+  assessments, forward guidance, …) with verbatim provenance.
+- **FactChanges (Phase 12)** — temporal comparisons of the same lineage
+  (same bank/subject/predicate/value kind/period/qualifier/type) between
+  consecutive publications, with provenance on both sides and deterministic
+  identities. Idempotent.
+- **PolicyReactions (Phase 13)** — temporal relations between a condition
+  `FactChange` and a policy `FactChange`, within the implemented lag window and
+  without look-ahead. **This is a temporal relation, not a causal claim.**
+  Idempotent.
 
 ## Quickstart
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
-# List the configured banks and sources (declarative registry)
+# List the configured banks and sources, with ON/OFF toggle state
 .venv/bin/python -m argus.cli --list-banks
 
-# Discover + fetch everything (honours robots.txt, rate-limited; idempotent)
+# Discover + fetch everything for the active banks (honours robots.txt, rate-limited, idempotent)
 .venv/bin/python -m argus.cli --store data/argus.db --raw-root data/raw
 
 # Discover only, restricted to one bank
@@ -86,64 +125,51 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m argus.cli --month 2026-07 --store data/argus.db --raw-root data/raw
 .venv/bin/python -m argus.cli --year 2026 --discover-only
 
+# Normalize fetched documents, then classify stored publications (offline)
+.venv/bin/python -m argus.cli --store data/argus.db --raw-root data/raw --normalize
+.venv/bin/python -m argus.cli --store data/argus.db --classify
+
+# Read-only store summary
+.venv/bin/python -m argus.cli --store data/argus.db --report
+
 # Delete all collected data (store db + raw documents), keeping data/ and data/raw/
 .venv/bin/python -m argus.cli --purge --store data/argus.db --raw-root data/raw
 ```
 
-All flags are optional: run without `--year`/`--month` to collect everything. They
-combine with any subcommand (`--list-banks --month 2026-07` works too) and
-`--month` takes precedence over `--year` if both are given.
-
-Or from Python:
+From Python:
 
 ```python
 from argus import CentralBankCollector
 
 collector = CentralBankCollector()          # default store ./data/argus.db
 publications = collector.discover_all()     # → list[Publication] (deduped, persisted)
-print([(p.central_bank, p.title, p.publication_date) for p in publications])
-
 documents = collector.fetch_all()           # → list[FetchResult], raw docs under data/raw/
 ```
 
-`collector.run()` runs discovery then fetches. Running it repeatedly is idempotent:
-publications are deduplicated by a deterministic identity, and already-fetched
-documents are not re-downloaded.
+`collector.run()` runs discovery then fetches. Running it repeatedly is
+idempotent: publications are deduplicated by a deterministic identity, and
+already-fetched documents are not re-downloaded.
 
-Raw documents are kept per bank under `data/raw/<bank>/<YYYY>/<MM>/...`, each with a
-SHA-256 fingerprint and full provenance (bank, source id, source url, publication
-url, publication date, retrieved-at time) recorded in the SQLite store
-(`data/argus.db`).
+Raw documents are kept per bank under `data/raw/<bank>/<YYYY>/<MM>/...` with a
+SHA-256 fingerprint and provenance in the SQLite store (`data/argus.db`).
 
-## Phases 2 & 3 — normalize & classify
+## Extraction and analysis (offline)
 
-Normalization parses raw documents on disk into structured text + tables (no
-network), and classification assigns a canonical `publication_type` from a
-deterministic rule engine:
+```python
+from argus.store import Store
+from argus.config import enabled_banks
+from argus.changes import analyze_changes      # Phase 12
+from argus.reactions import analyze_reactions  # Phase 13
 
-```bash
-# Parse all fetched documents (PDF/DOCX/XLSX/CSV/TXT/HTML) into the store
-.venv/bin/python -m argus.cli --store data/argus.db --raw-root data/raw --normalize
-
-# Re-run a single publication's normalization, overwriting previous output
-.venv/bin/python -m argus.cli --store data/argus.db --raw-root data/raw --publication <id> --normalize --force
-
-# Classify publications (optionally scoped per bank) and persist the result
-.venv/bin/python -m argus.cli --store data/argus.db --normalize --classify --bank ecb
-
-# Read-only store summary (publications, raw/normalized docs, classifications)
-.venv/bin/python -m argus.cli --store data/argus.db --report
-
-# In-process equivalent
-from argus.documents import Normalizer
-from argus.classification import PublicationClassifier
-
-normalizer = Normalizer(store=collector.store, raw_root="data/raw")
-docs = normalizer.normalize_all(force=False)
-
-classifier = PublicationClassifier(store=collector.store)
-results = classifier.classify_all()
+store = Store("data/argus.db")
+for bank in enabled_banks():                          # the active banks
+    analyze_changes(store, bank=bank, persist=True)      # → FactChanges
+    analyze_reactions(store, bank=bank, persist=True)    # → PolicyReactions
 ```
+
+Extraction is performed through the gated per-family entry points
+(`extract_decision`, `extract_statement`, `extract_minutes`, …), which dispatch
+the right extractor only for the classified publication type.
 
 ## Tests
 
@@ -151,23 +177,38 @@ results = classifier.classify_all()
 .venv/bin/python -m pytest
 ```
 
-Unit tests use local fixtures and a fake HTTP transport; they never depend on a live
-website. Binary fixtures (PDF / DOCX / XLSX) are generated at test time by
-`tests/fixture_docs.py`, so no binary blobs are committed.
+- **Unit / integration tests** use local fixtures and a fake HTTP transport —
+  never a live website.
+- **Golden corpus** (`docs/` … see below) replays captured real official
+  sources offline through the L4 harness.
+- **E2E / idempotence tests** cover one representative publication per active
+  bank through the full pipeline, including idempotent re-execution.
+- A **2025 historical validation** campaign was run on real data for the active
+  banks (see `docs/ROADMAP.md` "Current Position").
+
+## Project state
+
+- **Golden corpus: 9/10 banks** with real captured official sources (Fed, ECB,
+  BoE, BoJ, SNB, BoC, RBA via Search Discovery, Norges, Riksbank); RBNZ has no
+  real capture yet (its official domain is WAF-blocked from the capture
+  environment) and stays at 9/10 — no synthetic golden exists.
+- Phases 1–4 (Foundation, Source Discovery, Document Pipeline, Fact Extraction
+  incl. 4.1–4.7) and Phases 12–15 are `COMPLETE`; Phase 16 (Historical
+  Validation) is `DEFERRED`; Phase 17 (Trading) is `NOT STARTED`.
 
 ## Documentation
 
-- `docs/ROADMAP.md` — official roadmap: vision, phases 0–17, invariants,
-  architectural notes and current position.
-- `docs/DATA_MODEL.md` — the Fact model (Phase 4): what a Fact is/is not, value
-  types, temporal semantics, provenance, confidence, identity, persistence and
-  the future extractor contract.
+- `docs/ROADMAP.md` — official roadmap: phases, invariants, architectural notes
+  and current position.
 - `docs/ARCHITECTURE.md` — generic core, discovery abstractions, fetcher, storage,
-  deduplication and lifecycle design.
-- `docs/SOURCES.md` — the verified research matrix of official sources per bank
-  (RSS / sitemap / HTML archives / calendars / APIs), with the source IDs used by
-  each adapter.
-- `docs/SEARCH_DISCOVERY.md` — the optional Search Discovery fallback (SearXNG):
-  architecture, per-source configuration, fallback semantics and provenance.
-- `docs/BANKS.md` — the central bank enable/disable toggle: where it is
-  configured, the current ON/OFF state, and how to re-enable a bank.
+  deduplication, lifecycle, Search Discovery and Bank Toggle.
+- `docs/DATA_MODEL.md` — the Fact model: what a Fact is/is not, value types,
+  temporal semantics, provenance, confidence, identity, persistence.
+- `docs/EXTRACTORS.md` — the type-specific extractors (per family and bank).
+- `docs/CHANGES.md` — Phase 12: FactChange matching and identity rules.
+- `docs/REACTIONS.md` — Phase 13: PolicyReaction temporal-relation rules.
+- `docs/MONETARY_POLICY_STATE.md`, `docs/FOREX_FUNDAMENTALS.md` — Phases 14/15.
+- `docs/SOURCES.md` — the verified research matrix of official sources per bank.
+- `docs/SEARCH_DISCOVERY.md` — the SearXNG discovery fallback.
+- `docs/BANKS.md` — the Bank Toggle.
+- `docs/PRESS_CONFERENCES.md`, `docs/REPORTS.md`, `docs/SPEECHES.md` — family contracts.

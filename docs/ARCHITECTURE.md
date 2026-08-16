@@ -402,6 +402,49 @@ idempotently per currency (rebuilds read the full dataset so differentials are
 correct; the scope limits what is persisted), empty results clear the scope,
 and sources are never modified. See `docs/FOREX_FUNDAMENTALS.md`.
 
+## Search Discovery fallback (`discovery/search.py`, `search/`)
+
+Native discovery (RSS / HTML / sitemap) is the primary mechanism. **Search
+Discovery** is an optional, per-source **fallback** that uses a `SearchProvider`
+(SearXNG) to produce official publication candidates when native discovery is
+unavailable:
+
+- it is configured per source via `DiscoverySpec.search_query`,
+  `search_domain`, `search_engines`, `search_fallback_on_empty`;
+- it only yields candidate URLs — it **never** fetches or returns document
+  content; the Fetcher remains the only document-ingestion path;
+- search-discovered publications keep provenance
+  (`discovery_method=search`, provider, query, rank, result URL) and reuse the
+  existing deduplication / publication identity;
+- SearXNG is optional and never assumed to run locally (environment config:
+  `SEARCH_PROVIDER`, `SEARXNG_BASE_URL`, `SEARXNG_ENGINES`).
+
+Configured fallback sources today: RBA (`rba_media_releases_rss`) and RBNZ
+(`rbnz_ocr_decisions`). See `docs/SEARCH_DISCOVERY.md`.
+
+## Bank enable/disable toggle (`config.py`)
+
+`BANKS_ENABLED` in `src/argus/config.py` is the single source of truth for which
+of the 10 banks participate in operational executions. A bank set to `False`
+remains fully defined (adapter, sources, discovery, classification, extractors,
+fixtures, golden, unit tests) but is excluded from every integrated execution
+path (discovery / fetch / normalize / classify / extract) and from parametrized
+E2E scenarios — `--bank` does not bypass the toggle. Environment overrides:
+`ARGUS_BANKS_DISABLED` (additional exclusions) and `ARGUS_BANKS_ENABLED`
+(complete, authoritative allow-list — the only way to run a default-OFF bank).
+`filter_enabled(banks)` applies the toggle uniformly to any selection. RBNZ is
+currently OFF. See `docs/BANKS.md`.
+
+## Golden corpus (`tests/golden/`)
+
+Real captured official sources, versioned and replayed offline through the L4
+harness (`tests/l4_harness.py`). Each case stores the discovery artifact and the
+document with SHA-256 and provenance in `tests/golden/manifest.json`; the
+capture tool (`scripts/capture_golden.py`) supports native, search and manual
+modes. Coverage is currently **9/10 banks** (Fed, ECB, BoE, BoJ, SNB, BoC, RBA
+via Search Discovery, Norges, Riksbank); RBNZ has no real capture yet and stays
+at 9/10 — no synthetic golden exists.
+
 ## Deduplication
 
 Stable identity is derived per `Publication`:
@@ -453,5 +496,10 @@ running. Errors are persisted in the `collect_errors` table.
 2. declare one or more `Source`s (RSS / sitemap / HTML — with filters if needed),
 3. only write a custom discovery path if the site truly requires it (none of the
    current G10 banks do — all ten use the generic strategies).
+
+The bank is enabled by default (unknown banks are treated as enabled by the
+toggle); to keep a bank out of integrated executions, set it `False` in
+`BANKS_ENABLED` (see "Bank enable/disable toggle" above). If native access is
+unreliable, configure a Search Discovery fallback on the relevant source.
 
 No core code changes are required.
