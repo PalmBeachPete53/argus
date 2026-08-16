@@ -227,8 +227,9 @@ CREATE INDEX IF NOT EXISTS idx_fact_changes_publications
     ON fact_changes(previous_publication_id, current_publication_id);
 
 CREATE TABLE IF NOT EXISTS policy_reactions (
-    -- Phase 6 — empirical, INFERRED temporal associations between a
-    -- condition-side change and a policy-side change (condition → policy).
+    -- Phase 6 — empirical, INFERRED temporal relationships between two
+    -- observed FactChanges: an earlier change and a later change. Not causal,
+    -- not a reaction function (legacy table name "policy_reactions").
     -- `reaction_id` is a deterministic SHA-256 over the relationship
     -- (central_bank + condition_change_id + policy_change_id), so re-running
     -- the analysis updates the row instead of duplicating it. `inferred` is a
@@ -1747,7 +1748,7 @@ class Store:
         )
 
     # ------------------------------------------------------------------
-    # Phase 6 — policy reactions
+    # Phase 6 — temporal relationships (legacy table name "policy_reactions")
     # ------------------------------------------------------------------
     def save_reaction(self, reaction) -> None:
         """Persist one ``PolicyReaction``, upserting by its deterministic id.

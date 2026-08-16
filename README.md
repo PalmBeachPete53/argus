@@ -2,7 +2,7 @@
 
 Argus collects, normalizes, classifies and extracts **canonical, provenance-carrying
 Facts** from the official monetary-policy communications of the 10 initial G10
-central banks, then derives temporal **FactChanges** and **PolicyReactions**.
+central banks, then derives temporal **FactChanges** and **Temporal Relationships**.
 No economic interpretation, trading logic, sentiment or LLM-based analysis is
 performed: every conclusion is traceable to an official source.
 
@@ -33,7 +33,7 @@ Facts (typed, provenance-carrying) → Store
       ↓
 FactChanges (Phase 5 — temporal comparisons)
       ↓
-PolicyReactions (Phase 6 — temporal relations between condition and response changes)
+Temporal Relationships (Phase 6 — temporal relations between observed changes)
 ```
 
 Key responsibilities:
@@ -102,10 +102,10 @@ the toggle — the only way to run a disabled bank is to re-enable it via
   (same bank/subject/predicate/value kind/period/qualifier/type) between
   consecutive publications, with provenance on both sides and deterministic
   identities. Idempotent.
-- **PolicyReactions (Phase 6)** — temporal relations between a condition
-  `FactChange` and a policy `FactChange`, within the implemented lag window and
-  without look-ahead. **This is a temporal relation, not a causal claim.**
-  Idempotent.
+- **Temporal Relationships (Phase 6)** — descriptive temporal relations
+  between an earlier `FactChange` and a later `FactChange`, within the
+  implemented window, without look-ahead. **This is a temporal relation, not a
+  causal claim, not a central-bank reaction function.** Idempotent.
 
 ## Quickstart
 
@@ -164,7 +164,7 @@ from argus.reactions import analyze_reactions  # Phase 6
 store = Store("data/argus.db")
 for bank in enabled_banks():                          # the active banks
     analyze_changes(store, bank=bank, persist=True)      # → FactChanges
-    analyze_reactions(store, bank=bank, persist=True)    # → PolicyReactions
+    analyze_reactions(store, bank=bank, persist=True)    # → Temporal Relationships (legacy API name)
 ```
 
 Extraction is performed through the gated per-family entry points
@@ -206,7 +206,8 @@ the right extractor only for the classified publication type.
   temporal semantics, provenance, confidence, identity, persistence.
 - `docs/EXTRACTORS.md` — the type-specific extractors (per family and bank).
 - `docs/CHANGES.md` — Phase 5: FactChange matching and identity rules.
-- `docs/REACTIONS.md` — Phase 6: PolicyReaction temporal-relation rules.
+- `docs/TEMPORAL_RELATIONSHIPS.md` — Phase 6: Temporal Relationships (temporal
+  relations between observed changes, non-causal).
 - `docs/MONETARY_POLICY_STATE.md`, `docs/FOREX_FUNDAMENTALS.md` — Phase 7/8.
 - `docs/SOURCES.md` — the verified research matrix of official sources per bank.
 - `docs/SEARCH_DISCOVERY.md` — the SearXNG discovery fallback.

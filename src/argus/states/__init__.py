@@ -1,7 +1,7 @@
 """Phase 7 — monetary policy state analysis.
 
 This package synthesizes a historised, dated ``MonetaryPolicyState`` from the
-existing Phase 5 ``FactChange`` relations, reusing Phase 6's reaction-side
+existing Phase 5 ``FactChange`` relations, reusing Phase 6's later-side (legacy "reaction-side")
 vocabulary as the observable policy dimensions. Each state entry is a derived,
 dated observation of one policy dimension of one bank (``synthesized=True``
 constant, never a Fact, never a stance, never a forecast, never a

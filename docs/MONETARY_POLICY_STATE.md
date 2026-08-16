@@ -19,7 +19,7 @@ Fact                                    ← Phase 4 (src/argus/facts/)
     ↓
 Temporal / Cross-Publication Analysis   ← Phase 5 (src/argus/changes/)
     ↓
-Policy Reaction Function                ← Phase 6 (src/argus/reactions/)
+Temporal Relationships                 ← Phase 6 (src/argus/reactions/)
     ↓
 Monetary Policy State                   ← Phase 7 (src/argus/states/, THIS layer)
     ↓
@@ -69,7 +69,7 @@ trading/forex signal.
 
 ### Phase 6's contribution is the vocabulary, not the values
 
-The state's *dimensions* are exactly Phase 6's reaction-side subjects
+The state's *dimensions* are exactly Phase 6's later-side subjects (legacy 'reaction-side')
 (`REACTION_SUBJECTS`, re-exported here as `STATE_SUBJECTS`). Phase 6 is the
 documented owner of that vocabulary and of the role assignment (risk
 assessments are policy-side). The state's *values*, however, come **only from
@@ -143,7 +143,7 @@ policy dimensions — same policy as Phase 6 for vocabulary outsiders).
 - The **observation time** of a state entry is the temporal reference of the
   current-side publication: `meeting_date` when set, else `publication_date`
   (the exact reference Phase 5 uses to order observations and Phase 6 uses to
-  date reactions).
+  date temporal relationships).
 - **`effective_date` is never an observation time**: it is the date the value
   *takes effect*, a separate concept preserved verbatim on the entry. It is
   never used to order or to answer "state at T".

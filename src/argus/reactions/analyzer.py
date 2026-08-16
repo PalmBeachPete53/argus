@@ -1,20 +1,22 @@
-"""Phase 6 — empirical policy reaction analysis.
+"""Phase 6 — temporal relationship analysis (legacy name "policy reaction analysis").
 
 The analyzer is **pure** (``PolicyReactionAnalyzer.analyze`` works on in-memory
 ``FactChange`` objects + a publications mapping and never touches a store) and
-strictly deterministic.
+strictly deterministic. It relates observed changes temporally; it does **not**
+model a reaction function, a causal link, or an input→output policy response.
 
-Relationship rules (documented in ``docs/REACTIONS.md``):
+Relationship rules (documented in ``docs/TEMPORAL_RELATIONSHIPS.md``):
 
-1. A ``FactChange`` is **condition-side** when its ``subject`` is in
-   ``CONDITION_SUBJECTS``; it is **reaction-side** when its ``subject`` is in
+1. A ``FactChange`` is an **earlier-side** (legacy "condition-side") candidate
+   when its ``subject`` is in ``CONDITION_SUBJECTS``; it is a **later-side**
+   (legacy "reaction-side") candidate when its ``subject`` is in
    ``REACTION_SUBJECTS``. A change with neither role is ignored (irrelevant,
    not an error).
 2. The observation time of a change is the temporal reference of its
    **current-side** publication — ``meeting_date`` when set, else
    ``publication_date`` (same reference Phase 5 uses to order observations).
-3. **No look-ahead**: a condition may relate to a policy response only when
-   ``condition_observed_at <= policy_observed_at``.
+3. **No look-ahead**: an earlier change may relate to a later change only when
+   ``condition_observed_at <= policy_observed_at`` (legacy field names).
 4. **Window**: the lag ``policy_observed_at - condition_observed_at`` must be
    ``0 <= lag_days <= max_lag_days`` (documented default 180 days).
 5. **Bank isolation**: pairing is per ``central_bank``. The bank is a property
@@ -57,7 +59,7 @@ class _Entry:
 
 
 class PolicyReactionAnalyzer:
-    """Pure empirical policy reaction analyzer."""
+    """Temporal relationship analyzer (legacy class name ``PolicyReactionAnalyzer``)."""
 
     analysis_version = "13.0.0"
 
@@ -68,8 +70,8 @@ class PolicyReactionAnalyzer:
         publications: Mapping[str, Publication] | None = None,
         max_lag_days: int = DEFAULT_MAX_LAG_DAYS,
     ) -> PolicyReactionResult:
-        """Derive the empirical reactions between condition-side and
-        reaction-side changes.
+        """Derive temporal relationships between earlier-side and later-side
+        changes (legacy names: condition-side / reaction-side).
 
         ``changes`` are the ``FactChange`` relations produced by Phase 5;
         ``publications`` maps ``publication_id → Publication`` and supplies the

@@ -1,11 +1,16 @@
-"""Phase 6 — empirical policy reaction analysis (deep hardening).
+"""Phase 6 — temporal relationship analysis (legacy name "policy reaction analysis").
 
-Tests the pure ``PolicyReactionAnalyzer`` and the store integration
-(``analyze_reactions`` + ``policy_reactions`` persistence).
+Tests the pure ``PolicyReactionAnalyzer`` (legacy class name; concept: Temporal
+Relationship) and the store integration (``analyze_reactions`` +
+``policy_reactions`` persistence). The code identifiers remain the legacy ones
+for compatibility; the concept is a descriptive temporal relationship between
+two observed FactChanges — never a causal claim nor a central-bank reaction
+function.
 
 Coverage:
 
-- **Vocabulary**: condition-side vs reaction-side subject sets, disjointness,
+- **Vocabulary**: earlier-side (legacy condition-side) vs later-side (legacy
+  reaction-side) subject sets, disjointness,
   documented default window constant.
 - **Model**: ``inferred`` is always ``True``; formulation is explicitly
   non-causal; deterministic description; serialization round-trip.

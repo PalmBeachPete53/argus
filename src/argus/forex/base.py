@@ -10,7 +10,7 @@ explicitly declared, shared dimension**.
 Epistemic boundary (see ``docs/FOREX_FUNDAMENTALS.md``):
 
 - ``Fact`` / ``FactChange`` are **observed** (Phases 4 /5).
-- A ``PolicyReaction`` (Phase 6) is **inferred**.
+- A ``PolicyReaction`` (Phase 6, legacy class name; concept: Temporal Relationship) is **inferred**.
 - A ``MonetaryPolicyState`` (Phase 7) is **synthesized**.
 - A ``ForexFundamental`` / ``ForexDifferential`` (Phase 8) is **synthesized**:
   ``synthesized`` is always ``True``, the ``formulation`` is purely
@@ -34,7 +34,7 @@ from ..reactions.base import CONDITION_SUBJECTS
 from ..states.base import STATE_SUBJECTS
 
 # ---------------------------------------------------------------------------
-# Dimension vocabulary. Monetary dimensions are Phase 7's reaction-side
+# Dimension vocabulary. Monetary dimensions are Phase 7's later-side (legacy "reaction-side")
 # subjects (the observable policy dimensions); macro dimensions are Phase 6's
 # condition-side subjects (the observed economic conditions). Reused, never
 # re-declared, so the layers never drift.

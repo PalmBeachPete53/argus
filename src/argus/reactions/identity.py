@@ -1,4 +1,4 @@
-"""Phase 6 — deterministic identity of a ``PolicyReaction``.
+"""Phase 6 — deterministic identity of a Temporal Relationship (legacy class ``PolicyReaction``).
 
 A ``reaction_id`` is derived solely from the relationship itself — the central
 bank and the two source change ids — so the *same pair of changes observed the

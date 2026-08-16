@@ -14,7 +14,7 @@ Fact                                    ← Phase 4 (src/argus/facts/)
     ↓
 Temporal / Cross-Publication Analysis   ← Phase 5 (src/argus/changes/, THIS layer)
     ↓
-Policy Reaction Function                ← Phase 6
+Temporal Relationships                 ← Phase 6
 Monetary Policy State                   ← Phase 7
 Forex Fundamentals                      ← Phase 8
 ```

@@ -10,13 +10,13 @@ monetary policy at instant T?" is always answerable without look-ahead.
 Epistemic boundary (see ``docs/MONETARY_POLICY_STATE.md``):
 
 - ``Fact`` / ``FactChange`` are **observed** (Phases 4 /5).
-- A ``PolicyReaction`` (Phase 6) is **inferred**.
+- A ``PolicyReaction`` (Phase 6, legacy class name; concept: Temporal Relationship) is **inferred**.
 - A ``MonetaryPolicyState`` is **synthesized**: ``synthesized`` is always
   ``True``, its ``formulation`` is purely descriptive, and it is never
   presented as a new fact, as a stance, as a forecast, or as a
   trading/forex signal.
 
-The state consumes Phase 5 output (``FactChange`` relations) and reuses Phase 6's reaction-side vocabulary as its dimensions. Phase 6's *inferred*
+The state consumes Phase 5 output (``FactChange`` relations) and reuses Phase 6's later-side (legacy "reaction-side") vocabulary as its dimensions. Phase 6's *inferred*
 ``PolicyReaction`` values are deliberately **not** state inputs.
 
 This layer never mutates the ``FactChange`` / ``Fact`` inputs, never reads
@@ -34,7 +34,7 @@ from ..normalize import from_iso, iso, now_utc
 from ..reactions.base import REACTION_SUBJECTS
 
 # ---------------------------------------------------------------------------
-# State dimension vocabulary — exactly Phase 6's reaction-side subjects
+# State dimension vocabulary — exactly Phase 6's later-side (legacy "reaction-side") subjects
 # (the observable monetary-policy dimensions). Shared with the reaction layer
 # so the two analyses never drift.
 # ---------------------------------------------------------------------------

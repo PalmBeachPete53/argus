@@ -19,7 +19,7 @@ Fact                                    ← Phase 4 (src/argus/facts/)
     ↓
 Temporal / Cross-Publication Analysis   ← Phase 5 (src/argus/changes/)
     ↓
-Policy Reaction Function                ← Phase 6 (src/argus/reactions/)  [FROZEN]
+Temporal Relationships                 ← Phase 6 (src/argus/reactions/)  [FROZEN]
     ↓
 Monetary Policy State                   ← Phase 7 (src/argus/states/)     [FROZEN]
     ↓

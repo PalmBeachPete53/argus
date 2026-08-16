@@ -1,16 +1,19 @@
-"""Phase 6 — the Policy Reaction Function model.
+"""Phase 6 — Temporal Relationships model (legacy class name ``PolicyReaction``).
 
-A ``PolicyReaction`` is a **derived, inferred relation between two existing
-``FactChange`` objects**: a condition-side change (an observed change in an
-economic condition) temporally followed, within a documented window, by a
-policy-side change (an observable monetary-policy response).
+A ``PolicyReaction`` (legacy name) models a **derived, inferred temporal
+relationship between two existing ``FactChange`` objects**: an earlier change
+(observed in an economic condition) temporally followed, within a documented
+window, by a later change (an observable monetary-policy change). This is a
+**descriptive temporal association** — it is not a central-bank reaction
+function, not a causal link, and not an input→output policy response.
 
-Epistemic boundary (see ``docs/REACTIONS.md``):
+Epistemic boundary (see ``docs/TEMPORAL_RELATIONSHIPS.md``):
 
 - ``Fact`` / ``FactChange`` are **observed** (Phases 4 /5).
-- A ``PolicyReaction`` is **inferred**: ``inferred`` is always ``True``, its
-  ``formulation`` is explicitly non-causal, and it is never presented as a
-  fact, as a "true" structural reaction function, or as causality.
+- A ``PolicyReaction`` / Temporal Relationship is **inferred**: ``inferred`` is
+  always ``True``, its ``formulation`` is explicitly non-causal, and it is
+  never presented as a fact, as a "true" structural reaction function, or as
+  causality.
 
 This layer never mutates the ``FactChange`` / ``Fact`` inputs, never reads
 source documents, and never uses LLM / network / fuzzy / semantic logic.
@@ -26,8 +29,9 @@ from ..facts.base import FactPeriod, FactValue
 from ..normalize import from_iso, iso, now_utc
 
 # ---------------------------------------------------------------------------
-# Condition-side vocabulary — observed economic conditions (Phases 4.1–4.7 subjects).
-# A FactChange on one of these subjects is a candidate *antecedent*.
+# Earlier-side (legacy "condition-side") vocabulary — observed economic
+# conditions (Phases 4.1–4.7 subjects). A FactChange on one of these subjects
+# is a candidate *antecedent*.
 # ---------------------------------------------------------------------------
 CONDITION_SUBJECTS = frozenset(
     {
@@ -45,9 +49,9 @@ CONDITION_SUBJECTS = frozenset(
 )
 
 # ---------------------------------------------------------------------------
-# Reaction-side vocabulary — observable monetary-policy responses (Phases 4.1–4.7
+# Later-side (legacy "reaction-side") vocabulary — observable monetary-policy changes (Phases 4.1–4.7
 # subjects). Risk assessments are assigned the reaction role (documented choice,
-# see docs/REACTIONS.md) — they are never used as a condition in this phase.
+# see docs/TEMPORAL_RELATIONSHIPS.md) — they are never used as a condition in this phase.
 # ---------------------------------------------------------------------------
 REACTION_SUBJECTS = frozenset(
     {

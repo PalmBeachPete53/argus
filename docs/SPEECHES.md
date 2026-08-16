@@ -55,10 +55,10 @@ Speech extraction MUST **never** infer, emit, or label:
 - conviction / importance;
 - surprise;
 - rate path;
-- implied policy reaction.
+- implied causal policy interpretation (no reaction-function / causality claim).
 
 A speech is **evidence**, not interpreted policy. It is never converted into a
-Phase 6 reaction, a Phase 7 state dimension, or a Phase 8 forex
+Phase 6 temporal relationship, a Phase 7 state dimension, or a Phase 8 forex
 fundamental. The boundary is hard:
 
 ```

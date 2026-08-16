@@ -893,17 +893,29 @@ Phase 9 reste `DEFERRED`.
   avertissements, persistance et coexistence Phase 4.1–4.7. **Suite complète :
   685 tests verts et déterministes.**
 
-## Phase 6 — Policy Reaction Function
+## Phase 6 — Temporal Relationships
 
-- **Objectif** : reconstruire empiriquement la réaction observable de la banque
-  centrale à inflation, croissance, emploi, conditions financières,
-  projections, risques, communication.
-- **Périmètre** : ne jamais présenter cette reconstruction comme une « fonction
-  de réaction vraie » : il s'agit d'une reconstruction empirique/inférée.
+> **Historique.** Ancienne Phase 13, anciennement « Policy Reaction Function » :
+> la phase a été recontextualisée en **relations temporelles** — elle établit
+> des relations **temporelles descriptives** entre changements observés
+> (`FactChange`), et ne modélise **pas** une fonction de réaction de banque
+> centrale, ni une causalité, ni une réponse de politique monétaire.
+
+- **Objectif** : enrichir l'historique des changements (Phase 5) par des
+  **relations temporelles entre changements observés** dans les communications
+  officielles — un changement postérieur observé après un changement antérieur,
+  dans une fenêtre temporelle définie, lorsque les deux changements satisfont
+  les critères de correspondance du système.
+- **Périmètre** : ne jamais présenter ces relations comme une « fonction de
+  réaction », une réponse de la banque centrale, ni une inférence causale —
+  uniquement une structure temporelle descriptive (`A observé avant B, dans la
+  fenêtre, selon les critères définis`).
 - **Livrables** : module d'analyse, tests, documentation.
 - **Dépendances** : Phase 5.
-- **Critères de validation** : le caractère inféré est explicite et non
-  présenté comme factuel.
+- **Critères de validation** : le caractère inféré/non-causal est explicite et
+  jamais présenté comme factuel ; ordre temporel, fenêtre, matching exact,
+  provenance des deux côtés, `lag_days` (distance temporelle), identifiants
+  déterministes, idempotence, no-look-ahead, isolation par banque.
 - **Statut** : `COMPLETE` (durcissement validé — voir « Current Position »).
 
 ## Phase 7 — Monetary Policy State
@@ -999,8 +1011,10 @@ Phase 9 reste `DEFERRED`.
   **État partiel (campagne 2025)** : la campagne E2E historique réelle sur 2025
   (banques actives, mécanismes existants) a validé une partie du périmètre —
   cohérence temporelle, absence de look-ahead, absence de duplication,
-  provenance complète, idempotence sur `facts → FactChanges → PolicyReactions`
-  (1654 publications, 1627 Facts, 1061 FactChanges, 19585 PolicyReactions,
+  provenance complète, idempotence sur `facts → FactChanges → relations
+  temporelles`
+  (1654 publications, 1627 Facts, 1061 FactChanges, 19585 relations
+  temporelles,
   0 erreur restante). Elle ne couvre **pas** encore la chaîne complète
   `facts → states → changes` (états Phase 7 et fondamentaux Phase 8 non
   rejoués sur les données historiques) et n'a pas produit le **jeu de
@@ -1173,26 +1187,28 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   chaînage consécutif F1→F2→F3 sans pont, règles delta, provenance verbatim,
   persistance idempotente, isolation par banque). **685 tests verts et
   déterministes**.
-- **PHASE -2 — POLICY REACTION FUNCTION (COMPLETE / FROZEN)** : `src/argus/reactions/`
-  validé — `PolicyReactionAnalyzer` pur et déterministe (v13.0.0), relation
-  **dérivée et inférée** `condition change → policy change` (`inferred=True`
-  constant, jamais un `Fact`, formulation explicitement **non-causale**) ;
-  vocabulaire canonique vérifié (10 sujets condition : inflation,
+- **PHASE 6 — TEMPORAL RELATIONSHIPS (COMPLETE / FROZEN)** : `src/argus/reactions/`
+  (anciennement « Policy Reaction Function ») validé — `PolicyReactionAnalyzer`
+  pur et déterministe (v13.0.0), relation **dérivée et inférée** entre un
+  changement antérieur et un changement postérieur (`inferred=True`
+  constant, jamais un `Fact`, formulation explicitement **non-causale** —
+  relation temporelle descriptive, pas une fonction de réaction) ;
+  vocabulaire canonique vérifié (10 sujets côté antérieur : inflation,
   core_inflation, inflation_expectations, gdp, growth, unemployment, wages,
-  labour_market, financial_conditions, fiscal_policy ; 9 sujets réaction :
+  labour_market, financial_conditions, fiscal_policy ; 9 sujets côté postérieur :
   policy_rate, main_refinancing_rate, deposit_facility_rate,
   marginal_lending_rate, policy_guidance, asset_purchase, risk,
-  inflation_risk, growth_risk — les risk assessments sont réaction seule,
-  jamais condition, choix documenté) ; règle temporelle `meeting_date` sinon
-  `publication_date`, **no-look-ahead** (`condition_observed_at ≤
-  policy_observed_at`), fenêtre `0 ≤ lag_days ≤ max_lag_days` (constante
+  inflation_risk, growth_risk — les risk assessments sont côté postérieur seul,
+  jamais antérieur, choix documenté) ; règle temporelle `meeting_date` sinon
+  `publication_date`, **no-look-ahead** (`earlier_observed_at ≤
+  later_observed_at`), fenêtre `0 ≤ lag_days ≤ max_lag_days` (constante
   documentée `DEFAULT_MAX_LAG_DAYS = 180`, paramètre explicite jamais ajusté
   sur données) ; **isolation stricte par `central_bank`** — propriété du
   `FactChange`, jamais résolue depuis la publication (un changement sans
   `central_bank` est ignoré : `unplaced_change:<change_id>`) ; identité
   déterministe `reaction_id` = SHA-256(central_bank,
-  condition_change_id, policy_change_id) ; pairement exhaustif (toute paire
-  éligible même banque → exactement une réaction) ; provenance verbatim
+  earlier_change_id, later_change_id) ; pairement exhaustif (toute paire
+  éligible même banque → exactement une relation temporelle) ; provenance verbatim
   dénormalisée des deux côtés jusqu'aux `FactChange`/`Fact`/publications ;
   avertissements observabilité (`missing_publication:<id>` — `change_id` si le
   changement n'a pas de `current_publication_id`, sinon id de publication ;
@@ -1204,11 +1220,11 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   aucune causalité, aucun look-ahead ; 8 fixtures golden/adversarial, tests
   négatifs explicites, isolation cross-banque, déterminisme ×2. **65 tests
   dédiés — suite complète : 750 tests verts et déterministes.**
-- **PHASE -1 — MONETARY POLICY STATE (COMPLETE)** : `src/argus/states/`
+- **PHASE 7 — MONETARY POLICY STATE (COMPLETE)** : `src/argus/states/`
   validé — `MonetaryPolicyStateAnalyzer` pur et déterministe (v14.0.0), état
   **dérivé, daté et synthétisé** des dimensions de politique monétaire
   observables (`synthesized=True` constant, jamais un `Fact`, jamais une
-  interprétation) ; dimensions = vocabulaire réaction Phase 6
+  interprétation) ; dimensions = vocabulaire des relations temporelles Phase 6
   (`STATE_SUBJECTS = REACTION_SUBJECTS` : policy_rate,
   main_refinancing_rate, deposit_facility_rate, marginal_lending_rate,
   policy_guidance, asset_purchase, risk, inflation_risk, growth_risk) ;
@@ -1237,12 +1253,12 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   cible documentés (`stance`, `direction`, `rate_expectation`, `labour_risk`,
   `confidence` non structurés par les données → exclus, jamais inventés) ; 74
   tests dédiés — **suite complète : 827 tests verts et déterministes.**
-- **PHASE 0 — FOREX FUNDAMENTALS (COMPLETE)** : `src/argus/forex/` validé —
+- **PHASE 8 — FOREX FUNDAMENTALS (COMPLETE)** : `src/argus/forex/` validé —
   `ForexFundamentalsAnalyzer` pur et déterministe (v15.0.0), couche
   **dérivée, datée et synthétisée** de fondamentaux + différentiels
   inter-économies (`synthesized=True` constant, jamais un `Fact`, jamais une
   interprétation) ; **dimensions = vocabulaire condition Phase 6 ∪ vocabulaire
-  réaction Phase 7** (`FUNDAMENTAL_SUBJECTS = MACRO_SUBJECTS ∪
+  relations temporelles Phase 7** (`FUNDAMENTAL_SUBJECTS = MACRO_SUBJECTS ∪
   MONETARY_SUBJECTS`, réutilisés des couches canoniques, jamais re-déclarés) ;
   une dimension = lineage indépendant de la devise (subject, predicate,
   value_kind, période canonique, qualifier, publication_type), `dimension_key`
@@ -1328,7 +1344,7 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
 - **Validation E2E historique 2025 (données réelles)** — campagne sur les
   banques actives (fenêtre 2025, mécanismes existants uniquement) : 1654
   publications, 375 documents, **1627 Facts, 1061 FactChanges, 19585
-  PolicyReactions**, 0 erreur restante ; invariants Phase 5/6 vérifiés
+  relations temporelles**, 0 erreur restante ; invariants Phase 5/6 vérifiés
   (matching exact, même banque, ordre temporel, provenance des deux côtés,
   no-look-ahead, lag ≤ 180 j, ids déterministes, idempotence). **3 bugs réels
   trouvés et corrigés** : collision de `fact_id` (change facts sans
@@ -1348,8 +1364,8 @@ Fonctionnalités qui ne doivent pas être implémentées prématurément :
 - Extracteurs spécialisés (Phase 4, sous-phases 4.1–4.7) qui ne s'appuient pas
   sur le modèle `Fact`, la provenance et le contrat `ExtractionResult` définis
   en Phase 4.
-- Analyse temporelle, fonction de réaction, état de politique monétaire et
-  fondamentaux Forex avant les Phases 5–8.
+- Interprétation causale ou « fonction de réaction » attribuée aux relations
+  temporelles de la Phase 6 (les relations sont descriptives, non causales).
 - **Couche de trading / signaux** (Phase 10) tant que le cœur (collecte,
   normalisation, classification, extraction de faits) n'est pas stabilisé et
   isolé.

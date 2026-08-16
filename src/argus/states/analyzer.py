@@ -8,7 +8,7 @@ deterministic.
 State rules (documented in ``docs/MONETARY_POLICY_STATE.md``):
 
 1. A ``FactChange`` is a state observation when its ``subject`` is in
-   ``STATE_SUBJECTS`` (Phase 6's reaction-side vocabulary). A change with no
+   ``STATE_SUBJECTS`` (Phase 6's later-side (legacy "reaction-side") vocabulary). A change with no
    such subject is irrelevant and silently skipped.
 2. The observed value is the change's **current side** (the newest known level
    of the dimension), copied verbatim — never invented, never converted.
