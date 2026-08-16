@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { discoveryProgress, rangeStatus } from "./discovery";
+import { discoveryProgress, discoveryView, rangeStatus } from "./discovery";
+import type { DiscoveryRun } from "../types";
 
 describe("rangeStatus — Discovery launch precondition", () => {
   it("allows a run when both dates are present and ordered", () => {
@@ -91,5 +92,102 @@ describe("discoveryProgress — Core-driven source progression", () => {
     expect(Number.isNaN(p.fraction)).toBe(false);
     expect(Number.isNaN(p.percent)).toBe(false);
     expect(discoveryProgress(Number.NaN, Number.NaN)).toEqual(discoveryProgress(0, 0));
+  });
+});
+
+const run = (over: Partial<DiscoveryRun>): DiscoveryRun => ({
+  run_id: "20260816T182505-83606",
+  status: "completed",
+  started_at: "2026-08-16T18:25:05Z",
+  finished_at: "2026-08-16T18:26:11Z",
+  error: null,
+  candidates: 32,
+  banks: ["fed"],
+  pid: null,
+  date_start: "2026-01-01",
+  date_end: "2026-08-16",
+  sources_total: 32,
+  sources_completed: 32,
+  new: 5,
+  known: 27,
+  ...over,
+});
+
+describe("discoveryView — current Discovery versus history", () => {
+  it("keeps a completed run as the current Discovery when the cache has candidates", () => {
+    const view = discoveryView(run({}));
+    expect(view.hasRun).toBe(true);
+    expect(view.showCurrentCard).toBe(true);
+    expect(view.showProgressBar).toBe(true);
+    expect(view.showResults).toBe(true);
+    expect(view.canClear).toBe(true);
+    expect(view.showStatusPill).toBe(true);
+    expect(view.emptyHeading).toBeNull();
+  });
+
+  it("after clearing the cache: card, bar, results and pill all disappear", () => {
+    // Exactly the post-clear store snapshot from the real clear command:
+    // status stays "completed", timestamps and run_id survive, candidates are 0.
+    const view = discoveryView(run({ status: "completed", candidates: 0, new: 0, known: 0 }));
+    expect(view.hasRun).toBe(true); // history kept
+    expect(view.showCurrentCard).toBe(false); // no Status / Run ID / Date range / stats
+    expect(view.showProgressBar).toBe(false); // no source-progression bar
+    expect(view.showResults).toBe(false); // no candidates table
+    expect(view.emptyHeading).toBe("No active Discovery");
+    expect(view.canClear).toBe(true);
+  });
+
+  it("clear stays enabled on a cleared report (idempotent backend keep)", () => {
+    const view = discoveryView(run({ status: "completed", candidates: 0 }));
+    expect(view.canClear).toBe(true);
+  });
+
+  it("running campaign keeps the live card and bar but refrains from showing results", () => {
+    const view = discoveryView(run({ status: "running", candidates: 0, sources_completed: 17 }));
+    expect(view.showCurrentCard).toBe(true);
+    expect(view.showProgressBar).toBe(true);
+    expect(view.showResults).toBe(false);
+    expect(view.showStatusPill).toBe(true);
+    expect(view.emptyHeading).toBeNull();
+    // The Core refuses to clear an active campaign; the button stays disabled.
+    expect(view.canClear).toBe(false);
+  });
+
+  it("paused campaign mirrors the running behavior", () => {
+    const view = discoveryView(run({ status: "paused", candidates: 0, sources_completed: 17 }));
+    expect(view.showCurrentCard).toBe(true);
+    expect(view.showProgressBar).toBe(true);
+    expect(view.showResults).toBe(false);
+    expect(view.canClear).toBe(false);
+  });
+
+  it("stopped run: no card / bar / results, banner owns the state, history kept", () => {
+    const view = discoveryView(run({ status: "stopped", candidates: 0, error: "stopped by user" }));
+    expect(view.hasRun).toBe(true);
+    expect(view.showCurrentCard).toBe(false);
+    expect(view.showProgressBar).toBe(false);
+    expect(view.showResults).toBe(false);
+    expect(view.emptyHeading).toBeNull(); // the "Discovery stopped" banner shows instead
+    expect(view.canClear).toBe(true);
+  });
+
+  it("failed run: no card / bar / results, failure banner owns the state", () => {
+    const view = discoveryView(run({ status: "failed", candidates: 0, error: "campaign failed" }));
+    expect(view.showCurrentCard).toBe(false);
+    expect(view.showProgressBar).toBe(false);
+    expect(view.showResults).toBe(false);
+    expect(view.emptyHeading).toBeNull();
+    expect(view.canClear).toBe(true);
+  });
+
+  it("idle (nothing ever ran) is the neutral empty state with no history", () => {
+    const view = discoveryView(run({ run_id: null, status: "idle", candidates: 0, started_at: null, finished_at: null }));
+    expect(view.hasRun).toBe(false);
+    expect(view.showCurrentCard).toBe(false);
+    expect(view.showProgressBar).toBe(false);
+    expect(view.showResults).toBe(false);
+    expect(view.showStatusPill).toBe(false);
+    expect(view.emptyHeading).toBe("No active Discovery");
+    expect(view.canClear).toBe(false);
   });
 });

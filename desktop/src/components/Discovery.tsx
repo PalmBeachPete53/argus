@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { DiscoveryCandidate, DiscoveryRun } from "../types";
 import type { DiscoveryState } from "./MainContent";
 import { formatDate, formatDateTime } from "../lib/format";
-import { rangeStatus, REQUIRED_RANGE_HINT, INVALID_RANGE_HINT, discoveryProgress } from "../lib/discovery";
+import { rangeStatus, REQUIRED_RANGE_HINT, INVALID_RANGE_HINT, discoveryProgress, discoveryView } from "../lib/discovery";
 import ConfirmDialog from "./ConfirmDialog";
 
 interface DiscoveryProps {
@@ -176,7 +176,8 @@ export default function Discovery({ discovery }: DiscoveryProps) {
   const running = status.status === "running";
   const paused = status.status === "paused";
   const active = (running || paused) && !starting;
-  const hasRun = status.run_id !== null;
+  const view = discoveryView(status);
+  const hasRun = view.hasRun;
 
   const range =
     status.date_start || status.date_end
@@ -193,13 +194,11 @@ export default function Discovery({ discovery }: DiscoveryProps) {
     void discovery.launch(dateFrom, exclusiveEnd(dateTo));
   };
 
-  const showResults = !active && (status.status === "completed" || status.status === "cancelled" || status.status === "stopped");
-
   return (
     <div className="discovery-view">
       <div className="discovery-head">
         <h1 className="view-title">Discovery</h1>
-        {status.status !== "idle" && <StatusPill status={status.status} />}
+        {view.showStatusPill && <StatusPill status={status.status} />}
       </div>
 
       {error && <div className="data-browser-error">{error}</div>}
@@ -244,6 +243,14 @@ export default function Discovery({ discovery }: DiscoveryProps) {
           >
             Run Discovery
           </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={!view.canClear}
+            onClick={() => setConfirmClear(true)}
+          >
+            Clear Discovery Cache
+          </button>
           {active &&
             (paused ? (
               <button
@@ -268,35 +275,23 @@ export default function Discovery({ discovery }: DiscoveryProps) {
         </div>
       </section>
 
-      <section className="discovery-card" aria-label="Discovery status">
+      {view.showCurrentCard && (
+      <section className="discovery-card" aria-label="Current Discovery">
         <dl className="discovery-summary">
           <div className="discovery-summary-row">
             <dt>Status</dt>
-            <dd>{hasRun ? status.status : "No run yet"}</dd>
+            <dd>{status.status}</dd>
           </div>
           <div className="discovery-summary-row">
             <dt>Run ID</dt>
             <dd>{status.run_id ?? "—"}</dd>
           </div>
           <div className="discovery-summary-row">
-            <dt>Last run</dt>
-            <dd>{formatDateTime(status.started_at)}</dd>
-          </div>
-          {status.finished_at && (
-            <div className="discovery-summary-row">
-              <dt>Finished</dt>
-              <dd>{formatDateTime(status.finished_at)}</dd>
-            </div>
-          )}
-          <div className="discovery-summary-row">
             <dt>Date range</dt>
             <dd>{hasRun ? range : "—"}</dd>
           </div>
         </dl>
-        {hasRun && !starting &&
-          (status.status === "running" || status.status === "paused" || status.status === "completed") && (
-          <CampaignProgress status={status} />
-        )}
+        {!starting && view.showProgressBar && <CampaignProgress status={status} />}
         <div className="discovery-stats">
           <div className="stat-card">
             <span className="stat-value">{status.candidates.toLocaleString()}</span>
@@ -312,6 +307,23 @@ export default function Discovery({ discovery }: DiscoveryProps) {
           </div>
         </div>
       </section>
+      )}
+
+      {hasRun && (
+        <section className="discovery-card" aria-label="Discovery history">
+          <h2 className="discovery-section-title">Discovery History</h2>
+          <dl className="discovery-summary">
+            <div className="discovery-summary-row">
+              <dt>Last Run</dt>
+              <dd>{formatDateTime(status.started_at)}</dd>
+            </div>
+            <div className="discovery-summary-row">
+              <dt>Finished</dt>
+              <dd>{status.finished_at ? formatDateTime(status.finished_at) : "—"}</dd>
+            </div>
+          </dl>
+        </section>
+      )}
 
       {starting && (
         <div className="discovery-empty">
@@ -344,7 +356,13 @@ export default function Discovery({ discovery }: DiscoveryProps) {
         </div>
       )}
 
-      {showResults && (
+      {!active && !starting && view.emptyHeading && (
+        <div className="discovery-empty">
+          <p className="data-browser-muted">{view.emptyHeading}</p>
+        </div>
+      )}
+
+      {view.showResults && (
         <div className="discovery-results">
           {status.status === "completed" && (
             <p className="discovery-count">
@@ -395,17 +413,6 @@ export default function Discovery({ discovery }: DiscoveryProps) {
           {selected && <CandidateDetail candidate={selected} onOpen={(url) => void openUrl(url)} />}
         </div>
       )}
-
-      <div className="discovery-clear">
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={active || !hasRun}
-          onClick={() => setConfirmClear(true)}
-        >
-          Clear Discovery Cache
-        </button>
-      </div>
 
       <ConfirmDialog
         open={confirmClear}
