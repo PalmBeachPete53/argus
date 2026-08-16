@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 from collections import Counter
@@ -8,7 +9,33 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .collector import CentralBankCollector
+from .config import enabled_banks, is_bank_enabled
 from .registry import SourceRegistry
+
+
+def _search_provider_from_env():
+    """Build an optional SearchProvider from environment configuration.
+
+    Argus works entirely without a search provider; when configured it is used
+    only as a *fallback* for sources that declare a ``search_query``.
+    """
+    provider = os.environ.get("SEARCH_PROVIDER", "").strip().lower()
+    if not provider:
+        return None
+    if provider == "searxng":
+        from .search import SearxngSearchProvider
+
+        base_url = os.environ.get("SEARXNG_BASE_URL", "").strip()
+        if not base_url:
+            print("SEARCH_PROVIDER=searxng requires SEARXNG_BASE_URL", file=sys.stderr)
+            return None
+        engines = tuple(
+            e.strip() for e in os.environ.get("SEARXNG_ENGINES", "").split(",") if e.strip()
+        )
+        language = os.environ.get("SEARXNG_LANGUAGE", "").strip()
+        return SearxngSearchProvider(base_url, engines=engines, language=language)
+    print(f"unknown SEARCH_PROVIDER={provider!r}", file=sys.stderr)
+    return None
 
 
 def _print_publication(pub) -> None:
@@ -235,7 +262,8 @@ def main(argv=None) -> int:
     registry = SourceRegistry()
     if args.list_banks:
         for bank in registry.banks:
-            print(f"{bank.id:>9}  {bank.name:<28} {bank.currency}  {bank.official_domain}")
+            state = "ON" if is_bank_enabled(bank.id) else "OFF"
+            print(f"{bank.id:>9}  {state:>3}  {bank.name:<28} {bank.currency}  {bank.official_domain}")
             for source in registry.sources_for_bank(bank.id):
                 status = "enabled" if source.enabled else "disabled"
                 print(f"          {source.priority:>3}  {status:<8} {source.id:<36} "
@@ -248,7 +276,7 @@ def main(argv=None) -> int:
               f"{raw_entries} entrie(s) under {args.raw_root}")
         return 0
 
-    banks = tuple(args.bank) if args.bank else None
+    banks = tuple(args.bank) if args.bank else enabled_banks()
     pub_ids = tuple(args.publication) if args.publication else None
 
     if args.normalize or args.classify or args.report:
@@ -266,6 +294,7 @@ def main(argv=None) -> int:
         store=args.store,
         http_config=config,
         raw_root=args.raw_root,
+        search_provider=_search_provider_from_env(),
     )
     banks = tuple(args.bank) if args.bank else None
     source_ids = tuple(args.source) if args.source else None

@@ -133,6 +133,19 @@ def test_pdf_scanned_document_reported(tmp_path):
     assert normalized.text == ""
 
 
+def test_pdf_digit_space_collapse():
+    """pypdf artifact spaces inside numbers are collapsed; line breaks and
+    letter spaces are preserved."""
+    from argus.documents.pdf import collapse_digit_spaces
+
+    assert collapse_digit_spaces("July 31, 202 6") == "July 31, 2026"
+    assert collapse_digit_spaces("around 1.0 5 percent") == "around 1.05 percent"
+    assert collapse_digit_spaces("voted by an 8-1 majority") == "voted by an 8-1 majority"
+    assert collapse_digit_spaces("operati ons and V oting") == "operati ons and V oting"
+    # a line break between digits is preserved (not a digit-space artifact)
+    assert collapse_digit_spaces("rate 1.0\n6.0 next") == "rate 1.0\n6.0 next"
+
+
 def test_pdf_missing_file(tmp_path):
     doc = Document(
         publication_id="pub-1",

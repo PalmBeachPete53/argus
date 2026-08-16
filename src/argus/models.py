@@ -43,6 +43,15 @@ class DiscoverySpec:
     keep_documents: bool = False
     lookback_window_days: int | None = None
     params: dict[str, Any] = field(default_factory=dict)
+    # Search Discovery fallback (optional, per source). When ``search_query`` is
+    # set and native discovery is unavailable (or, if ``search_fallback_on_empty``,
+    # yields no results), the source falls back to a SearchProvider. Search results
+    # are filtered to ``search_domain`` when set. Search is a discovery mechanism
+    # only — it never fetches document content.
+    search_query: str | None = None
+    search_domain: str | None = None
+    search_engines: tuple[str, ...] = ()
+    search_fallback_on_empty: bool = False
 
 
 @dataclass(frozen=True, slots=True)

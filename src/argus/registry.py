@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from . import models
 from .adapters import ALL_ADAPTERS, BankAdapter
+from .config import is_bank_enabled
 
 
 class SourceRegistry:
@@ -18,7 +19,13 @@ class SourceRegistry:
 
     @property
     def banks(self) -> list[models.CentralBank]:
+        """Every registered bank, including disabled ones (they remain known)."""
         return [self._banks[b] for b in self._banks]
+
+    @property
+    def active_banks(self) -> list[models.CentralBank]:
+        """Banks that currently participate in operational executions."""
+        return [b for b in self._banks.values() if is_bank_enabled(b.id)]
 
     def bank(self, bank_id: str) -> models.CentralBank | None:
         return self._banks.get(bank_id)
@@ -49,6 +56,8 @@ class SourceRegistry:
             if source_ids is not None and source.id not in source_ids:
                 continue
             if not source.enabled:
+                continue
+            if not is_bank_enabled(source.central_bank):
                 continue
             selected.append(source)
         return selected

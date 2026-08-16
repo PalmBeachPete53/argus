@@ -39,6 +39,12 @@ class RBAAdapter(BankAdapter):
                 "RBA media releases RSS (incl. policy decisions)",
                 "https://www.rba.gov.au/rss/rss-cb-media-releases.xml",
                 priority=1,
+                # Search Discovery fallback: rba.gov.au blocks automated native
+                # access from some environments (HTTP 403). The query is
+                # constrained to the official domain and the decision wording.
+                search_query='site:rba.gov.au "Monetary Policy Decision"',
+                search_domain="rba.gov.au",
+                search_engines=(),
             ),
             rss_source(
                 "rba_smp_rss",

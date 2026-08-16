@@ -173,7 +173,7 @@ class BoeDecisionExtractor(DecisionExtractor):
         if not levels:
             result.warnings.append("no_bank_rate")
 
-        for index, source, amount, delta in self._rate_changes(document):
+        for ordinal, (index, source, amount, delta) in enumerate(self._rate_changes(document)):
             result.add(
                 Fact(
                     publication_id=result.publication_id,
@@ -186,6 +186,7 @@ class BoeDecisionExtractor(DecisionExtractor):
                     extraction_method=METHOD_REGEX,
                     extraction_version=EXTRACTION_VERSION,
                     confidence=Confidence.HIGH,
+                    identity_qualifier=f"change:{ordinal}",
                 )
             )
 
@@ -261,7 +262,7 @@ class BoeDecisionExtractor(DecisionExtractor):
                 else:  # "percentage points" → basis points (1 pp = 100 bps)
                     delta = magnitude * 100
                 verb = match.group("verb").lower()
-                sign = -1 if re.search(r"(?:lower|decrease|reduce|cut|drop|ease)", verb) else 1
+                sign = -1 if re.search(r"\b(?:lower|decrease|reduce|cut|drop|ease)\b", verb) else 1
                 changes.append((index, _sentence_around(text, match.start()), amount, round(sign * delta, 2)))
         return changes
 

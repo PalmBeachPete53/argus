@@ -548,6 +548,11 @@ def test_broad_feed_declares_no_type():
     assert types_of("boe_news_rss") == ()
     assert types_of("boj_whatsnew_rss") == ()
 
+    # RBNZ: the OCR decision timeline is a mixed-family source ("media releases
+    # + MPS"): it must not declare a single decision type, otherwise every MPS
+    # item discovered through it is forced into a HIGH-confidence decision.
+    assert types_of("rbnz_ocr_decisions") == ()
+
     # Type-specific sources still declare their type.
     assert types_of("boc_fad_archive") == ("monetary_policy_decision",)
     assert types_of("norges_mpr_rss") == ("monetary_policy_report",)

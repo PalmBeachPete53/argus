@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from io import BytesIO
 
 from ..normalize import now_utc
@@ -14,6 +15,16 @@ from .base import (
     NormalizedDocument,
 )
 from ._util import make_unavailable, strip_noise_lines
+
+
+def collapse_digit_spaces(text: str) -> str:
+    """Collapse a space/tab sitting between two digits — an extraction artifact.
+
+    pypdf sometimes emits a spurious space inside a number (e.g. a 4-digit
+    year "202 6" or a rate "1.0 5"). A space/tab between two digits is almost
+    always such an artifact; a line break between digits is preserved.
+    """
+    return re.sub(r"(?<=\d)[ \t]+(?=\d)", "", text)
 
 
 class PdfParser(DocumentParser):
@@ -60,6 +71,10 @@ class PdfParser(DocumentParser):
             except Exception:
                 page_text = ""
             page_text = strip_noise_lines(page_text)
+            # pypdf sometimes inserts spurious spaces inside numbers (e.g. a
+            # 4-digit year "202 6" or a rate "1.0 5"); collapse digit-separated
+            # spaces. A line break between digits is preserved.
+            page_text = collapse_digit_spaces(page_text)
             page_number = index + 1
             pages.append(DocumentPage(number=page_number, text=page_text))
             sections.append(

@@ -88,9 +88,11 @@ _DATE_TOKEN = re.compile(
 
 # The short-term policy target: "… so that the uncollateralized overnight call
 # rate will be formed at around 0.5 percent". "around" marks the target as an
-# approximate level — kept as an explicit source-stated numeric target.
+# approximate level — kept as an explicit source-stated numeric target. The real
+# source spells the unit as both "%" and the word "percent", so both are accepted.
 _LEVEL = re.compile(
-    rf"uncollateralized\s+overnight\s+call\s+rate[^.]*?\b(?:at\s+around|at)\s+(?P<token>{_RATE_ITEM}\s*%)",
+    rf"uncollateralized\s+overnight\s+call\s+rate[^.]*?\b(?:at\s+around|at)\s+"
+    rf"(?P<token>{_RATE_ITEM}\s*(?:%|percent))",
     re.IGNORECASE,
 )
 
@@ -132,7 +134,9 @@ _RISK_ORIENTATION = re.compile(r"\b(?:downside|upside|two-sided|symmetric|broadl
 
 
 def _split_sentences(text: str) -> list[str]:
-    return [part.strip() for part in re.split(r"(?<=\.)\s+", text or "") if part.strip()]
+    # Break on sentence end AND on paragraph boundaries (blank lines): PDF
+    # extraction lays the BoJ statement out as paragraphs, not sentences.
+    return [part.strip() for part in re.split(r"(?<=\.)\s+|\n\s*\n", text or "") if part.strip()]
 
 
 class BojStatementExtractor(StatementExtractor):

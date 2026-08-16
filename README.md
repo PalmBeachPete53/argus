@@ -167,3 +167,7 @@ website. Binary fixtures (PDF / DOCX / XLSX) are generated at test time by
 - `docs/SOURCES.md` — the verified research matrix of official sources per bank
   (RSS / sitemap / HTML archives / calendars / APIs), with the source IDs used by
   each adapter.
+- `docs/SEARCH_DISCOVERY.md` — the optional Search Discovery fallback (SearXNG):
+  architecture, per-source configuration, fallback semantics and provenance.
+- `docs/BANKS.md` — the central bank enable/disable toggle: where it is
+  configured, the current ON/OFF state, and how to re-enable a bank.

@@ -16,8 +16,6 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-import pytest
-
 from argus.adapters.boc import BoCAdapter
 from argus.classification import PublicationClassifier
 from argus.classification.base import Confidence
@@ -29,7 +27,8 @@ from argus.registry import SourceRegistry
 from argus.reports import get_extractor, extract_report
 from argus.reports.boc import BocReportExtractor
 from argus.store import Store
-from conftest import FakeSession, make_client, make_store, response
+from conftest import FakeSession, make_client, response
+from l4_harness import fact_signature as _signature
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -286,17 +285,6 @@ def test_generic_qualitative_language_no_fact():
     assert not any("is important" in (f.source_text or "").lower() for f in result.facts)
 
 
-def _signature(fact) -> tuple:
-    kind = fact.value.kind.value if hasattr(fact.value.kind, "value") else fact.value.kind
-    if fact.period:
-        pkind = fact.period.kind
-        pkind_str = pkind.value if hasattr(pkind, "value") else pkind
-        period = f"{pkind_str}:{fact.period.value}"
-    else:
-        period = None
-    return (fact.subject, fact.predicate, kind, fact.value.value, period)
-
-
 # ---------------------------------------------------------------------------
 # Determinism, order independence, immutability
 # ---------------------------------------------------------------------------
@@ -338,64 +326,36 @@ def test_source_immutability():
 
 # ---------------------------------------------------------------------------
 # End-to-end persistence: discover → fetch → normalize → classify → extract →
-# persist → retrieve, with idempotent re-extraction.
+# persist → retrieve, with idempotent re-extraction. Driven through the shared
+# L4 harness so the same invariants apply to every bank/family.
 # ---------------------------------------------------------------------------
 
 
 def test_integration_end_to_end_persistence(tmp_path, fixture_bytes):
-    store = make_store(tmp_path)
-    session = FakeSession({
-        MPR_FEED_URL: response(fixture_bytes("boc_mpr_feed.xml"), url=MPR_FEED_URL, content_type="application/xml"),
-        MPR_URL: response(fixture_bytes("documents/boc_report.html"), url=MPR_URL, content_type="text/html"),
-    })
-    registry = SourceRegistry()
-    client = make_client(session)
+    from l4_harness import run_l4_end_to_end
 
-    # discover
-    source = _adapter_source("boc_mpr_feed")
-    pubs = create_strategy(source, client).discover()
-    mpr_pub = next(p for p in pubs if p.url == MPR_URL)
-    stored = store.upsert_publication(mpr_pub)
-    assert stored.id
-
-    # classify (authoritative classifications table)
-    classifier = PublicationClassifier(store=store, registry=registry)
-    classification = classifier.classify(stored)
-    assert classification.publication_type == "monetary_policy_report"
-    store.set_classification(
-        stored.id, central_bank="boc", publication_type=classification.publication_type,
-        confidence=classification.confidence.value, method=classification.method,
-        evidence=classification.evidence, classified_at=classification.classified_at,
+    _, _, _, facts, _ = run_l4_end_to_end(
+        adapter=BoCAdapter(),
+        source_id="boc_mpr_feed",
+        discovery_fixture="boc_mpr_feed.xml",
+        document_fixture="documents/boc_report.html",
+        target_url=MPR_URL,
+        expected_type="monetary_policy_report",
+        extract=extract_report,
+        expected_extractor=BocReportExtractor,
+        qualifier_prefix="report:",
+        expected_facts={
+            ("inflation", "value", "percentage", 2.1, "year:2026"),
+            ("gdp", "value", "percentage", 1.8, "year:2027"),
+            ("unemployment", "value", "percentage", 5.8, "year:2026"),
+            ("inflation_risk", "assessment", "categorical", "balanced", None),
+        },
+        fixture_bytes=fixture_bytes,
+        tmp_path=tmp_path,
     )
 
-    # fetch + normalize the official MPR page
-    from argus.documents import Normalizer
-    from argus.fetcher import Fetcher
-
-    fetcher = Fetcher(client, store, tmp_path / "raw")
-    fetch = fetcher.fetch(stored)
-    assert fetch.ok, fetch.failed_urls
-    Normalizer(store=store, raw_root=tmp_path / "raw").normalize_publication(stored)
-    docs = store.normalized_documents_for_publication(stored.id)
-    assert docs and all(getattr(d, "ok", False) for d in docs)
-
-    # extract via the generic Report entry point (classification-gated)
-    results = extract_report(store, stored)
-    assert len(results) == 1
-    result = results[0]
-    assert result.publication_id == stored.id
-    assert {_signature(f) for f in result.facts}
-
-    # retrieve persisted facts and verify provenance survived
-    facts = store.get_facts(publication_id=stored.id)
-    assert facts
+    # BoC-specific: MPR facts are never decision or projection facts.
     for fact in facts:
-        assert fact.source_text
-        assert fact.extraction_version
-        assert fact.identity_qualifier.startswith("report:")
-        assert fact.document_id
-
-    # idempotent re-extraction: deterministic fact_ids, no duplication
-    extract_report(store, stored)
-    again = store.get_facts(publication_id=stored.id)
-    assert [f.resolve_id() for f in facts] == [f.resolve_id() for f in again]
+        assert fact.subject != "policy_rate"
+        assert fact.subject != "monetary_policy_decision"
+        assert fact.predicate != "projection"
