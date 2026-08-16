@@ -31,7 +31,7 @@ from typing import Any
 
 from ..facts.base import FactPeriod, FactValue
 from ..normalize import from_iso, iso, now_utc
-from ..reactions.base import REACTION_SUBJECTS
+from ..temporal_relationships.base import LATER_SUBJECTS as REACTION_SUBJECTS
 
 # ---------------------------------------------------------------------------
 # State dimension vocabulary — exactly Phase 6's later-side (legacy "reaction-side") subjects

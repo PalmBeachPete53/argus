@@ -158,13 +158,13 @@ SHA-256 fingerprint and provenance in the SQLite store (`data/argus.db`).
 ```python
 from argus.store import Store
 from argus.config import enabled_banks
-from argus.changes import analyze_changes      # Phase 5
-from argus.reactions import analyze_reactions  # Phase 6
+from argus.changes import analyze_changes                        # Phase 5
+from argus.temporal_relationships import analyze_temporal_relationships  # Phase 6
 
 store = Store("data/argus.db")
 for bank in enabled_banks():                          # the active banks
     analyze_changes(store, bank=bank, persist=True)      # → FactChanges
-    analyze_reactions(store, bank=bank, persist=True)    # → Temporal Relationships (legacy API name)
+    analyze_temporal_relationships(store, bank=bank, persist=True)  # → Temporal Relationships
 ```
 
 Extraction is performed through the gated per-family entry points

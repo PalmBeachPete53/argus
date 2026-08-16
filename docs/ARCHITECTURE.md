@@ -129,10 +129,11 @@ documents are re-tried on later runs up to a per-document retry budget.
   change_type (numeric/qualitative/text_changed), denormalized provenance of
   **both** source Facts (publication, document, value, period, effective date,
   verbatim source text), delta (numeric only), analysis_version, analyzed_at
-- `PolicyReaction` (Phase 6) — reaction_id (deterministic SHA-256 over
-  central_bank + condition_change_id + policy_change_id), inferred (constant
-  `True`), condition side + policy side (each a denormalized `FactChange`
-  provenance), lag_days, max_lag_days, non-causal formulation, analysis_version
+- `TemporalRelationship` (Phase 6, legacy class name `PolicyReaction`) —
+  reaction_id (deterministic SHA-256 over central_bank + condition_change_id +
+  policy_change_id), inferred (constant `True`), earlier side + later side (each
+  a denormalized `FactChange` provenance, stored as condition_*/policy_*),
+  lag_days, max_lag_days, non-causal formulation, analysis_version
 - `MonetaryPolicyState` (Phase 7) — state_id (deterministic SHA-256 over
   central_bank + source_change_id), synthesized (constant `True`), one policy
   dimension (subject, predicate, value_kind, qualifier, period, authoritative
@@ -318,27 +319,27 @@ never an economic interpretation. It is derived data: `fact_changes` is
 rebuilt idempotently per bank (`rebuild_changes`), empty results clear the
 scope, and source `Fact`s are never modified. See `docs/CHANGES.md`.
 
-## Phase 6 — Temporal Relationships (`reactions/`, legacy module name)
+## Phase 6 — Temporal Relationships (`temporal_relationships/`, legacy module name `reactions/`)
 
-`PolicyReactionAnalyzer` (legacy class name) derives **inferred, non-causal
-temporal associations** between Phase 5 `FactChange`s: an earlier change
-(antecedent vocabulary: inflation, core_inflation, inflation_expectations, gdp,
-growth, unemployment, wages, labour_market, financial_conditions,
-fiscal_policy) temporally followed by a later change (subsequent vocabulary:
-policy_rate, main_refinancing_rate, deposit_facility_rate,
-marginal_lending_rate, policy_guidance, asset_purchase, risk, inflation_risk,
-growth_risk). The observation time of each change is the temporal reference of
-its current-side publication (`meeting_date`, else `publication_date`). The
-`central_bank` used to group changes is a property of the `FactChange`, never
-resolved from the publication (a change without one is skipped with
-`unplaced_change`). Pairing is per central bank, requires **no look-ahead**
-(`earlier_observed_at ≤ later_observed_at`) and a lag within the documented
-window (`DEFAULT_MAX_LAG_DAYS = 180`); every eligible pair yields exactly one
-Temporal Relationship (legacy class `PolicyReaction`). A relationship is never
-a Fact, never causal, never a central-bank reaction function, and carries no
-stance/trading interpretation. It is derived data: `policy_reactions` is
-rebuilt idempotently per bank (`rebuild_reactions`), empty results clear the
-scope, and source `Fact`s / `FactChange`s are never modified. See
+`TemporalRelationshipAnalyzer` (legacy class name `PolicyReactionAnalyzer`)
+derives **inferred, non-causal temporal associations** between Phase 5
+`FactChange`s: an earlier change (antecedent vocabulary: inflation,
+core_inflation, inflation_expectations, gdp, growth, unemployment, wages,
+labour_market, financial_conditions, fiscal_policy) temporally followed by a
+later change (subsequent vocabulary: policy_rate, main_refinancing_rate,
+deposit_facility_rate, marginal_lending_rate, policy_guidance, asset_purchase,
+risk, inflation_risk, growth_risk). The observation time of each change is the
+temporal reference of its current-side publication (`meeting_date`, else
+`publication_date`). The `central_bank` used to group changes is a property of
+the `FactChange`, never resolved from the publication (a change without one is
+skipped with `unplaced_change`). Pairing is per central bank, requires **no
+look-ahead** (`earlier_observed_at ≤ later_observed_at`) and a lag within the
+documented window (`DEFAULT_MAX_LAG_DAYS = 180`); every eligible pair yields
+exactly one Temporal Relationship. A relationship is never a Fact, never causal,
+never a central-bank reaction function, and carries no stance/trading
+interpretation. It is derived data: `policy_reactions` is rebuilt idempotently
+per bank (`rebuild_temporal_relationships`), empty results clear the scope, and
+source `Fact`s / `FactChange`s are never modified. See
 `docs/TEMPORAL_RELATIONSHIPS.md`.
 
 ## Phase 7 — Monetary Policy State (`states/`)

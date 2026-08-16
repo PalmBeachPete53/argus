@@ -30,7 +30,7 @@ from typing import Any
 
 from ..facts.base import FactPeriod, FactValue
 from ..normalize import from_iso, iso
-from ..reactions.base import CONDITION_SUBJECTS
+from ..temporal_relationships.base import EARLIER_SUBJECTS as CONDITION_SUBJECTS
 from ..states.base import STATE_SUBJECTS
 
 # ---------------------------------------------------------------------------

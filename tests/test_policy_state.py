@@ -45,7 +45,7 @@ from argus.changes import ChangeType, FactChange
 from argus.facts import categorical, percentage, text_value
 from argus.facts.base import FactPeriod, PeriodKind
 from argus.models import Publication, PublicationStatus
-from argus.reactions import REACTION_SUBJECTS
+from argus.temporal_relationships import LATER_SUBJECTS as REACTION_SUBJECTS
 from argus.states import (
     STATE_EXCLUDED_PREDICATES,
     STATE_SUBJECTS,

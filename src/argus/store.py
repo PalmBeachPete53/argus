@@ -1750,16 +1750,16 @@ class Store:
     # ------------------------------------------------------------------
     # Phase 6 — temporal relationships (legacy table name "policy_reactions")
     # ------------------------------------------------------------------
-    def save_reaction(self, reaction) -> None:
-        """Persist one ``PolicyReaction``, upserting by its deterministic id.
+    def save_temporal_relationship(self, reaction) -> None:
+        """Persist one :class:`TemporalRelationship`, upserting by its deterministic id.
 
         Idempotent: re-saving the same reaction overwrites the row in place,
         preserving ``created_at``.
         """
-        from .reactions.base import PolicyReaction
+        from .temporal_relationships.base import TemporalRelationship
 
-        if not isinstance(reaction, PolicyReaction):
-            raise TypeError(f"expected PolicyReaction, got {type(reaction).__name__}")
+        if not isinstance(reaction, TemporalRelationship):
+            raise TypeError(f"expected TemporalRelationship, got {type(reaction).__name__}")
         reaction_id = reaction.resolve_id()
         now_iso = iso(now_utc())
         existing = self._conn.execute(
@@ -1866,9 +1866,9 @@ class Store:
         )
         self._conn.commit()
 
-    def save_reactions(self, reactions) -> int:
-        """Persist a list of ``PolicyReaction`` (or a ``PolicyReactionResult``).
-        Returns count."""
+    def save_temporal_relationships(self, reactions) -> int:
+        """Persist a list of :class:`TemporalRelationship` (or a
+        :class:`TemporalRelationshipResult`). Returns count."""
         if hasattr(reactions, "reactions"):
             reactions = reactions.reactions
         count = 0
@@ -1877,13 +1877,18 @@ class Store:
             count += 1
         return count
 
-    def get_reaction(self, reaction_id: str):
+    def get_temporal_relationship(self, relationship_id: str):
         row = self._conn.execute(
-            "SELECT * FROM policy_reactions WHERE reaction_id = ?", (reaction_id,)
+            "SELECT * FROM policy_reactions WHERE reaction_id = ?", (relationship_id,)
         ).fetchone()
-        return self._reaction_from_row(row) if row else None
+        return self._temporal_relationship_from_row(row) if row else None
 
-    def get_reactions(
+    # legacy alias
+    def get_reaction(self, reaction_id: str):
+        """Legacy alias for :meth:`get_temporal_relationship`."""
+        return self.get_temporal_relationship(reaction_id)
+
+    def get_temporal_relationships(
         self,
         *,
         bank: str | tuple[str, ...] | None = None,
@@ -1916,10 +1921,10 @@ class Store:
             query += " LIMIT ?"
             params.append(limit)
         rows = self._conn.execute(query, params).fetchall()
-        return [self._reaction_from_row(r) for r in rows]
+        return [self._temporal_relationship_from_row(r) for r in rows]
 
-    def delete_reactions(self, *, bank: str | None = None) -> int:
-        """Delete every reaction of a bank (or of the whole store)."""
+    def delete_temporal_relationships(self, *, bank: str | None = None) -> int:
+        """Delete every temporal relationship of a bank (or of the whole store)."""
         if bank is not None:
             cursor = self._conn.execute(
                 "DELETE FROM policy_reactions WHERE central_bank = ?", (bank,)
@@ -1929,8 +1934,8 @@ class Store:
         self._conn.commit()
         return cursor.rowcount
 
-    def delete_reactions_for_document(self, document_id: str) -> int:
-        """Delete every reaction involving a document (either side)."""
+    def delete_temporal_relationships_for_document(self, document_id: str) -> int:
+        """Delete every temporal relationship involving a document (either side)."""
         cursor = self._conn.execute(
             "DELETE FROM policy_reactions WHERE condition_document_id = ? OR policy_document_id = ?",
             (document_id, document_id),
@@ -1938,8 +1943,8 @@ class Store:
         self._conn.commit()
         return cursor.rowcount
 
-    def delete_reactions_for_publication(self, publication_id: str) -> int:
-        """Delete every reaction involving a publication (either side)."""
+    def delete_temporal_relationships_for_publication(self, publication_id: str) -> int:
+        """Delete every temporal relationship involving a publication (either side)."""
         cursor = self._conn.execute(
             "DELETE FROM policy_reactions WHERE condition_publication_id = ? OR policy_publication_id = ?",
             (publication_id, publication_id),
@@ -1947,17 +1952,17 @@ class Store:
         self._conn.commit()
         return cursor.rowcount
 
-    def rebuild_reactions(self, reactions, *, bank: str | None = None) -> int:
-        """Replace a bank's (or the store's) reactions with ``reactions`` in one
+    def rebuild_temporal_relationships(self, reactions, *, bank: str | None = None) -> int:
+        """Replace a bank's (or the store's) temporal relationships with ``reactions`` in one
         transaction.
 
-        ``reactions`` is a list of ``PolicyReaction`` or a
-        ``PolicyReactionResult``. ``policy_reactions`` is derived data: the bank
+        ``reactions`` is a list of :class:`TemporalRelationship` or a
+        :class:`TemporalRelationshipResult`. ``policy_reactions`` is derived data: the bank
         scope is fully recomputed each time, so re-analysis is idempotent, an
         empty result clears the scope, and no stale reaction survives the
         changes it relates.
         """
-        from .reactions.base import PolicyReaction
+        from .temporal_relationships.base import TemporalRelationship
 
         if hasattr(reactions, "reactions"):
             reactions = reactions.reactions
@@ -1970,9 +1975,9 @@ class Store:
                 self._conn.execute("DELETE FROM policy_reactions")
             count = 0
             for reaction in reactions:
-                if not isinstance(reaction, PolicyReaction):
+                if not isinstance(reaction, TemporalRelationship):
                     raise TypeError(
-                        f"expected PolicyReaction, got {type(reaction).__name__}"
+                        f"expected TemporalRelationship, got {type(reaction).__name__}"
                     )
                 reaction_id = reaction.resolve_id()
                 now_iso = iso(now_utc())
@@ -2045,11 +2050,11 @@ class Store:
             raise
 
     @staticmethod
-    def _reaction_from_row(row: sqlite3.Row):
+    def _temporal_relationship_from_row(row: sqlite3.Row):
         from .facts.base import FactPeriod, PeriodKind, FactValue
-        from .reactions.base import PolicyReaction
+        from .temporal_relationships.base import TemporalRelationship
 
-        return PolicyReaction(
+        return TemporalRelationship(
             reaction_id=row["reaction_id"],
             central_bank=row["central_bank"],
             inferred=bool(row["inferred"]),
@@ -2115,6 +2120,57 @@ class Store:
             analysis_version=row["analysis_version"],
             analyzed_at=from_iso(row["analyzed_at"]),
         )
+
+    # ------------------------------------------------------------------
+    # Legacy "reaction" method aliases (delegate to the canonical names)
+    # ------------------------------------------------------------------
+    def save_reaction(self, reaction) -> None:
+        """Legacy alias for :meth:`save_temporal_relationship`."""
+        return self.save_temporal_relationship(reaction)
+
+    def save_reactions(self, reactions) -> int:
+        """Legacy alias for :meth:`save_temporal_relationships`."""
+        return self.save_temporal_relationships(reactions)
+
+    def get_reactions(
+        self,
+        *,
+        bank: str | tuple[str, ...] | None = None,
+        condition_change_id: str | None = None,
+        policy_change_id: str | None = None,
+        subject: str | None = None,
+        limit: int | None = None,
+    ) -> list:
+        """Legacy alias for :meth:`get_temporal_relationships`."""
+        return self.get_temporal_relationships(
+            bank=bank,
+            condition_change_id=condition_change_id,
+            policy_change_id=policy_change_id,
+            subject=subject,
+            limit=limit,
+        )
+
+    def delete_reactions(self, *, bank: str | None = None) -> int:
+        """Legacy alias for :meth:`delete_temporal_relationships`."""
+        return self.delete_temporal_relationships(bank=bank)
+
+    def delete_reactions_for_document(self, document_id: str) -> int:
+        """Legacy alias for :meth:`delete_temporal_relationships_for_document`."""
+        return self.delete_temporal_relationships_for_document(document_id)
+
+    def delete_reactions_for_publication(self, publication_id: str) -> int:
+        """Legacy alias for :meth:`delete_temporal_relationships_for_publication`."""
+        return self.delete_temporal_relationships_for_publication(publication_id)
+
+    def rebuild_reactions(self, reactions, *, bank: str | None = None) -> int:
+        """Legacy alias for :meth:`rebuild_temporal_relationships`."""
+        return self.rebuild_temporal_relationships(reactions, bank=bank)
+
+    @staticmethod
+    def _reaction_from_row(row: sqlite3.Row):
+        """Legacy alias for :meth:`_temporal_relationship_from_row`."""
+        return Store._temporal_relationship_from_row(row)
+
     # ------------------------------------------------------------------
     # Phase 7 — monetary policy states
     # ------------------------------------------------------------------

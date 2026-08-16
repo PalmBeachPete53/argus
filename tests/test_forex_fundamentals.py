@@ -46,7 +46,7 @@ import pytest
 from argus.facts import percentage, currency, text_value
 from argus.facts.base import Confidence, Fact, FactPeriod, PeriodKind
 from argus.models import Publication, PublicationStatus
-from argus.reactions import CONDITION_SUBJECTS
+from argus.temporal_relationships import EARLIER_SUBJECTS as CONDITION_SUBJECTS
 from argus.states import STATE_SUBJECTS, MonetaryPolicyState
 from argus.forex import (
     FUNDAMENTAL_EXCLUDED_PREDICATES,

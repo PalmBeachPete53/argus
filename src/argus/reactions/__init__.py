@@ -1,30 +1,12 @@
-"""Phase 6 — temporal relationship analysis (legacy name "policy reaction analysis").
+"""Compatibility shim for ``argus.reactions``.
 
-This package derives ``PolicyReaction`` relations (legacy class name; concept:
-Temporal Relationship) between existing Phase 5 ``FactChange`` objects: an
-earlier change temporally followed (within a documented window) by a later
-change. It is strictly **inferred** (never
-a Fact, never causal, never a stance/trading signal) and never mutates the
-source ``FactChange`` / ``Fact`` objects.
+The canonical implementation lives in :mod:`argus.temporal_relationships`.
+All public names are re-exported unchanged; new code should import from
+``argus.temporal_relationships``.
 """
 
-from .analyzer import PolicyReactionAnalyzer, analyze_reactions
-from .base import (
-    CONDITION_SUBJECTS,
-    DEFAULT_MAX_LAG_DAYS,
-    REACTION_SUBJECTS,
-    PolicyReaction,
-    PolicyReactionResult,
-)
-from .identity import reaction_id_of
+from ..temporal_relationships import *
 
-__all__ = [
-    "CONDITION_SUBJECTS",
-    "REACTION_SUBJECTS",
-    "DEFAULT_MAX_LAG_DAYS",
-    "PolicyReaction",
-    "PolicyReactionResult",
-    "PolicyReactionAnalyzer",
-    "reaction_id_of",
-    "analyze_reactions",
-]
+from ..temporal_relationships import __all__ as _canonical_all
+
+__all__ = list(_canonical_all)

@@ -1,0 +1,222 @@
+"""Phase 6 — temporal relationship analysis (legacy name "policy reaction analysis").
+
+The analyzer is **pure** (``TemporalRelationshipAnalyzer.analyze`` works on in-memory
+``FactChange`` objects + a publications mapping and never touches a store) and
+strictly deterministic. It relates observed changes temporally; it does **not**
+model a reaction function, a causal link, or an input→output policy response.
+
+Relationship rules (documented in ``docs/TEMPORAL_RELATIONSHIPS.md``):
+
+1. A ``FactChange`` is an **earlier-side** candidate when its ``subject``
+   is in ``EARLIER_SUBJECTS``; it is a **later-side** candidate when its
+   ``subject`` is in ``LATER_SUBJECTS``. A change with neither role is ignored (irrelevant,
+   not an error).
+2. The observation time of a change is the temporal reference of its
+   **current-side** publication — ``meeting_date`` when set, else
+   ``publication_date`` (same reference Phase 5 uses to order observations).
+3. **No look-ahead**: an earlier change may relate to a later change only when
+   ``earlier_observed_at <= later_observed_at`` (stored as the legacy
+   ``condition_observed_at`` / ``policy_observed_at`` fields).
+4. **Window**: the lag ``later_observed_at - earlier_observed_at`` must be
+   ``0 <= lag_days <= max_lag_days`` (documented default 180 days).
+5. **Bank isolation**: pairing is per ``central_bank``. The bank is a property
+   of the ``FactChange`` and is **never** resolved from the publication: a
+   change without a ``central_bank`` is skipped with an
+   ``unplaced_change:<change_id>`` warning (never invented).
+6. Each eligible ``(earlier change, later change)`` pair produces exactly one
+   ``TemporalRelationship``.
+
+No economic interpretation is ever attached to a reaction: no hawkish/dovish,
+no stance score, no causality, no trading/forex logic.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Mapping
+
+from ..changes.base import FactChange
+from ..models import Publication
+from ..normalize import iso
+from .base import (
+    DEFAULT_MAX_LAG_DAYS,
+    EARLIER_SUBJECTS,
+    LATER_SUBJECTS,
+    TemporalRelationship,
+    TemporalRelationshipResult,
+)
+
+
+@dataclass
+class _Entry:
+    """A change joined with the temporal reference of its current-side
+    publication and its resolved central bank."""
+
+    change: FactChange
+    observed_at: datetime
+    central_bank: str
+
+
+class TemporalRelationshipAnalyzer:
+    """Temporal relationship analyzer (legacy class name ``PolicyReactionAnalyzer``)."""
+
+    analysis_version = "13.0.0"
+
+    def analyze(
+        self,
+        changes: list[FactChange],
+        *,
+        publications: Mapping[str, Publication] | None = None,
+        max_lag_days: int = DEFAULT_MAX_LAG_DAYS,
+    ) -> TemporalRelationshipResult:
+        """Derive temporal relationships between earlier-side and later-side
+        changes (legacy names: condition-side / reaction-side).
+
+        ``changes`` are the ``FactChange`` relations produced by Phase 5;
+        ``publications`` maps ``publication_id → Publication`` and supplies the
+        temporal reference (``meeting_date`` else ``publication_date``) of each
+        change's current-side publication.
+        """
+        pubs: Mapping[str, Publication] = publications or {}
+        result = TemporalRelationshipResult()
+        if max_lag_days < 0:
+            raise ValueError(f"max_lag_days must be >= 0, got {max_lag_days}")
+
+        earlier: dict[str, list[_Entry]] = {}
+        later: dict[str, list[_Entry]] = {}
+        for change in changes:
+            entry = self._prepare(change, pubs, result.warnings)
+            if entry is None:
+                continue
+            subject = change.subject
+            if subject in LATER_SUBJECTS:
+                later.setdefault(entry.central_bank, []).append(entry)
+            elif subject in EARLIER_SUBJECTS:
+                earlier.setdefault(entry.central_bank, []).append(entry)
+            # neither role → irrelevant, silently skipped.
+
+        derived: list[TemporalRelationship] = []
+        for bank, later_entries in later.items():
+            earlier_entries = earlier.get(bank, ())
+            for l in later_entries:
+                for e in earlier_entries:
+                    lag = int((l.observed_at - e.observed_at).total_seconds())
+                    if lag < 0 or lag > max_lag_days * 86400:
+                        continue
+                    derived.append(
+                        self._build(e, l, lag_days=lag // 86400, max_lag_days=max_lag_days)
+                    )
+
+        derived.sort(key=lambda rel: rel.resolve_id())
+        result.relationships = derived
+        return result
+
+    # ------------------------------------------------------------------
+    # preparation
+    # ------------------------------------------------------------------
+    def _prepare(
+        self,
+        change: FactChange,
+        pubs: Mapping[str, Publication],
+        warnings: list[str],
+    ) -> _Entry | None:
+        if not change.current_publication_id:
+            warnings.append(f"missing_publication:{change.change_id or change.resolve_id()}")
+            return None
+        pub = pubs.get(change.current_publication_id)
+        if pub is None:
+            warnings.append(f"missing_publication:{change.current_publication_id}")
+            return None
+        observed_at = pub.meeting_date or pub.publication_date
+        if observed_at is None:
+            warnings.append(f"undated_publication:{pub.id}")
+            return None
+        bank = change.central_bank
+        if not bank:
+            warnings.append(f"unplaced_change:{change.change_id or change.resolve_id()}")
+            return None
+        return _Entry(change=change, observed_at=observed_at, central_bank=bank)
+
+    # ------------------------------------------------------------------
+    # build
+    # ------------------------------------------------------------------
+    def _build(
+        self,
+        earlier: _Entry,
+        later: _Entry,
+        *,
+        lag_days: int,
+        max_lag_days: int,
+    ) -> TemporalRelationship:
+        e, l = earlier.change, later.change
+        relationship = TemporalRelationship(
+            central_bank=earlier.central_bank,
+            inferred=True,
+            # condition side
+            condition_change_id=e.resolve_id(),
+            condition_subject=e.subject,
+            condition_predicate=e.predicate,
+            condition_value_kind=e.value_kind,
+            condition_previous_value=e.previous_value,
+            condition_current_value=e.current_value,
+            condition_period=e.current_period,
+            condition_publication_id=e.current_publication_id,
+            condition_document_id=e.current_document_id,
+            condition_effective_date=e.current_effective_date,
+            condition_source_text=e.current_source_text,
+            condition_observed_at=earlier.observed_at,
+            # policy side
+            policy_change_id=l.resolve_id(),
+            policy_subject=l.subject,
+            policy_predicate=l.predicate,
+            policy_value_kind=l.value_kind,
+            policy_previous_value=l.previous_value,
+            policy_current_value=l.current_value,
+            policy_period=l.current_period,
+            policy_publication_id=l.current_publication_id,
+            policy_document_id=l.current_document_id,
+            policy_effective_date=l.current_effective_date,
+            policy_source_text=l.current_source_text,
+            policy_observed_at=later.observed_at,
+            # relationship
+            lag_days=lag_days,
+            max_lag_days=max_lag_days,
+            analysis_version=self.analysis_version,
+        )
+        relationship.formulation = relationship.describe()
+        return relationship
+
+
+def analyze_temporal_relationships(
+    store,
+    *,
+    bank: str | None = None,
+    max_lag_days: int = DEFAULT_MAX_LAG_DAYS,
+    persist: bool = True,
+) -> TemporalRelationshipResult:
+    """Recompute the relationships of a bank (or the whole store) from the current
+    ``fact_changes`` table (Phase 5 output), persist them idempotently, and
+    return the result (relationships + observability warnings).
+
+    Phase 6 consumes Phase 5 output: the changes are read from the persisted
+    ``fact_changes`` table; Phase 5 must be run first. The ``policy_reactions``
+    table is derived data: ``analyze_temporal_relationships`` recomputes the full
+    bank scope and *replaces* it (``rebuild_temporal_relationships``), so repeated
+    runs are idempotent, empty results clear the scope, and a relationship can
+    never survive the disappearance of the changes it relates. Source ``facts``
+    and ``fact_changes`` are never modified.
+    """
+    publications = store.list_publications(bank=bank)
+    pubs: dict[str, object] = {p.id: p for p in publications if p.id}
+    changes = store.get_changes(bank=bank)
+    result = TemporalRelationshipAnalyzer().analyze(
+        changes, publications=pubs, max_lag_days=max_lag_days
+    )
+    if persist:
+        store.rebuild_temporal_relationships(result.relationships, bank=bank)
+    return result
+
+# Legacy compatibility aliases.
+PolicyReactionAnalyzer = TemporalRelationshipAnalyzer
+analyze_reactions = analyze_temporal_relationships

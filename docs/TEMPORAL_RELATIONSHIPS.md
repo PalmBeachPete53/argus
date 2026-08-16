@@ -244,32 +244,35 @@ intent, stance and market meaning are never asserted.
 
 ## Persistence (`policy_reactions`, legacy table name)
 
-- The `policy_reactions` table is **derived data**. `analyze_reactions(store,
-  *, bank=None, max_lag_days=…)` (legacy entry point) reads the persisted
-  `fact_changes` of a bank (the Phase 5 output), recomputes the full
-  relationship scope and **replaces** it atomically (`rebuild_reactions`).
+- The `policy_reactions` table is **derived data**. `analyze_temporal_relationships(store,
+  *, bank=None, max_lag_days=…)` (legacy entry point name `analyze_reactions`)
+  reads the persisted `fact_changes` of a bank (the Phase 5 output), recomputes
+  the full relationship scope and **replaces** it atomically
+  (`rebuild_temporal_relationships`).
 - Consequences: re-analysis is **idempotent**; an empty result **clears** the
   scope; a relationship can never survive the disappearance of the changes it
   relates; a rebuild of one bank never touches another bank; the source
   `facts` / `fact_changes` tables are never modified.
-- Read filters (`get_reactions`) support `bank`, `condition_change_id`,
-  `policy_change_id`, `subject` (either side), and `limit`.
-- `save_reaction` upserts by `reaction_id` and preserves `created_at`.
-- `delete_reactions`, `delete_reactions_for_document`,
-  `delete_reactions_for_publication` provide the same lifecycle surface as
-  Phase 5.
+- Read filters (`get_temporal_relationships`) support `bank`,
+  `condition_change_id`, `policy_change_id`, `subject` (either side), and
+  `limit`.
+- `save_temporal_relationship` upserts by `reaction_id` and preserves
+  `created_at`.
+- `delete_temporal_relationships`, `delete_temporal_relationships_for_document`,
+  `delete_temporal_relationships_for_publication` provide the same lifecycle
+  surface as Phase 5.
 
 ## Analysis version
 
-`PolicyReactionAnalyzer.analysis_version = "13.0.0"` (legacy analyzer class
-name). Changing the analytical algorithm (vocabulary, window rule,
-formulation) must bump this version; the version is persisted with every
-relationship.
+`TemporalRelationshipAnalyzer.analysis_version = "13.0.0"` (legacy analyzer class
+name `PolicyReactionAnalyzer`). Changing the analytical algorithm (vocabulary,
+window rule, formulation) must bump this version; the version is persisted with
+every relationship.
 
 ## Observability
 
-`PolicyReactionAnalyzer.analyze` and `analyze_reactions` return a
-`PolicyReactionResult` with `reactions` and `warnings`:
+`TemporalRelationshipAnalyzer.analyze` and `analyze_temporal_relationships`
+return a `TemporalRelationshipResult` with `relationships` and `warnings`:
 
 | warning | meaning |
 |---|---|
