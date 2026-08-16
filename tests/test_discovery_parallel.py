@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -54,6 +55,40 @@ class _ExplodingDiscovery(DiscoveryStrategy):
     kind = "explode"
 
     def discover(self):
+        raise RuntimeError("boom")
+
+
+class _GatedDiscovery(DiscoveryStrategy):
+    """One source == block on a per-source ``threading.Event``.
+
+    Class-level ``gates`` / ``completion`` (create_strategy only passes
+    source/client/now) let a test *deterministically* control, and observe,
+    the real completion order of the workers.
+    """
+
+    kind = "gated"
+    gates: dict[str, threading.Event] = {}
+    completion: list[str] = []
+    _deadline = 5.0
+
+    def discover(self):
+        gate = self.gates.get(self.source.id)
+        if gate is not None:
+            gate.wait(self._deadline)
+        self.completion.append(self.source.id)
+        return [self._make(url=f"https://x/{self.source.id}", title=self.source.id)]
+
+
+class _GatedExplodingDiscovery(_GatedDiscovery):
+    """Gated, like ``_GatedDiscovery``, but every source fails on return."""
+
+    kind = "gated_explode"
+
+    def discover(self):
+        gate = self.gates.get(self.source.id)
+        if gate is not None:
+            gate.wait(self._deadline)
+        self.completion.append(self.source.id)
         raise RuntimeError("boom")
 
 
@@ -219,6 +254,148 @@ def test_progress_reports_completed_over_total(tmp_path, monkeypatch):
         assert seen == [(1, 4), (2, 4), (3, 4), (4, 4)]
     finally:
         STRATEGIES["fixed"] = original
+
+
+def _run_gated(collector, *source_ids):
+    """Drive a gated discovery, releasing per-source gates in the given order.
+
+    ``discover_all`` runs on the caller (main) thread — the Store is single
+    connection and thread-affine, exactly like production — while a coordinator
+    thread releases the gates, waiting on the observed progress after each one.
+    This is deterministic (events, no sleep-ordering bets): the return value is
+    the list of ``(completed, total, completion_order_tuple)`` snapshots seen
+    by the progress callback, plus the discovered publications.
+    """
+    from threading import Condition
+
+    seen: list[tuple[int, int, tuple]] = []
+    condition = Condition()
+    failures: list[BaseException] = []
+
+    def wait_for(count: int) -> None:
+        with condition:
+            deadline = time.monotonic() + 5.0
+            while len(seen) < count:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(f"progress stuck at {len(seen)}/{count}: {seen!r}")
+                condition.wait(remaining)
+
+    def progress(completed, total):
+        with condition:
+            seen.append((completed, total, tuple(_GatedDiscovery.completion)))
+            condition.notify_all()
+
+    def coordinator():
+        try:
+            for index, source_id in enumerate(source_ids, start=1):
+                _GatedDiscovery.gates[source_id].set()
+                if index < len(source_ids):
+                    wait_for(index)
+        except BaseException as exc:  # pragma: no cover - timeout / unexpected
+            failures.append(exc)
+        finally:
+            for source_id in source_ids:  # never leave workers blocked
+                _GatedDiscovery.gates[source_id].set()
+
+    thread = threading.Thread(target=coordinator, daemon=True)
+    thread.start()
+    try:
+        pubs = collector.discover_all(progress=progress)
+    finally:
+        thread.join(timeout=5.0)
+    assert not failures, failures
+    return seen, pubs
+
+
+def test_progress_follows_real_completion_order(tmp_path, monkeypatch):
+    """The callback fires at the real completion instant, in completion order:
+    a slow late source never stalls the progress of already-finished sources.
+
+    All four sources run simultaneously behind per-source gates. B is released
+    while A is still in flight: the callback already reports 1/4, proving the
+    scheduler does not wait for A (the first submitted source).
+    """
+    original = _register_strategy("gated", _GatedDiscovery)
+    try:
+        monkeypatch.setattr(collector_mod, "DISCOVERY_WORKERS", 4)
+        gates = {source_id: threading.Event() for source_id in ARBITRARY_SOURCE_IDS}
+        completion: list[str] = []
+        _GatedDiscovery.gates = gates
+        _GatedDiscovery.completion = completion
+        collector, _ = _build_collector(tmp_path, kind="gated")
+
+        seen, pubs = _run_gated(collector, "source_b", "source_c", "source_d", "source_a")
+
+        # progress in *completion* order, A (the slow one) last
+        assert [snapshot[0:2] for snapshot in seen] == [(1, 4), (2, 4), (3, 4), (4, 4)]
+        assert [snapshot[2] for snapshot in seen] == [
+            ("source_b",),
+            ("source_b", "source_c"),
+            ("source_b", "source_c", "source_d"),
+            ("source_b", "source_c", "source_d", "source_a"),
+        ]
+        # B reported done while A was still running (and before its gate).
+        # The very first snapshot already contains B and not A.
+        assert seen[0][2] == ("source_b",) and "source_a" not in seen[0][2]
+        # logical results unchanged: every source, dedup intact
+        assert {p.source_id for p in pubs} == set(ARBITRARY_SOURCE_IDS)
+    finally:
+        STRATEGIES["gated"] = original
+        _GatedDiscovery.gates = {}
+        _GatedDiscovery.completion = []
+
+
+def test_progress_counts_failed_source_and_still_reaches_total(tmp_path, monkeypatch):
+    """A source that fails fast is counted as a completed step as soon as it
+    fails, is logged, does not stall slower in-flight sources, and the campaign
+    still reaches 4/4. A (the slow source) must never delay the 1/3 ticks made
+    possible by B/C/D."""
+    original = _register_strategy("gated", _GatedDiscovery)
+    original_explode = _register_strategy("gated_explode", _GatedExplodingDiscovery)
+    try:
+        monkeypatch.setattr(collector_mod, "DISCOVERY_WORKERS", 4)
+        from argus.registry import SourceRegistry
+
+        registry = SourceRegistry(
+            adapters=[
+                _ArbitraryAdapter(
+                    "gated",
+                    ARBITRARY_SOURCE_IDS,
+                    kinds={"source_b": "gated_explode"},
+                )
+            ]
+        )
+        store = make_store(tmp_path / "db")
+        collector = CentralBankCollector(
+            store=store,
+            registry=registry,
+            client=make_client(FakeSession({})),
+            raw_root=tmp_path / "raw",
+        )
+        gates = {source_id: threading.Event() for source_id in ARBITRARY_SOURCE_IDS}
+        completion: list[str] = []
+        _GatedDiscovery.gates = gates
+        _GatedDiscovery.completion = completion
+        _GatedExplodingDiscovery.gates = gates
+        _GatedExplodingDiscovery.completion = completion
+
+        seen, pubs = _run_gated(collector, "source_b", "source_c", "source_d", "source_a")
+
+        # the failing B counts 1/4 before A (still running) is done
+        assert seen[0][0:2] == (1, 4) and seen[0][2] == ("source_b",)
+        assert [snapshot[0:2] for snapshot in seen] == [(1, 4), (2, 4), (3, 4), (4, 4)]
+        # a failure never hides B's error from the store, and never produces pubs
+        assert {p.source_id for p in pubs} == {"source_a", "source_c", "source_d"}
+        assert store.count_publications() == 3
+        assert any(e.source_id == "source_b" for e in store.list_errors())
+    finally:
+        STRATEGIES["gated"] = original
+        STRATEGIES["gated_explode"] = original_explode
+        _GatedDiscovery.gates = {}
+        _GatedDiscovery.completion = []
+        _GatedExplodingDiscovery.gates = {}
+        _GatedExplodingDiscovery.completion = []
 
 
 def test_window_applied_identically_to_each_worker(tmp_path, monkeypatch):

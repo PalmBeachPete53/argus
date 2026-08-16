@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -140,9 +140,12 @@ class CentralBankCollector:
         campaign: it is recorded (logged + source result) and the other
         sources proceed.
 
-        ``progress(completed, total)`` is called (on the caller's thread) after
-        each source finishes — ``completed`` / ``total`` are source counts, so a
-        future GUI progress bar needs no prior knowledge of the candidate count.
+        ``progress(completed, total)`` is called (on the caller's thread) as
+        soon as each source *actually finishes* — ``completed`` / ``total`` are
+        source counts, so a future GUI progress bar needs no prior knowledge of
+        the candidate count. Progress follows worker completion order (a slow
+        source never stalls the progress of already-finished sources), while
+        the returned publications keep their logical source order.
         """
         self._sync_sources()
         run_id = run_id or self.store.run_stamp()
@@ -230,31 +233,48 @@ class CentralBankCollector:
             )
 
     def _run_sources(self, sources, *, date_start=None, date_end=None, progress=None):
-        """Run the bounded worker pool over ``sources``, preserving source order.
+        """Run the bounded worker pool over ``sources``.
 
-        ``progress(completed, total)`` is invoked on the caller's thread as each
-        source finishes. A stop request (``DiscoveryStopped`` raised on the main
-        thread by the SIGTERM handler, or any other unexpected failure) shuts
-        the pool down without waiting for in-flight workers and propagates — the
-        campaign lifecycle (Stop / app close) must never wait for a stuck worker.
+        Progress and results are decoupled on purpose:
+
+        * ``progress(completed, total)`` is invoked on the caller's thread as
+          soon as each worker *really* finishes (``as_completed``), so the
+          remontée of progress follows the real completion order and a slow
+          source can never stall the progress of sources already done;
+        * the returned results keep the source *submission* order, so the
+          serialized Store writes (and the logical result order / dedup) are
+          unchanged by the completion order.
+
+        A stop request (``DiscoveryStopped`` raised on the main thread by the
+        SIGTERM handler, or any other unexpected failure) shuts the pool down
+        without waiting for in-flight workers and propagates — the campaign
+        lifecycle (Stop / app close) must never wait for a stuck worker, and
+        never fabricate a ``progress(total, total)`` for interrupted work.
         """
         executor = ThreadPoolExecutor(max_workers=_worker_pool_size())
         total = len(sources)
         try:
-            futures = [
-                executor.submit(self._discover_source_worker, source, date_start, date_end)
-                for source in sources
-            ]
-            results = []
-            for index, future in enumerate(futures):
-                results.append(future.result())
+            future_to_index = {
+                executor.submit(
+                    self._discover_source_worker, source, date_start, date_end
+                ): index
+                for index, source in enumerate(sources)
+            }
+            results: list[_SourceDiscoveryResult | None] = [None] * total
+            completed = 0
+            for future in as_completed(future_to_index):
+                # The worker isolates every Exception; a BaseException escaping
+                # it propagates here and shuts the pool down (never counted as a
+                # successful completion).
+                results[future_to_index[future]] = future.result()
+                completed += 1
                 if progress is not None:
-                    progress(index + 1, total)
+                    progress(completed, total)
         except BaseException:
             executor.shutdown(wait=False, cancel_futures=True)
             raise
         executor.shutdown(wait=True)
-        return results
+        return [result for result in results if result is not None]
 
     def _search_configured(self, source) -> bool:
         return bool(source.discovery.search_query) and self.search_provider is not None
