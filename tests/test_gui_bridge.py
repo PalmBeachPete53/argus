@@ -8,6 +8,9 @@ navigation that escapes it (``..``, absolute paths).
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -634,7 +637,7 @@ def test_discovery_control_unknown_action(patched):
     assert gui_bridge.main(["discovery-control", "explode"]) == 2
 
 
-def test_discovery_clear_removes_only_report_cache(monkeypatch, tmp_path, patched):
+def test_discovery_clear_preserves_history_clears_candidates(monkeypatch, tmp_path, patched):
     from argus.models import Document, DocumentStatus
 
     _seed_store(
@@ -650,17 +653,208 @@ def test_discovery_clear_removes_only_report_cache(monkeypatch, tmp_path, patche
     _completed_campaign(monkeypatch, patched)
     _, status = patched(["discovery-status"])
     assert status["status"] == "completed"
+    assert status["candidates"] == 1
+    assert status["new"] == 1
 
     code, cleared = patched(["discovery-clear"])
     assert code == 0
-    assert cleared["runs_cleared"] == 1
     assert cleared["candidates_cleared"] == 1
+    assert cleared["runs_preserved"] == 1  # campaign history survives the cache
 
-    # the report cache is gone…
+    # the candidate cache is gone, the run history is preserved (candidates 0)
     _, status = patched(["discovery-status"])
-    assert status["status"] == "idle"
+    assert status["status"] == "completed"  # history: the run still exists
+    assert status["candidates"] == 0
+    assert status["new"] == 0 and status["known"] == 0
+    # results: the snapshot list is empty
+    _, results = patched(["discovery-results"])
+    assert results["total"] == 0
     # …but pipeline data (publications, documents) is untouched
     store = gui_bridge.Store(tmp_path / "data" / "argus.db")
     assert store.count_publications() == 1
     assert store.count_documents() == 1
     store.close()
+
+
+def test_discovery_clear_refused_while_running(patched, tmp_path):
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_discovery_run("run-1", ["fed"], pid=0)
+    store.close()
+    code, data = patched(["discovery-clear"])
+    assert code == 1
+    assert "while a campaign is active" in data["error"]
+
+
+def test_discovery_clear_refused_while_paused(patched, tmp_path):
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_discovery_run("run-1", ["fed"], pid=0)
+    store.set_discovery_run_control("run-1", "paused")
+    store.close()
+    code, data = patched(["discovery-clear"])
+    assert code == 1
+    assert "while a campaign is active" in data["error"]
+
+
+def test_discovery_run_refused_when_already_active(patched, tmp_path, monkeypatch):
+    """A second launch is refused by the backend — React is not responsible
+    for the single-active invariant."""
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_discovery_run("run-1", ["fed"], pid=0)
+    store.close()
+
+    calls: list = []
+
+    def pubs_fn(run_id):
+        return []
+
+    monkeypatch.setattr(gui_bridge, "CentralBankCollector", _fake_collector_factory(calls, pubs_fn))
+    code, data = patched(["discovery-run"])
+    assert code == 1
+    assert "already active" in data["error"]
+    assert calls == []  # no campaign ever started
+
+
+def test_start_discovery_run_enforces_single_active(tmp_path):
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_discovery_run("run-a", ["fed"], pid=1)
+    try:
+        store.start_discovery_run("run-b", ["ecb"], pid=2)
+    except gui_bridge.ActiveDiscoveryError as exc:
+        assert "run-a" in str(exc)
+    else:
+        raise AssertionError("a second active campaign must be refused")
+    # the winner is untouched, the loser never recorded
+    assert store.latest_discovery_run()["run_id"] == "run-a"
+    assert store.get_discovery_run("run-b") is None
+
+
+def test_discovery_run_reconciles_dead_active_before_launch(patched, tmp_path, monkeypatch, capsys):
+    """A stale 'running' row whose PID is gone is reconciled (failed) first, so
+    a fresh campaign can start."""
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_discovery_run("stale-1", ["fed"], pid=gone.pid)
+    store.close()
+
+    calls: list = []
+
+    def pubs_fn(run_id):
+        return [_publication(id_="p2", bank="fed", title="F2", url="https://fed.gov/2", source_id="fed_rss")]
+
+    monkeypatch.setattr(gui_bridge, "CentralBankCollector", _fake_collector_factory(calls, pubs_fn))
+    code, data = patched(["discovery-run"])
+    assert code == 0
+    assert data["status"] == "completed"
+    # the stale record was reconciled before the guard ran
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    stale = store.get_discovery_run("stale-1")
+    assert stale["status"] == "failed"
+    store.close()
+
+
+def test_discovery_control_targets_explicit_run_id(patched, tmp_path, monkeypatch):
+    """The control commands operate on the given run_id — never an implicit
+    'latest' that could be a different campaign."""
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_discovery_run("old-1", ["fed"], pid=999999)
+    store.finish_discovery_run("old-1", status="completed")
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    store.start_discovery_run("live-1", ["ecb"], pid=sleeper.pid)
+    store.close()
+    try:
+        # a completed run_id cannot be controlled
+        code, data = patched(["discovery-control", "pause", "old-1"])
+        assert code == 1
+        assert "no active campaign" in data["error"]
+
+        # the active run_id is targeted precisely (its own PID is signalled)
+        code, run = patched(["discovery-control", "pause", "live-1"])
+        assert code == 0
+        assert run["run_id"] == "live-1"
+        assert run["pid"] == sleeper.pid
+        assert run["status"] == "paused"
+        assert gui_bridge._process_state(sleeper.pid).startswith("T"), "must actually be stopped"
+
+        code, run = patched(["discovery-control", "resume", "live-1"])
+        assert code == 0
+        assert run["run_id"] == "live-1"
+        assert run["status"] == "running"
+        assert not gui_bridge._process_state(sleeper.pid).startswith("T")
+
+        # explicit run_id that does not exist
+        code, data = patched(["discovery-control", "stop", "nope-1"])
+        assert code == 1
+        assert "no active campaign" in data["error"]
+    finally:
+        if sleeper.poll() is None:
+            sleeper.kill()
+            sleeper.wait()
+
+
+def test_discovery_control_pause_dead_pid_reconciles(patched, tmp_path):
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    for index, action in enumerate(("pause", "resume")):
+        run_id = f"dead-{index}"
+        store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+        store.start_discovery_run(run_id, ["fed"], pid=gone.pid)
+        store.close()
+
+        code, data = patched(["discovery-control", action, run_id])
+        assert code == 1
+        assert "no longer running" in data["error"]
+        _, status = patched(["discovery-status"])
+        assert status["status"] == "failed", action
+        assert "exited unexpectedly" in status["error"]
+
+
+def test_discovery_status_reconciles_dead_pid(tmp_path, monkeypatch, capsys):
+    for seeded_status in ("running", "paused"):
+        root = tmp_path / seeded_status
+        root.mkdir()
+        monkeypatch.setattr(gui_bridge, "ROOT", root)
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        store = gui_bridge.Store(root / "data" / "argus.db")
+        run_id = f"dead-{seeded_status}"
+        store.start_discovery_run(run_id, ["fed"], pid=gone.pid)
+        if seeded_status == "paused":
+            store.set_discovery_run_control(run_id, "paused")
+        store.close()
+
+        code = gui_bridge.main(["discovery-status"])
+        assert code == 0
+        status = json.loads(capsys.readouterr().out)
+        assert status["status"] == "failed", f"stored {seeded_status}"
+        assert status["run_id"] == run_id
+        assert "exited unexpectedly" in status["error"]
+
+
+def test_discovery_stop_kills_uncooperative_process(patched, tmp_path, monkeypatch):
+    """SIGTERM alone is not enough → escalate to SIGKILL, verify real exit, and
+    only then record `stopped`. A live process must never hide behind a
+    `stopped` Store row."""
+    monkeypatch.setattr(gui_bridge, "STOP_GRACE_S", 0.3)
+    monkeypatch.setattr(gui_bridge, "STOP_KILL_S", 0.5)
+
+    stubborn = subprocess.Popen(
+        [sys.executable, "-c", "import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN); import time; time.sleep(120)"]
+    )
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_discovery_run("stub-1", ["fed"], pid=stubborn.pid)
+    store.close()
+    try:
+        code, run = patched(["discovery-control", "stop", "stub-1"])
+        assert code == 0
+        assert run["status"] == "stopped"
+        assert stubborn.wait(5) is not None
+        assert run["pid"] == stubborn.pid
+        # no active (running/paused) campaign remains
+        _, status = patched(["discovery-status"])
+        assert status["status"] == "stopped"
+        assert not gui_bridge._process_alive(stubborn.pid)
+    finally:
+        if stubborn.poll() is None:
+            stubborn.kill()
+            stubborn.wait()

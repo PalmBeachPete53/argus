@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { DiscoveryCandidate } from "../types";
 import type { DiscoveryState } from "./MainContent";
 import { formatDate, formatDateTime } from "../lib/format";
+import ConfirmDialog from "./ConfirmDialog";
 
 interface DiscoveryProps {
   discovery: DiscoveryState;
@@ -179,9 +180,16 @@ function RangeControl({
 export default function Discovery({ discovery }: DiscoveryProps) {
   const { status, candidates, error, openUrl } = discovery;
   const [selected, setSelected] = useState<DiscoveryCandidate | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const running = status.status === "running";
   const paused = status.status === "paused";
   const active = running || paused;
+  const range =
+    status.date_start || status.date_end
+      ? [status.date_start && formatDate(status.date_start), status.date_end && formatDate(status.date_end)]
+          .filter(Boolean)
+          .join(" → ")
+      : null;
 
   return (
     <div className="discovery-view">
@@ -198,6 +206,7 @@ export default function Discovery({ discovery }: DiscoveryProps) {
         <div className="discovery-empty">
           <p className={paused ? "discovery-paused-text" : "discovery-running-text"}>
             {paused ? "Discovery paused" : "Discovery running…"}
+            {range && ` · range ${range}`}
           </p>
           <div className="discovery-controls">
             {paused ? (
@@ -241,6 +250,12 @@ export default function Discovery({ discovery }: DiscoveryProps) {
           {status.status === "completed" && (
             <p className="discovery-count">
               Discovery Candidates · {status.candidates.toLocaleString()} candidates discovered
+              {range && (
+                <>
+                  {" "}
+                  · {status.new} new / {status.known} known · range {range}
+                </>
+              )}
             </p>
           )}
           {candidates.length > 0 ? (
@@ -283,10 +298,24 @@ export default function Discovery({ discovery }: DiscoveryProps) {
             <CandidateDetail candidate={selected} onOpen={(url) => void openUrl(url)} />
           )}
           <div className="discovery-controls">
-            <ConfirmButton label="Clear cache" confirmLabel="Confirm clear?" onClick={() => void discovery.clearCache()} />
+            <button type="button" className="secondary-button" onClick={() => setConfirmClear(true)}>
+              Clear cache
+            </button>
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmClear}
+        title="Clear discovery cache"
+        message="This removes the discovery candidate snapshots. Campaign history is kept. Continue?"
+        confirmLabel="Clear cache"
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={() => {
+          setConfirmClear(false);
+          void discovery.clearCache();
+        }}
+      />
     </div>
   );
 }

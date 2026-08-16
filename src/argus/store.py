@@ -97,7 +97,9 @@ CREATE TABLE IF NOT EXISTS discovery_runs (
     error TEXT,
     candidates INTEGER DEFAULT 0,
     banks_json TEXT,
-    pid INTEGER
+    pid INTEGER,
+    date_start TEXT,
+    date_end TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_discovery_runs_started
     ON discovery_runs(started_at);
@@ -484,6 +486,14 @@ CREATE INDEX IF NOT EXISTS idx_forex_differentials_publication
 """
 
 
+class ActiveDiscoveryError(Exception):
+    """A discovery campaign is already running/paused; only one may exist.
+
+    Raised by ``start_discovery_run`` so the invariant "0 or 1 active campaign"
+    is guaranteed by the Store itself, never by the GUI or the caller.
+    """
+
+
 class Store:
     def __init__(self, path: str | os.PathLike) -> None:
         self.path = Path(path)
@@ -493,6 +503,11 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         if str(self.path) != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
+        # Concurrent claimers of the single active discovery campaign (or any
+        # other writer) block briefly instead of failing immediately on the
+        # write lock — the campaign-launch guard in `start_discovery_run`
+        # serializes on this.
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.executescript(_SCHEMA)
         try:
             self._conn.execute("ALTER TABLE facts ADD COLUMN identity_qualifier TEXT")
@@ -508,6 +523,14 @@ class Store:
             pass
         try:
             self._conn.execute("ALTER TABLE discovery_runs ADD COLUMN pid INTEGER")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute("ALTER TABLE discovery_runs ADD COLUMN date_start TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute("ALTER TABLE discovery_runs ADD COLUMN date_end TEXT")
         except sqlite3.OperationalError:
             pass
         self._conn.commit()
@@ -938,29 +961,60 @@ class Store:
     # Discovery campaign report layer (run lifecycle + result snapshot)
     # ------------------------------------------------------------------
 
-    def start_discovery_run(self, run_id: str, banks, pid: int | None = None) -> None:
+    def start_discovery_run(
+        self,
+        run_id: str,
+        banks,
+        pid: int | None = None,
+        date_start: str | None = None,
+        date_end: str | None = None,
+    ) -> None:
         """Record that a discovery campaign started (status ``running``).
 
         ``pid`` is the OS process running the campaign (for the desktop GUI's
-        pause / resume / stop controls). It is optional so CLI-driven campaigns
-        stay recordable too.
+        pause / resume / stop controls); it is optional so CLI-driven campaigns
+        stay recordable too. ``date_start`` / ``date_end`` are the campaign's
+        publication-date window (ISO), persisted as a property of that run.
+
+        Only one campaign may be active (``running`` or ``paused``) at a time.
+        The claim is taken in a write-locked transaction so two launchers
+        racing (e.g. two GUI launches) cannot both start: the second one raises
+        :class:`ActiveDiscoveryError`.
         """
-        self._conn.execute(
-            """
-            INSERT INTO discovery_runs (run_id, started_at, status, candidates, banks_json, pid)
-            VALUES (?, ?, 'running', 0, ?, ?)
-            ON CONFLICT(run_id) DO UPDATE SET
-                started_at=excluded.started_at,
-                status='running',
-                candidates=0,
-                error=NULL,
-                finished_at=NULL,
-                banks_json=excluded.banks_json,
-                pid=excluded.pid
-            """,
-            (run_id, iso(now_utc()), json.dumps(list(banks or ())), pid),
-        )
-        self._conn.commit()
+        started = iso(now_utc())
+        banks_json = json.dumps(list(banks or ()))
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            existing = self._conn.execute(
+                "SELECT run_id FROM discovery_runs "
+                "WHERE status IN ('running', 'paused') LIMIT 1"
+            ).fetchone()
+            if existing is not None:
+                raise ActiveDiscoveryError(
+                    f"a discovery campaign is already active: {existing['run_id']}"
+                )
+            self._conn.execute(
+                """
+                INSERT INTO discovery_runs
+                    (run_id, started_at, status, candidates, banks_json, pid, date_start, date_end)
+                VALUES (?, ?, 'running', 0, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    started_at=excluded.started_at,
+                    status='running',
+                    candidates=0,
+                    error=NULL,
+                    finished_at=NULL,
+                    banks_json=excluded.banks_json,
+                    pid=excluded.pid,
+                    date_start=excluded.date_start,
+                    date_end=excluded.date_end
+                """,
+                (run_id, started, banks_json, pid, date_start, date_end),
+            )
+            self._conn.commit()
+        except BaseException:
+            self._conn.rollback()
+            raise
 
     def set_discovery_run_control(self, run_id: str, status: str) -> None:
         """Flip the status of a *running/paused* campaign (pause / resume) from
@@ -972,16 +1026,19 @@ class Store:
         self._conn.commit()
 
     def clear_discovery_cache(self) -> tuple[int, int]:
-        """Drop every discovery report (runs + their candidate snapshots).
+        """Drop the discovery *candidate cache*, preserving campaign history.
 
-        The discovery cache is exactly the two report tables: the run lifecycle
-        and the per-candidate snapshot. Publications/documents/facts are
-        pipeline data, never cache, and are untouched.
+        Only ``discovery_candidates`` is a cache (per-run result snapshots).
+        ``discovery_runs`` is campaign history (timing, status, scope, window)
+        and is preserved; its cached candidate count is zeroed so the report
+        never claims snapshots that no longer exist. Publications, documents,
+        facts and every other pipeline table are untouched.
         """
         candidates = self._conn.execute("DELETE FROM discovery_candidates").rowcount
-        runs = self._conn.execute("DELETE FROM discovery_runs").rowcount
+        self._conn.execute("UPDATE discovery_runs SET candidates=0")
         self._conn.commit()
-        return runs, candidates
+        runs = self._conn.execute("SELECT COUNT(*) FROM discovery_runs").fetchone()[0]
+        return int(runs), candidates
 
     def finish_discovery_run(
         self,
@@ -1032,11 +1089,10 @@ class Store:
         )
         self._conn.commit()
 
-    @staticmethod
-    def _run_from_row(row: sqlite3.Row) -> dict | None:
+    def _run_from_row(self, row: sqlite3.Row) -> dict | None:
         if row is None:
             return None
-        return {
+        run = {
             "run_id": row["run_id"],
             "status": row["status"],
             "started_at": row["started_at"],
@@ -1045,7 +1101,22 @@ class Store:
             "candidates": row["candidates"] or 0,
             "banks": json.loads(row["banks_json"] or "[]"),
             "pid": row["pid"],
+            "date_start": row["date_start"],
+            "date_end": row["date_end"],
         }
+        new, known = self.discovery_candidate_counts(row["run_id"])
+        run["new"] = new
+        run["known"] = known
+        return run
+
+    def discovery_candidate_counts(self, run_id: str) -> tuple[int, int]:
+        """(new, known) candidate counts for a run's snapshot (0 when none)."""
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(is_new), 0) AS n, COALESCE(SUM(1 - is_new), 0) AS k "
+            "FROM discovery_candidates WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        return int(row["n"]), int(row["k"])
 
     def get_discovery_run(self, run_id: str) -> dict | None:
         row = self._conn.execute(

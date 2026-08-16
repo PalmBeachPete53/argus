@@ -11,6 +11,10 @@ const IDLE: DiscoveryRun = {
   candidates: 0,
   banks: [],
   pid: null,
+  date_start: null,
+  date_end: null,
+  new: 0,
+  known: 0,
 };
 
 const POLL_MS = 1200;
@@ -39,6 +43,9 @@ export function useDiscovery() {
   const [candidates, setCandidates] = useState<DiscoveryCandidate[]>([]);
   const [error, setError] = useState<string | null>(null);
   const loopActiveRef = useRef(false);
+  // Mirrors `status` for event handlers that must not go stale (e.g. control
+  // resolving the *current* campaign's run_id without re-subscribing).
+  const statusRef = useRef<DiscoveryRun>(IDLE);
 
   const fetchResults = useCallback(async (runId: string | null) => {
     if (!runId) return;
@@ -54,6 +61,7 @@ export function useDiscovery() {
     try {
       const run = await invoke<DiscoveryRun>("get_discovery_status");
       setStatus(run);
+      statusRef.current = run;
       if (run.status === "completed") {
         await fetchResults(run.run_id);
       }
@@ -102,7 +110,9 @@ export function useDiscovery() {
         return false;
       }
       setCandidates([]);
-      setStatus((prev) => ({ ...prev, status: "running" }));
+      const optimistic: DiscoveryRun = { ...statusRef.current, status: "running" };
+      setStatus(optimistic);
+      statusRef.current = optimistic;
       startLoop();
       return true;
     },
@@ -112,9 +122,16 @@ export function useDiscovery() {
   const control = useCallback(
     async (action: "pause" | "resume" | "stop") => {
       setError(null);
+      // Target the explicit active campaign (its recorded PID) — never an
+      // implicit "latest" that could be a different run.
+      const runId = statusRef.current?.run_id ?? null;
       try {
-        const run = await invoke<DiscoveryRun>("discovery_control", { action });
+        const run = await invoke<DiscoveryRun>("discovery_control", {
+          action,
+          runId: runId ?? "",
+        });
         setStatus(run);
+        statusRef.current = run;
         if (action === "stop") {
           setCandidates([]);
         }
@@ -136,13 +153,16 @@ export function useDiscovery() {
     try {
       const cleared = await invoke<ClearedCache>("clear_discovery_cache");
       setCandidates([]);
-      setStatus(IDLE);
+      // Clearing drops the candidate snapshots *and* their report — the last
+      // campaign record survives (history preserved), so the authoritative
+      // state is re-read rather than assumed.
+      await check();
       return cleared;
     } catch (err) {
       setError(String(err));
       return null;
     }
-  }, []);
+  }, [check]);
 
   const openUrl = useCallback(async (url: string) => {
     try {

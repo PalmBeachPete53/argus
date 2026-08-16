@@ -53,14 +53,14 @@ from .config import enabled_banks
 from .http import HttpConfig
 from .normalize import iso, now_utc
 from .registry import SourceRegistry
-from .store import Store
+from .store import ActiveDiscoveryError, Store
 
 USAGE = (
     "usage: python -m argus.gui_bridge "
     "banks|banks-set <id> on|off|data-root|list-dir <relative-path>|"
     "open-file <relative-path>|sources|"
     "discovery-run [--bank <id>]... [--start-date YYYY-MM-DD|--end-date YYYY-MM-DD]|"
-    "discovery-control <pause|resume|stop>|discovery-clear|"
+    "discovery-control <pause|resume|stop> [<run-id>]|discovery-clear|"
     "discovery-status|discovery-results [<run-id>]|stats|open-url <url>"
 )
 
@@ -312,6 +312,118 @@ def _parse_date_arg(value: str, name: str) -> datetime:
     raise ValueError(f"{name} must be a date (YYYY-MM-DD or ISO datetime): {value!r}")
 
 
+# Lifecycle-control timings (kept as module constants so tests can shorten
+# them): how long a Stop waits for SIGTERM to be honoured before escalating to
+# SIGKILL, and how long it waits for the hard kill to take effect.
+STOP_GRACE_S = 2.5
+STOP_KILL_S = 2.0
+
+_ACTIVE_STATUSES = ("running", "paused")
+_TERMINAL_STATUSES = ("completed", "failed", "stopped")
+
+
+def _process_state(pid: int) -> str:
+    """The process state char (``ps -o stat=``), or ``""`` when the process is
+    gone. Distinguishes a live process from a dead-but-unreaped zombie: a
+    zombie reports ``Z``, which ``_process_alive`` treats as not alive."""
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip()
+
+
+def _process_alive(pid: int) -> bool:
+    """True only for a *runnable* process (running or stopped, never a zombie).
+
+    ``os.kill(pid, 0)`` alone is not enough: an unreaped zombie still answers
+    it, which would let the Store keep lying about a dead campaign. The state
+    comes from ``ps``, the only portable zombie-aware oracle.
+    """
+    state = _process_state(pid)
+    return bool(state) and not state.startswith("Z")
+
+
+def _reconcile_run(store: Store, run: dict | None) -> dict | None:
+    """Bring the Store in line with reality: a campaign whose recorded PID is
+    no longer a live process can never be ``running``/``paused`` again.
+
+    The cause is not recoverable from the Store (the process vanished without
+    finalizing), so it is the honest non-explicit outcome: ``failed``. An
+    explicit user Stop records ``stopped`` at the moment it *verifies* the
+    process is gone, and is never downgraded afterwards.
+    """
+    if run is None or run["status"] not in _ACTIVE_STATUSES:
+        return run
+    pid = run.get("pid")
+    if pid and not _process_alive(pid):
+        store.finish_discovery_run(
+            run["run_id"],
+            status="failed",
+            error=f"campaign process {pid} exited unexpectedly",
+        )
+        return store.get_discovery_run(run["run_id"])
+    return run
+
+
+def _terminate_campaign(store: Store, run: dict, pid: int) -> dict:
+    """Stop a campaign and guarantee the process is really gone before the
+    Store says ``stopped``.
+
+    1. un-freeze a paused campaign so its signals can be delivered;
+    2. SIGTERM (graceful — the campaign records itself as ``stopped``);
+    3. wait for real termination (``STOP_GRACE_S``);
+    4. escalate to SIGKILL if it is still alive (``STOP_KILL_S``);
+    5. only when the process is verified dead, write ``stopped``.
+
+    The Store is never edited to hide a still-living process: if the process
+    cannot be killed, the error propagates and the campaign stays active.
+    """
+    import time
+
+    if run["status"] == "paused":
+        try:
+            os.kill(pid, signal.SIGCONT)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            pass
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+    deadline = time.monotonic() + STOP_GRACE_S
+    while time.monotonic() < deadline:
+        if not _process_alive(pid):
+            break
+        time.sleep(0.05)
+
+    if _process_alive(pid):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        kill_deadline = time.monotonic() + STOP_KILL_S
+        while time.monotonic() < kill_deadline:
+            if not _process_alive(pid):
+                break
+            time.sleep(0.05)
+
+    if _process_alive(pid):
+        raise RuntimeError(f"could not terminate campaign process {pid}")
+
+    current = store.get_discovery_run(run["run_id"])
+    if current and current["status"] in _ACTIVE_STATUSES:
+        store.finish_discovery_run(run["run_id"], status="stopped", error="stopped by user")
+    return store.get_discovery_run(run["run_id"])
+
+
 def _run_discovery_campaign(
     store_path: Path,
     raw_root: Path,
@@ -337,7 +449,13 @@ def _run_discovery_campaign(
     registry = SourceRegistry()
     run_id = store.run_stamp()
     bank_names = {b.id: b.name for b in registry.banks}
-    store.start_discovery_run(run_id, banks, pid=os.getpid())
+    store.start_discovery_run(
+        run_id,
+        banks,
+        pid=os.getpid(),
+        date_start=iso(date_start) if date_start else None,
+        date_end=iso(date_end) if date_end else None,
+    )
     known = {p.id for p in store.list_publications()}
     try:
         config = HttpConfig(respect_robots=True, min_interval=1.0)
@@ -392,7 +510,10 @@ def _cmd_discovery_run(argv: list[str]) -> int:
     run uses every currently enabled bank. Either way the selection is the
     Core's toggle-respecting enabled set — never a GUI-side bank list.
     Optional ``--start-date`` / ``--end-date`` (ISO dates) bound the campaign
-    to a publication-date window, applied by the Core.
+    to a publication-date window, applied by the Core and persisted with the
+    run. Exactly one campaign may be active; the Store claims the run in a
+    locked transaction, so a concurrent or second launch (even racing) is
+    refused here too.
     """
     banks = enabled_banks()
     selected: list[str] = []
@@ -420,38 +541,56 @@ def _cmd_discovery_run(argv: list[str]) -> int:
         else:
             print(f"unexpected argument: {argv[index]}", file=sys.stderr)
             return 2
+    if date_start is not None and date_end is not None and date_start > date_end:
+        print("start-date must be <= end-date", file=sys.stderr)
+        return 2
     if selected:
         from .config import filter_enabled
 
         banks = filter_enabled(selected) or ()
-    result = _run_discovery_campaign(_store_path(), _raw_root(), banks, date_start, date_end)
+
+    store = Store(_store_path())
+    # Reconcile a stale "active" record (dead PID) before deciding whether a
+    # new campaign may start.
+    _reconcile_run(store, store.latest_discovery_run())
+    active = store.latest_discovery_run()
+    if active is not None and active["status"] in _ACTIVE_STATUSES:
+        print(
+            json.dumps(
+                {"error": f"a discovery campaign is already active: {active['run_id']}"},
+                indent=2,
+            )
+        )
+        return 1
+
+    try:
+        result = _run_discovery_campaign(_store_path(), _raw_root(), banks, date_start, date_end)
+    except ActiveDiscoveryError as exc:
+        # Lost the claim race — another campaign started first. This is the
+        # backend's single-active invariant, never a client-side guess.
+        print(json.dumps({"error": str(exc)}, indent=2))
+        return 1
     print(json.dumps(result, indent=2))
     return 0
 
 
-def _await_run_status(store: Store, run_id: str, terminal: tuple[str, ...], timeout: float) -> dict | None:
-    """Poll a run until it reaches a terminal status (used after a stop signal
-    so the campaign's own ``stopped`` finalization wins over a forced one)."""
-    import time
-
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        run = store.get_discovery_run(run_id)
-        if run and run["status"] in terminal:
-            return run
-        time.sleep(0.2)
-    return None
-
-
 def _cmd_discovery_control(argv: list[str]) -> int:
-    """Real lifecycle control of the active campaign subprocess.
+    """Real lifecycle control of a campaign, targeting its ``run_id``.
 
-    The campaign records its PID in the store; the controlling command reads it
-    and signals the process directly (SIGSTOP / SIGCONT / SIGTERM) — the GUI
-    never fabricates a state. The status is flipped in the store by the
-    controller, because a SIGSTOPped process cannot write to the store itself,
-    except for ``stop`` where the campaign is asked to finalize itself as
-    ``stopped`` (a SIGTERMped process records an honest status).
+    ``discovery-control <action> [run_id]`` — the ``run_id`` is that of the
+    campaign actually controlled (its PID is read from the Store, never
+    invented). Without a ``run_id`` the most recent campaign is used (legacy
+    convenience; the GUI always passes the explicit id).
+
+    The status is flipped in the Store only after the signal demonstrably took
+    effect:
+    - ``pause``  → SIGSTOP, then ``paused``;
+    - ``resume`` → SIGCONT, then ``running``;
+    - ``stop``   → SIGTERM with a real termination wait and SIGKILL escalation
+      (see :func:`_terminate_campaign`) — the Store says ``stopped`` only once
+      the process is verified gone.
+    A dead PID is never hidden: the campaign is reconciled and the command
+    errors out.
     """
     if len(argv) < 1:
         print(USAGE, file=sys.stderr)
@@ -460,60 +599,81 @@ def _cmd_discovery_control(argv: list[str]) -> int:
     if action not in ("pause", "resume", "stop"):
         print(f"unknown discovery-control action: {action} (pause|resume|stop)", file=sys.stderr)
         return 2
+    run_id = argv[1] if len(argv) > 1 else None
     store = Store(_store_path())
-    run = store.latest_discovery_run()
-    if run is None or run["status"] in ("idle", "completed", "failed", "stopped"):
+    run = store.get_discovery_run(run_id) if run_id else store.latest_discovery_run()
+    if run is None or run["status"] in ("idle", *_TERMINAL_STATUSES):
         print(json.dumps({"error": f"no active campaign to {action}"}, indent=2))
         return 1
-    run_id = run["run_id"]
     pid = run.get("pid")
     if not pid:
-        print(json.dumps({"error": "campaign has no recorded pid (started outside the desktop GUI)"}, indent=2))
+        print(
+            json.dumps({"error": f"campaign {run['run_id']} has no recorded pid (started outside the desktop GUI)"}, indent=2)
+        )
         return 1
     try:
-        if action == "pause":
-            os.kill(pid, signal.SIGSTOP)
-        elif action == "resume":
-            os.kill(pid, signal.SIGCONT)
-        else:  # stop: deliver after un-freezing a paused campaign, so the
-            # process' own stop handler can actually run and record `stopped`.
-            os.kill(pid, signal.SIGCONT)
-            os.kill(pid, signal.SIGTERM)
+        if action == "stop":
+            run = _terminate_campaign(store, run, pid)
+        else:
+            if not _process_alive(pid):
+                _reconcile_run(store, run)
+                print(json.dumps({"error": f"campaign process {pid} is no longer running"}, indent=2))
+                return 1
+            os.kill(pid, signal.SIGSTOP if action == "pause" else signal.SIGCONT)
+            # The signal is only taken as applied once the process is still
+            # demonstrably around (and, for pause, has transitioned under the
+            # signal's effect, seen as a T state by `ps`).
+            if not _process_alive(pid):
+                _reconcile_run(store, run)
+                print(json.dumps({"error": f"campaign process {pid} vanished during {action}"}, indent=2))
+                return 1
+            store.set_discovery_run_control(run["run_id"], "paused" if action == "pause" else "running")
+            run = store.get_discovery_run(run["run_id"])
     except ProcessLookupError:
-        if action != "stop":
-            print(json.dumps({"error": f"campaign process {pid} is no longer running"}, indent=2))
-            return 1
-        # The campaign is already gone → record an honest stopped lifecycle.
+        _reconcile_run(store, run)
+        print(json.dumps({"error": f"campaign process {pid} is no longer running"}, indent=2))
+        return 1
+    except RuntimeError as exc:
+        # Stop could not guarantee the process is gone — the Store must NOT
+        # claim `stopped` while the process lives.
+        print(json.dumps({"error": str(exc)}, indent=2))
+        return 1
     except OSError as exc:
         print(json.dumps({"error": f"cannot {action} campaign process {pid}: {exc}"}, indent=2))
         return 1
-
-    if action == "stop":
-        # Give the campaign a moment to finalize itself as `stopped`; if it
-        # cannot (already dead, stuck frozen), the controller records it.
-        run = _await_run_status(store, run_id, ("stopped", "failed", "completed"), timeout=2.0)
-        if run is None:
-            store.finish_discovery_run(run_id, status="stopped", error="stopped by user (process did not finalize)")
-            run = store.get_discovery_run(run_id)
-    else:
-        store.set_discovery_run_control(run_id, "paused" if action == "pause" else "running")
-        run = store.get_discovery_run(run_id)
     print(json.dumps(run, indent=2))
     return 0
 
 
 def _cmd_discovery_clear(argv: list[str]) -> int:
-    """Drop the discovery report cache (runs + candidate snapshots only)."""
+    """Drop the discovery candidate cache (never during an active campaign).
+
+    Refused while a campaign is ``running`` or ``paused`` (after reconciling a
+    stale dead-PID active record). Clears the candidate snapshots only; the
+    run/ campaign history is preserved (see ``Store.clear_discovery_cache``).
+    """
     store = Store(_store_path())
+    _reconcile_run(store, store.latest_discovery_run())
+    active = store.latest_discovery_run()
+    if active is not None and active["status"] in _ACTIVE_STATUSES:
+        print(
+            json.dumps({"error": "cannot clear the discovery cache while a campaign is active"}, indent=2)
+        )
+        return 1
     runs, candidates = store.clear_discovery_cache()
-    print(json.dumps({"runs_cleared": runs, "candidates_cleared": candidates}, indent=2))
+    print(json.dumps({"runs_preserved": runs, "candidates_cleared": candidates}, indent=2))
     return 0
 
 
 def _cmd_discovery_status(argv: list[str]) -> int:
-    """JSON summary of the most recent discovery campaign (or ``idle``)."""
+    """JSON summary of the most recent discovery campaign (or ``idle``).
+
+    Runs the dead-PID reconciliation first, so an active-looking campaign whose
+    process is gone is surfaced as ``failed`` rather than left ``running``
+    forever (the GUI polls this command).
+    """
     store = Store(_store_path())
-    run = store.latest_discovery_run()
+    run = _reconcile_run(store, store.latest_discovery_run())
     if run is None:
         print(
             json.dumps(
@@ -525,6 +685,11 @@ def _cmd_discovery_status(argv: list[str]) -> int:
                     "error": None,
                     "candidates": 0,
                     "banks": [],
+                    "pid": None,
+                    "date_start": None,
+                    "date_end": None,
+                    "new": 0,
+                    "known": 0,
                 },
                 indent=2,
             )

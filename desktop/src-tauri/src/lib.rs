@@ -179,7 +179,18 @@ impl Bridge {
     /// ``discovery_control``; the interface never blocks on the run.
     /// ``start_date`` / ``end_date`` (ISO dates, optional) bound the campaign
     /// to a publication-date window, applied by the Core itself.
+    ///
+    /// Only one campaign may run at a time: the Core refuses a second launch,
+    /// but the detached spawn would swallow that refusal — so the active state
+    /// is re-read here *before* spawning, and a busy campaign surfaces a
+    /// synchronous error instead of a silent no-op. The Core guard remains the
+    /// authority for the racing case.
     fn discovery_run(&self, start_date: Option<String>, end_date: Option<String>) -> Result<(), String> {
+        let active = self.discovery_status()?;
+        if matches!(active.status.as_str(), "running" | "paused") {
+            let run_id = active.run_id.as_deref().unwrap_or("<unknown>");
+            return Err(format!("a discovery campaign is already active: {run_id}"));
+        }
         let mut args = vec!["discovery-run".to_string()];
         if let Some(date) = start_date {
             args.push("--start-date".into());
@@ -192,11 +203,12 @@ impl Bridge {
         self.spawn_detached(&args)
     }
 
-    /// Real lifecycle control of the active campaign subprocess: the bridge
-    /// signals the recorded PID (SIGSTOP / SIGCONT / SIGTERM) and returns the
-    /// updated run lifecycle.
-    fn discovery_control(&self, action: &str) -> Result<DiscoveryRun, String> {
-        let out = self.run(&["discovery-control".into(), action.to_string()])?;
+    /// Real lifecycle control of a campaign subprocess, targeted by its
+    /// ``run_id``: the bridge signals the recorded PID (SIGSTOP / SIGCONT /
+    /// SIGTERM) and returns the updated run lifecycle. The id makes the
+    /// command address an explicit campaign — never an implicit "latest".
+    fn discovery_control(&self, action: &str, run_id: &str) -> Result<DiscoveryRun, String> {
+        let out = self.run(&["discovery-control".into(), action.to_string(), run_id.to_string()])?;
         let value: serde_json::Value = serde_json::from_str(&out).map_err(|err| err.to_string())?;
         if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
             return Err(err.to_string());
@@ -300,6 +312,10 @@ struct DiscoveryRun {
     candidates: i64,
     banks: Vec<String>,
     pid: Option<i64>,
+    date_start: Option<String>,
+    date_end: Option<String>,
+    new: i64,
+    known: i64,
 }
 
 #[derive(Serialize, serde::Deserialize)]
@@ -331,7 +347,7 @@ struct DiscoveryResults {
 #[derive(Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct ClearedCache {
-    runs_cleared: i64,
+    runs_preserved: i64,
     candidates_cleared: i64,
 }
 
@@ -391,8 +407,8 @@ fn run_discovery(
 }
 
 #[tauri::command]
-fn discovery_control(state: State<'_, Bridge>, action: String) -> Result<DiscoveryRun, String> {
-    state.discovery_control(&action)
+fn discovery_control(state: State<'_, Bridge>, action: String, run_id: String) -> Result<DiscoveryRun, String> {
+    state.discovery_control(&action, &run_id)
 }
 
 #[tauri::command]

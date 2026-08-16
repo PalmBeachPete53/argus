@@ -55,6 +55,12 @@ export interface DiscoveryRun {
   banks: string[];
   /** OS PID of the campaign subprocess (null when none is recorded). */
   pid: number | null;
+  /** Publication-date window bounding the campaign (ISO, null = unbounded). */
+  date_start: string | null;
+  date_end: string | null;
+  /** Candidate snapshot split: not-yet-known vs already-known publications. */
+  new: number;
+  known: number;
 }
 
 /** One publication candidate produced by a discovery campaign. */
@@ -82,9 +88,10 @@ export interface DiscoveryResults {
   total: number;
 }
 
-/** Result of clearing the discovery report cache (runs + candidates only). */
+/** Result of clearing the discovery report cache: the candidate snapshots are
+ * gone, the campaign history (runs) is preserved. */
 export interface ClearedCache {
-  runs_cleared: number;
+  runs_preserved: number;
   candidates_cleared: number;
 }
 

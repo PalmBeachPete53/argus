@@ -754,6 +754,34 @@ body {
   overflow-y: auto;
 }
 
+/* CONFIRM DIALOG — compact destructive-action modal                 */
+/* ------------------------------------------------------------------ */
+.confirm-dialog {
+  width: 420px;
+}
+
+.confirm-dialog-message {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.primary-button.danger {
+  background: var(--red);
+}
+
+.primary-button.danger:hover {
+  background: var(--red);
+  filter: brightness(0.9);
+}
+
 /* Settings internal navigation (left) + content (right) */
 .modal-split {
   display: flex;
