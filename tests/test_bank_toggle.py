@@ -12,7 +12,13 @@ from conftest import FakeSession, make_client, make_store, response
 from argus.adapters.base import BankAdapter, rss_source
 from argus.adapters.rbnz import RBNZAdapter
 from argus.collector import CentralBankCollector
-from argus.config import BANKS_ENABLED, enabled_banks, is_bank_enabled
+from argus.config import (
+    BANKS_ENABLED,
+    clear_bank_overrides,
+    enabled_banks,
+    is_bank_enabled,
+    set_bank_enabled,
+)
 from argus.errors import TransportError
 from argus.models import CentralBank
 from argus.registry import SourceRegistry
@@ -210,6 +216,119 @@ def test_env_enable_restricted(monkeypatch):
     assert is_bank_enabled("fed") is True
     assert is_bank_enabled("rbnz") is True
     assert is_bank_enabled("ecb") is False
+
+
+# ---------------------------------------------------------------------------
+# Persistent user overrides (operator / desktop GUI controlled)
+# ---------------------------------------------------------------------------
+
+
+def test_no_overrides_defaults_to_map():
+    assert is_bank_enabled("rbnz") is False
+    assert is_bank_enabled("fed") is True
+
+
+def test_persistent_override_disables_bank():
+    set_bank_enabled("fed", False)
+    assert is_bank_enabled("fed") is False
+    assert is_bank_enabled("ecb") is True
+    assert "fed" not in enabled_banks()
+
+
+def test_persistent_override_reenables_rbnz():
+    set_bank_enabled("rbnz", True)
+    assert is_bank_enabled("rbnz") is True
+    assert "rbnz" in enabled_banks()
+
+
+def test_persistent_override_written_to_disk():
+    from argus.config import banks_config_path, load_bank_overrides
+
+    set_bank_enabled("boe", False)
+    assert banks_config_path().exists()
+    assert load_bank_overrides()["boe"] is False
+
+
+def test_clear_overrides_returns_to_defaults():
+    set_bank_enabled("rbnz", True)
+    set_bank_enabled("fed", False)
+    clear_bank_overrides()
+    assert is_bank_enabled("rbnz") is False
+    assert is_bank_enabled("fed") is True
+
+
+def test_env_allow_list_still_authoritative_over_overrides(monkeypatch):
+    set_bank_enabled("rbnz", True)  # GUI re-enabled RBNZ
+    monkeypatch.setenv("ARGUS_BANKS_ENABLED", "fed,ecb")
+    assert is_bank_enabled("rbnz") is False  # not in the allow-list
+    assert is_bank_enabled("fed") is True
+
+
+def test_env_disabled_still_beats_overrides(monkeypatch):
+    set_bank_enabled("fed", True)
+    monkeypatch.setenv("ARGUS_BANKS_DISABLED", "fed")
+    assert is_bank_enabled("fed") is False
+
+
+def test_filter_enabled_respects_overrides():
+    set_bank_enabled("rbnz", True)
+    set_bank_enabled("boj", False)
+    from argus.config import filter_enabled
+
+    assert filter_enabled(("rbnz", "boj", "fed")) == ("rbnz", "fed")
+
+
+def test_cli_list_banks_reflects_overrides(monkeypatch, capsys):
+    set_bank_enabled("rbnz", True)
+    from argus.cli import main as cli_main
+
+    assert cli_main(["--list-banks"]) == 0
+    out = capsys.readouterr().out
+    assert "rbnz" in out
+    assert "ON" in out
+
+
+# ---------------------------------------------------------------------------
+# GUI bridge
+# ---------------------------------------------------------------------------
+
+
+def test_gui_bridge_banks(monkeypatch):
+    from argus.gui_bridge import _cmd_banks
+
+    monkeypatch.setattr("sys.stdout", __import__("io").StringIO())
+    assert _cmd_banks() == 0
+
+
+def test_gui_bridge_banks_set(monkeypatch):
+    from argus.gui_bridge import _cmd_banks_set
+
+    out = __import__("io").StringIO()
+    monkeypatch.setattr("sys.stdout", out)
+    assert _cmd_banks_set(["rbnz", "on"]) == 0
+    assert is_bank_enabled("rbnz") is True
+    assert '"enabled": true' in out.getvalue()
+
+
+def test_gui_bridge_data_root(monkeypatch):
+    from pathlib import Path
+
+    from argus.gui_bridge import _cmd_data_root
+
+    out = __import__("io").StringIO()
+    monkeypatch.setattr("sys.stdout", out)
+    assert _cmd_data_root() == 0
+    import json
+
+    root = json.loads(out.getvalue())["root"]
+    assert Path(root).is_absolute()
+    assert Path(root).name == "data"
+
+
+def test_gui_bridge_rejects_bad_state(monkeypatch):
+    from argus.gui_bridge import _cmd_banks_set
+
+    assert _cmd_banks_set(["rbnz", "maybe"]) == 2
 
 
 # ---------------------------------------------------------------------------

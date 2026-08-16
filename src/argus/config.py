@@ -9,28 +9,26 @@ is scheduled for it, and parametrized E2E scenarios are skipped.
 This is generic (no per-bank special-casing in the pipeline). Turning a bank
 back on is a configuration change only.
 
-Override hooks (environment):
-- ``ARGUS_BANKS_DISABLED``: comma-separated bank ids to additionally disable.
-- ``ARGUS_BANKS_ENABLED``: comma-separated allow-list that re-enables banks
-  regardless of the default map (e.g. to temporarily turn RBNZ back on).
+Layers of truth (highest → lowest):
 
-Interaction rules (deterministic):
-- When ``ARGUS_BANKS_ENABLED`` is set, it is the *complete* allow-list and is
-  authoritative: ``ARGUS_BANKS_DISABLED`` is ignored, and a bank present in
-  both lists is enabled.
-- When only ``ARGUS_BANKS_DISABLED`` is set, it removes banks from the default
-  ``BANKS_ENABLED`` state.
-- An unknown bank id defaults to enabled (not registered banks are not part of
-  ``enabled_banks()``).
-- Every integrated execution path filters its bank selection through
-  ``is_bank_enabled`` (see ``filter_enabled``), so an OFF bank is never
-  scheduled — explicit selection alone cannot re-enable it; only
-  ``ARGUS_BANKS_ENABLED`` can.
+1. ``ARGUS_BANKS_ENABLED`` (environment) — complete allow-list, authoritative
+   over everything below (documented contract, unchanged).
+2. ``ARGUS_BANKS_DISABLED`` (environment) — additionally disables banks.
+3. Persistent user overrides file (default ``data/argus_banks.json``,
+   overridable via ``ARGUS_BANKS_CONFIG``) — written by operators / the desktop
+   GUI, the only *writable* layer of the toggle.
+4. ``BANKS_ENABLED`` (default map, code).
+
+The persistent file is part of the Core configuration, not a GUI-only state:
+the CLI, the pipeline and the GUI all read exactly the same
+``is_bank_enabled`` / ``enabled_banks``. There is no second source of truth.
 """
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 # Default activation state. RBNZ is currently OFF: its official domain
 # (rbnz.govt.nz) is inaccessible from the current execution environment
@@ -52,6 +50,84 @@ BANKS_ENABLED: dict[str, bool] = {
 ENV_DISABLED = "ARGUS_BANKS_DISABLED"
 ENV_ENABLED = "ARGUS_BANKS_ENABLED"
 
+# Persistent user overrides file. Defaults to the Argus data directory
+# (consistent with ``collector.DEFAULT_STORE_PATH = "data/argus.db"``), so it
+# lives next to the runtime data and is never committed (``data/`` is ignored).
+DEFAULT_BANKS_CONFIG = "data/argus_banks.json"
+ENV_CONFIG = "ARGUS_BANKS_CONFIG"
+
+# (path, mtime_ns, overrides) cache so the hot toggle path does not re-read the
+# file on every call. Invalidated on write and whenever the file changes.
+_override_cache: tuple[str, int, dict[str, bool]] | None = None
+
+
+def banks_config_path() -> Path:
+    """Path of the persistent user-override file (``ARGUS_BANKS_CONFIG`` wins)."""
+    env = os.environ.get(ENV_CONFIG)
+    if env:
+        return Path(env)
+    return Path(DEFAULT_BANKS_CONFIG)
+
+
+def load_bank_overrides() -> dict[str, bool]:
+    """Read the persistent user-override file (empty dict when absent/invalid)."""
+    global _override_cache
+    path = banks_config_path()
+    try:
+        stat = path.stat()
+    except OSError:
+        _override_cache = None
+        return {}
+    key = (str(path), stat.st_mtime_ns)
+    if _override_cache is not None and (_override_cache[0], _override_cache[1]) == key:
+        return _override_cache[2]
+    try:
+        raw = path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("bank config must be an object")
+        overrides = {str(k).lower(): bool(v) for k, v in data.items()}
+    except (OSError, ValueError):
+        _override_cache = None
+        return {}
+    _override_cache = (key[0], key[1], overrides)
+    return overrides
+
+
+def save_bank_overrides(overrides: dict[str, bool]) -> None:
+    """Persist the user-override file, atomically (write + rename)."""
+    global _override_cache
+    path = banks_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    clean = {str(k).lower(): bool(v) for k, v in overrides.items()}
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(clean, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+    _override_cache = None
+
+
+def set_bank_enabled(bank_id: str, enabled: bool) -> None:
+    """Persist a bank's ON/OFF state in the user-override file.
+
+    The write goes through the Core configuration (the single source of truth),
+    so the GUI, the CLI and the pipeline observe the same state. This can also
+    re-enable a default-OFF bank (e.g. RBNZ) without any code change.
+    """
+    overrides = load_bank_overrides()
+    overrides[(bank_id or "").lower()] = bool(enabled)
+    save_bank_overrides(overrides)
+
+
+def clear_bank_overrides() -> None:
+    """Remove the user-override file (back to the default ``BANKS_ENABLED`` map)."""
+    global _override_cache
+    path = banks_config_path()
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    _override_cache = None
+
 
 def _env_disabled() -> set[str]:
     return {b.strip().lower() for b in os.environ.get(ENV_DISABLED, "").split(",") if b.strip()}
@@ -65,30 +141,28 @@ def _env_enabled() -> set[str] | None:
 
 
 def is_bank_enabled(bank_id: str) -> bool:
-    """True when ``bank_id`` participates in operational executions."""
+    """True when ``bank_id`` participates in operational executions.
+
+    Precedence: ``ARGUS_BANKS_ENABLED`` allow-list > ``ARGUS_BANKS_DISABLED`` >
+    persistent user overrides > ``BANKS_ENABLED`` defaults.
+    """
     bank_id = (bank_id or "").lower()
     allow = _env_enabled()
     if allow is not None:
         # The environment allow-list is authoritative when set: it can re-enable
         # a bank that is OFF by default without any code change.
         return bank_id in allow
-    if not BANKS_ENABLED.get(bank_id, True):
-        return False
     if bank_id in _env_disabled():
         return False
-    return True
+    overrides = load_bank_overrides()
+    if bank_id in overrides:
+        return overrides[bank_id]
+    return BANKS_ENABLED.get(bank_id, True)
 
 
 def enabled_banks() -> tuple[str, ...]:
-    """The known banks currently active (config + environment)."""
-    allow = _env_enabled()
-    if allow is not None:
-        return tuple(bank_id for bank_id in BANKS_ENABLED if bank_id in allow)
-    disabled = _env_disabled()
-    return tuple(
-        bank_id for bank_id, enabled in BANKS_ENABLED.items()
-        if enabled and bank_id not in disabled
-    )
+    """The known banks currently active (config + environment + overrides)."""
+    return tuple(bank_id for bank_id in BANKS_ENABLED if is_bank_enabled(bank_id))
 
 
 def filter_enabled(banks) -> tuple[str, ...]:
@@ -97,5 +171,5 @@ def filter_enabled(banks) -> tuple[str, ...]:
     Used so that every integrated execution path applies the same toggle filter,
     whether the banks were selected globally or explicitly: a disabled bank is
     never scheduled for operational work unless it was first re-enabled (e.g.
-    via ``ARGUS_BANKS_ENABLED``)."""
+    via ``ARGUS_BANKS_ENABLED`` or the persistent user overrides)."""
     return tuple(b for b in (banks or ()) if is_bank_enabled(b))

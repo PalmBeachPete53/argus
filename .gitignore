@@ -6,3 +6,10 @@ __pycache__/
 sitemap.xml
 .DS_Store
 searxng/
+
+# Desktop GUI (Tauri 2 + Vite)
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+

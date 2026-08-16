@@ -186,6 +186,19 @@ the right extractor only for the classified publication type.
 - A **2025 historical validation** campaign was run on real data for the active
   banks (see `docs/ROADMAP.md` "Current Position").
 
+## Desktop GUI
+
+A minimal desktop shell (Tauri 2 + React + TypeScript) exposes the Argus
+`data/` directory and the Bank Toggle in Settings, backed by the real Python
+Core configuration (single source of truth). See `docs/GUI.md`.
+
+```bash
+cd desktop
+npm install
+npm run tauri dev        # development
+npm run tauri build      # production bundle
+```
+
 ## Project state
 
 - **Golden corpus: 9/10 banks** with real captured official sources (Fed, ECB,

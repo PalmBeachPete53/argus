@@ -82,3 +82,13 @@ def fixture_text(fixture_bytes):
 
 def BANK(id_="bank", name="Bank", currency="XXX", domain="example.org") -> CentralBank:
     return CentralBank(id=id_, name=name, currency=currency, official_domain=domain)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_bank_overrides(tmp_path, monkeypatch):
+    """Point the persistent bank-override file at a per-test temp path so the
+    suite is hermetic: a bank toggle written by a developer's desktop GUI (in
+    the real ``data/`` directory) never leaks into the test run, and test
+    writes never touch the real configuration."""
+    monkeypatch.setenv("ARGUS_BANKS_CONFIG", str(tmp_path / "banks.json"))
+    yield
