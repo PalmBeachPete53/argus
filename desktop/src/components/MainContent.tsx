@@ -1,10 +1,42 @@
-import type { SectionId } from "../types";
+import type { DataView, DiscoveryCandidate, DiscoveryRun } from "../types";
 import DataBrowser from "./DataBrowser";
+import Discovery from "./Discovery";
+import Overview from "./Overview";
 
-interface MainContentProps {
-  section: SectionId;
+export interface DiscoveryState {
+  status: DiscoveryRun;
+  candidates: DiscoveryCandidate[];
+  error: string | null;
+  launch: () => Promise<boolean>;
+  openUrl: (url: string) => Promise<void>;
 }
 
-export default function MainContent({ section }: MainContentProps) {
-  return <main className="main">{section === "data" ? <DataBrowser /> : null}</main>;
+interface MainContentProps {
+  view: DataView;
+  discovery: DiscoveryState;
+  onGoToDiscovery: () => void;
+}
+
+export default function MainContent({ view, discovery, onGoToDiscovery }: MainContentProps) {
+  switch (view) {
+    case "discovery":
+      return (
+        <main className="main">
+          <Discovery discovery={discovery} />
+        </main>
+      );
+    case "files":
+      return (
+        <main className="main">
+          <DataBrowser />
+        </main>
+      );
+    case "overview":
+    default:
+      return (
+        <main className="main">
+          <Overview discovery={discovery} onGoToDiscovery={onGoToDiscovery} />
+        </main>
+      );
+  }
 }

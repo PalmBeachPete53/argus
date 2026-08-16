@@ -1,17 +1,20 @@
-import type { SectionId } from "../types";
+import type { DataView } from "../types";
 
 interface SidebarProps {
-  active: SectionId;
-  onSelect: (section: SectionId) => void;
+  active: DataView;
+  onSelect: (view: DataView) => void;
 }
 
-// V1 exposes a single section ("Data"); the list is structured so further
-// sections can be added without a layout refactor.
-const SECTIONS: { id: SectionId; label: string }[] = [{ id: "data", label: "Data" }];
+const SECTIONS: { id: DataView; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "discovery", label: "Discovery" },
+  { id: "files", label: "Files" },
+];
 
 export default function Sidebar({ active, onSelect }: SidebarProps) {
   return (
     <nav className="sidebar" aria-label="Sections">
+      <p className="sidebar-group">DATA</p>
       <ul className="sidebar-list">
         {SECTIONS.map((section) => (
           <li key={section.id}>

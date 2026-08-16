@@ -1,37 +1,21 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import type { BankInfo } from "../types";
+import { useState } from "react";
+import type { SettingsSection } from "../types";
+import BanksSection from "./BanksSection";
+import SourcesSection from "./SourcesSection";
+import GeneralSection from "./GeneralSection";
 
 interface SettingsModalProps {
   onClose: () => void;
 }
 
+const SECTIONS: { id: SettingsSection; label: string }[] = [
+  { id: "general", label: "General" },
+  { id: "banks", label: "Banks" },
+  { id: "sources", label: "Sources" },
+];
+
 export default function SettingsModal({ onClose }: SettingsModalProps) {
-  const [banks, setBanks] = useState<BankInfo[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        setBanks(await invoke<BankInfo[]>("get_banks"));
-      } catch (err) {
-        setError(String(err));
-      }
-    })();
-  }, []);
-
-  const toggle = async (bank: BankInfo) => {
-    setBusy(bank.id);
-    setError(null);
-    try {
-      setBanks(await invoke<BankInfo[]>("set_bank", { bankId: bank.id, enabled: !bank.enabled }));
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(null);
-    }
-  };
+  const [section, setSection] = useState<SettingsSection>("general");
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -42,33 +26,27 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
             &times;
           </button>
         </div>
-        <div className="modal-body">
-          <h3 className="modal-section">Banks</h3>
-          {error && <div className="modal-error">Error: {error}</div>}
-          {!banks && !error && <div className="data-browser-muted">Loading…</div>}
-          {banks && (
-            <ul className="bank-list">
-              {banks.map((bank) => (
-                <li key={bank.id} className="bank-row">
-                  <div className="bank-text">
-                    <span className="bank-name">{bank.name}</span>
-                    <span className="bank-meta">
-                      {bank.id} &middot; {bank.currency}
-                    </span>
-                  </div>
+        <div className="modal-split">
+          <nav className="settings-nav" aria-label="Settings sections">
+            <ul className="settings-nav-list">
+              {SECTIONS.map((s) => (
+                <li key={s.id}>
                   <button
                     type="button"
-                    className={bank.enabled ? "toggle on" : "toggle"}
-                    onClick={() => toggle(bank)}
-                    disabled={busy === bank.id}
-                    aria-pressed={bank.enabled}
+                    className={section === s.id ? "settings-nav-item active" : "settings-nav-item"}
+                    onClick={() => setSection(s.id)}
                   >
-                    {bank.enabled ? "ON" : "OFF"}
+                    {s.label}
                   </button>
                 </li>
               ))}
             </ul>
-          )}
+          </nav>
+          <div className="settings-content">
+            {section === "general" && <GeneralSection />}
+            {section === "banks" && <BanksSection />}
+            {section === "sources" && <SourcesSection />}
+          </div>
         </div>
       </div>
     </div>

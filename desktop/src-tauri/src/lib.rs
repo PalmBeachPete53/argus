@@ -1,12 +1,12 @@
 //! Argus desktop — Tauri 2 native layer.
 //!
 //! Rust stays confined to the Tauri shell. All Argus business state (bank
-//! toggle, data path) lives in the Python Core and is reached by spawning
-//! `python -m argus.gui_bridge` (single source of truth). Directory browsing
-//! of the exposed `data/` area is generic filesystem access.
+//! toggle, data path, directory listing) lives in the Python Core and is
+//! reached by spawning `python -m argus.gui_bridge` (single source of truth).
+//! The bridge resolves and confines every path to the Argus `data/` directory.
 
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde::Serialize;
 use tauri::State;
@@ -114,6 +114,91 @@ impl Bridge {
             .map(String::from)
             .ok_or_else(|| "malformed bridge output: missing 'root'".to_string())
     }
+
+    /// List `<data-root>/<relative_path>` through the bridge, which resolves and
+    /// confines the path to the Argus `data/` directory (rejects `..` escapes,
+    /// absolute paths, missing/unreadable directories).
+    fn list_dir(&self, relative_path: &str) -> Result<DirListing, String> {
+        let out = self.run(&["list-dir".into(), relative_path.to_string()])?;
+        let value: serde_json::Value = serde_json::from_str(&out).map_err(|err| err.to_string())?;
+        if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
+            return Err(err.to_string());
+        }
+        serde_json::from_value(value).map_err(|err| err.to_string())
+    }
+
+    /// Open a supported file (`html`/`htm`/`pdf`) inside `data/` with the
+    /// OS-default application. The bridge validates confinement, existence and
+    /// the file type before handing the file to the system launcher.
+    fn open_file(&self, relative_path: &str) -> Result<(), String> {
+        let out = self.run(&["open-file".into(), relative_path.to_string()])?;
+        let value: serde_json::Value = serde_json::from_str(&out).map_err(|err| err.to_string())?;
+        if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
+            return Err(err.to_string());
+        }
+        Ok(())
+    }
+
+    /// Read-only view of the real ``SourceRegistry`` (never duplicated in the
+    /// frontend): each bank's known sources.
+    fn sources(&self) -> Result<std::collections::HashMap<String, BankSources>, String> {
+        let out = self.run(&["sources".into()])?;
+        let value: serde_json::Value = serde_json::from_str(&out).map_err(|err| err.to_string())?;
+        value
+            .get("banks")
+            .cloned()
+            .ok_or_else(|| "malformed bridge output: missing 'banks'".to_string())
+            .and_then(|v| serde_json::from_value(v).map_err(|err| err.to_string()))
+    }
+
+    /// Launch a discovery campaign as a *detached* background subprocess.
+    ///
+    /// Discovery is a long-running operation; the Rust shell only starts the
+    /// Core's campaign (which records its lifecycle in the store) and returns
+    /// immediately. The frontend observes it via ``discovery_status`` /
+    /// ``discovery_results`` — the interface never blocks on the run.
+    fn discovery_run(&self) -> Result<(), String> {
+        Command::new(&self.python)
+            .arg("-m")
+            .arg("argus.gui_bridge")
+            .arg("discovery-run")
+            .current_dir(&self.root)
+            .env("PYTHONPATH", self.root.join("src"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|err| format!("failed to launch discovery: {err}"))?;
+        Ok(())
+    }
+
+    /// JSON summary of the most recent discovery campaign.
+    fn discovery_status(&self) -> Result<DiscoveryRun, String> {
+        let out = self.run(&["discovery-status".into()])?;
+        serde_json::from_str(&out).map_err(|err| err.to_string())
+    }
+
+    /// JSON candidates of a discovery campaign (latest run by default).
+    fn discovery_results(&self) -> Result<DiscoveryResults, String> {
+        let out = self.run(&["discovery-results".into()])?;
+        serde_json::from_str(&out).map_err(|err| err.to_string())
+    }
+
+    /// Read-only store aggregates for the Overview.
+    fn stats(&self) -> Result<DataStats, String> {
+        let out = self.run(&["stats".into()])?;
+        serde_json::from_str(&out).map_err(|err| err.to_string())
+    }
+
+    /// Open an http(s) URL with the OS-default application (bridge validates).
+    fn open_url(&self, url: &str) -> Result<(), String> {
+        let out = self.run(&["open-url".into(), url.to_string()])?;
+        let value: serde_json::Value = serde_json::from_str(&out).map_err(|err| err.to_string())?;
+        if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
+            return Err(err.to_string());
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -129,20 +214,89 @@ struct BankInfo {
     enabled: bool,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+// Directory types match the bridge's snake_case JSON contract (and the
+// frontend's TS types): `is_dir`, `root`, `segments`, `parent`.
+#[derive(Serialize, serde::Deserialize)]
 struct DirEntry {
     name: String,
     path: String,
     is_dir: bool,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Serialize, serde::Deserialize)]
 struct DirListing {
+    root: String,
     path: String,
+    segments: Vec<String>,
     parent: Option<String>,
     entries: Vec<DirEntry>,
+}
+
+// Read-only view of the Core's SourceRegistry (mirrors the bridge contract).
+#[derive(Serialize, serde::Deserialize)]
+struct SourceInfo {
+    id: String,
+    name: String,
+    kind: String,
+    url: String,
+    enabled: bool,
+    publication_types: Vec<String>,
+    search_fallback: bool,
+}
+
+#[derive(Serialize, serde::Deserialize)]
+struct BankSources {
+    bank: String,
+    sources: Vec<SourceInfo>,
+}
+
+// Discovery campaign contract (mirrors the bridge's snake_case JSON).
+#[derive(Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct DiscoveryRun {
+    run_id: Option<String>,
+    status: String, // idle | running | completed | failed
+    started_at: Option<String>,
+    finished_at: Option<String>,
+    error: Option<String>,
+    candidates: i64,
+    banks: Vec<String>,
+}
+
+#[derive(Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct DiscoveryCandidate {
+    publication_id: Option<String>,
+    bank_id: String,
+    bank_name: String,
+    title: String,
+    url: String,
+    source_id: String,
+    method: String, // native | search
+    is_new: bool,
+    discovered_at: Option<String>,
+    publication_date: Option<String>,
+}
+
+#[derive(Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct DiscoveryResults {
+    run_id: Option<String>,
+    status: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+    candidates: Vec<DiscoveryCandidate>,
+    total: i64,
+}
+
+#[derive(Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct DataStats {
+    publications: i64,
+    documents: i64,
+    normalized_documents: i64,
+    facts: i64,
+    last_discovery: Option<DiscoveryRun>,
 }
 
 // ---------------------------------------------------------------------------
@@ -167,28 +321,43 @@ fn get_data_root(state: State<'_, Bridge>) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn list_dir(path: String) -> Result<DirListing, String> {
-    let dir = PathBuf::from(&path);
-    let meta = std::fs::metadata(&dir).map_err(|err| format!("cannot access {path}: {err}"))?;
-    if !meta.is_dir() {
-        return Err(format!("not a directory: {path}"));
-    }
-    let mut entries: Vec<DirEntry> = Vec::new();
-    for item in std::fs::read_dir(&dir).map_err(|err| format!("cannot read {path}: {err}"))? {
-        let item = item.map_err(|err| err.to_string())?;
-        let file_type = item.file_type().map_err(|err| err.to_string())?;
-        entries.push(DirEntry {
-            name: item.file_name().to_string_lossy().into_owned(),
-            path: item.path().to_string_lossy().into_owned(),
-            is_dir: file_type.is_dir(),
-        });
-    }
-    entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
-    let parent = dir
-        .parent()
-        .map(|p| p.to_string_lossy().into_owned())
-        .filter(|p| !p.is_empty());
-    Ok(DirListing { path, parent, entries })
+fn list_dir(state: State<'_, Bridge>, relative_path: String) -> Result<DirListing, String> {
+    state.list_dir(&relative_path)
+}
+
+#[tauri::command]
+fn open_file(state: State<'_, Bridge>, relative_path: String) -> Result<(), String> {
+    state.open_file(&relative_path)
+}
+
+#[tauri::command]
+fn get_sources(state: State<'_, Bridge>) -> Result<std::collections::HashMap<String, BankSources>, String> {
+    state.sources()
+}
+
+#[tauri::command]
+fn run_discovery(state: State<'_, Bridge>) -> Result<(), String> {
+    state.discovery_run()
+}
+
+#[tauri::command]
+fn get_discovery_status(state: State<'_, Bridge>) -> Result<DiscoveryRun, String> {
+    state.discovery_status()
+}
+
+#[tauri::command]
+fn get_discovery_results(state: State<'_, Bridge>) -> Result<DiscoveryResults, String> {
+    state.discovery_results()
+}
+
+#[tauri::command]
+fn get_stats(state: State<'_, Bridge>) -> Result<DataStats, String> {
+    state.stats()
+}
+
+#[tauri::command]
+fn open_url(state: State<'_, Bridge>, url: String) -> Result<(), String> {
+    state.open_url(&url)
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +365,19 @@ fn list_dir(path: String) -> Result<DirListing, String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(Bridge::new())
-        .invoke_handler(tauri::generate_handler![get_banks, set_bank, get_data_root, list_dir])
+        .invoke_handler(tauri::generate_handler![
+            get_banks,
+            set_bank,
+            get_data_root,
+            list_dir,
+            open_file,
+            get_sources,
+            run_discovery,
+            get_discovery_status,
+            get_discovery_results,
+            get_stats,
+            open_url
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Argus");
 }
@@ -243,21 +424,120 @@ mod tests {
     }
 
     #[test]
-    fn list_dir_lists_and_sorts() {
-        let dir = std::env::temp_dir().join(format!("argus-test-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("sub")).unwrap();
-        std::fs::write(dir.join("a.txt"), b"x").unwrap();
-        let listing = list_dir(dir.to_string_lossy().into_owned()).unwrap();
-        assert_eq!(listing.parent, dir.parent().map(|p| p.to_string_lossy().into_owned()));
-        // directories sort before files; names then alphabetically
-        let kinds: Vec<&str> = listing.entries.iter().map(|e| if e.is_dir { "dir" } else { "file" }).collect();
-        assert_eq!(kinds, vec!["dir", "file"]);
-        let _ = std::fs::remove_dir_all(&dir);
+    fn bridge_lists_data_root() {
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        if !bridge.root.join("data").is_dir() {
+            return; // no data dir in this checkout
+        }
+        let listing = bridge.list_dir("").expect("bridge must list data/");
+        assert!(listing.root.ends_with("data"));
+        assert!(listing.parent.is_none());
+        assert!(listing.segments.is_empty());
     }
 
     #[test]
-    fn list_dir_errors_on_missing_path() {
-        let missing = std::env::temp_dir().join(format!("argus-does-not-exist-{}", std::process::id()));
-        assert!(list_dir(missing.to_string_lossy().into_owned()).is_err());
+    fn bridge_rejects_escape() {
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        for bad in ["..", "../..", "../../etc", "/etc", "/tmp"] {
+            assert!(bridge.list_dir(bad).is_err(), "expected rejection for {bad:?}");
+        }
+    }
+
+    #[test]
+    fn bridge_lists_existing_subdir() {
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        if !bridge.root.join("data").join("raw_2025").is_dir() {
+            return;
+        }
+        let listing = bridge.list_dir("raw_2025").expect("bridge must list raw_2025/");
+        assert_eq!(listing.path, "raw_2025");
+        assert_eq!(listing.segments, vec!["raw_2025"]);
+        assert_eq!(listing.parent, Some("".to_string()));
+    }
+
+    #[test]
+    fn bridge_missing_directory_is_error() {
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        assert!(bridge.list_dir("definitely-not-here").is_err());
+    }
+
+    #[test]
+    fn bridge_open_file_rejects_escapes_without_opening() {
+        // These must fail before any system launcher is invoked.
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        for bad in ["..", "../secret.pdf", "../../etc/passwd", "/etc/passwd", "/tmp/x.pdf"] {
+            assert!(bridge.open_file(bad).is_err(), "expected rejection for {bad:?}");
+        }
+        assert!(bridge.open_file("definitely-not-here.pdf").is_err());
+    }
+
+    #[test]
+    fn bridge_sources_end_to_end() {
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let banks = bridge.sources().expect("bridge must return the source registry");
+        assert!(banks.contains_key("fed"));
+        assert!(!banks["fed"].sources.is_empty(), "fed must have configured sources");
+        assert!(banks.contains_key("rbnz"), "rbnz stays a known bank");
+    }
+
+    #[test]
+    fn bridge_discovery_status_is_readable() {
+        // Read-only: never launches a campaign, never mutates the store. The
+        // real store may hold zero runs (idle) or a previous campaign.
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let run = bridge.discovery_status().expect("bridge must return discovery status");
+        assert!(
+            matches!(run.status.as_str(), "idle" | "running" | "completed" | "failed"),
+            "unexpected status: {}",
+            run.status
+        );
+        assert!(run.candidates >= 0);
+    }
+
+    #[test]
+    fn bridge_stats_are_readable() {
+        // Read-only aggregates; numbers must come from the Core store.
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let stats = bridge.stats().expect("bridge must return stats");
+        assert!(stats.publications >= 0);
+        assert!(stats.documents >= 0);
+        assert!(stats.normalized_documents >= 0);
+        assert!(stats.facts >= 0);
+    }
+
+    #[test]
+    fn bridge_open_url_rejects_non_http() {
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        // Must fail validation before any system launcher is invoked.
+        for bad in ["ftp://example.org", "file:///etc/passwd", "javascript:alert(1)"] {
+            assert!(bridge.open_url(bad).is_err(), "expected rejection for {bad:?}");
+        }
     }
 }

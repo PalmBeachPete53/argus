@@ -85,6 +85,42 @@ CREATE TABLE IF NOT EXISTS collect_errors (
     created_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_errors_bank ON collect_errors(bank_id);
+CREATE TABLE IF NOT EXISTS discovery_runs (
+    -- One row per discovery campaign (launched from the CLI or the desktop
+    -- GUI). The report layer for a discovery run: status, timing and scope.
+    -- Discovery itself stays untouched in the collector/strategies — this only
+    -- records the lifecycle of a campaign so the GUI can observe it.
+    run_id TEXT PRIMARY KEY,
+    started_at TEXT,
+    finished_at TEXT,
+    status TEXT,
+    error TEXT,
+    candidates INTEGER DEFAULT 0,
+    banks_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_discovery_runs_started
+    ON discovery_runs(started_at);
+CREATE TABLE IF NOT EXISTS discovery_candidates (
+    -- The result snapshot of a discovery campaign: one row per candidate the
+    -- Core's discovery produced for that run, with the provenance the GUI
+    -- needs (method Native/Search, new/known as of this run). The `publications`
+    -- table remains the single source of truth for downstream work.
+    run_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    publication_id TEXT,
+    central_bank TEXT,
+    bank_name TEXT,
+    title TEXT,
+    url TEXT,
+    source_id TEXT,
+    method TEXT,
+    is_new INTEGER,
+    discovered_at TEXT,
+    publication_date TEXT,
+    PRIMARY KEY (run_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_discovery_candidates_run
+    ON discovery_candidates(run_id);
 CREATE TABLE IF NOT EXISTS normalized_documents (
     document_id TEXT PRIMARY KEY,
     publication_id TEXT NOT NULL,
@@ -892,6 +928,143 @@ class Store:
 
     def run_stamp(self) -> str:
         return time_mod.strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
+
+    # ------------------------------------------------------------------
+    # Discovery campaign report layer (run lifecycle + result snapshot)
+    # ------------------------------------------------------------------
+
+    def start_discovery_run(self, run_id: str, banks) -> None:
+        """Record that a discovery campaign started (status ``running``)."""
+        self._conn.execute(
+            """
+            INSERT INTO discovery_runs (run_id, started_at, status, candidates, banks_json)
+            VALUES (?, ?, 'running', 0, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                started_at=excluded.started_at,
+                status='running',
+                candidates=0,
+                error=NULL,
+                finished_at=NULL,
+                banks_json=excluded.banks_json
+            """,
+            (run_id, iso(now_utc()), json.dumps(list(banks or ()))),
+        )
+        self._conn.commit()
+
+    def finish_discovery_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        candidates: list[dict] | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Finalize a discovery campaign: status + per-candidate snapshot.
+
+        ``candidates`` is the *report* of what the run discovered (provenance
+        fields such as method and new/known are computed by the caller from the
+        publications the Core's discovery returned). The ``publications`` table
+        stays the single source of truth for the pipeline itself.
+        """
+        rows = candidates or []
+        finished = iso(now_utc())
+        self._conn.execute(
+            "DELETE FROM discovery_candidates WHERE run_id=?", (run_id,)
+        )
+        for position, c in enumerate(rows):
+            self._conn.execute(
+                """
+                INSERT INTO discovery_candidates
+                    (run_id, position, publication_id, central_bank, bank_name,
+                     title, url, source_id, method, is_new, discovered_at, publication_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    position,
+                    c.get("publication_id"),
+                    c.get("bank_id"),
+                    c.get("bank_name"),
+                    c.get("title"),
+                    c.get("url"),
+                    c.get("source_id"),
+                    c.get("method"),
+                    1 if c.get("is_new") else 0,
+                    c.get("discovered_at"),
+                    c.get("publication_date"),
+                ),
+            )
+        self._conn.execute(
+            "UPDATE discovery_runs SET finished_at=?, status=?, candidates=?, error=? WHERE run_id=?",
+            (finished, status, len(rows), error, run_id),
+        )
+        self._conn.commit()
+
+    @staticmethod
+    def _run_from_row(row: sqlite3.Row) -> dict | None:
+        if row is None:
+            return None
+        return {
+            "run_id": row["run_id"],
+            "status": row["status"],
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+            "error": row["error"],
+            "candidates": row["candidates"] or 0,
+            "banks": json.loads(row["banks_json"] or "[]"),
+        }
+
+    def get_discovery_run(self, run_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM discovery_runs WHERE run_id=?", (run_id,)
+        ).fetchone()
+        return self._run_from_row(row)
+
+    def latest_discovery_run(self) -> dict | None:
+        """The most recently started discovery campaign, if any."""
+        row = self._conn.execute(
+            "SELECT * FROM discovery_runs ORDER BY started_at DESC, run_id DESC LIMIT 1"
+        ).fetchone()
+        return self._run_from_row(row)
+
+    def list_discovery_candidates(self, run_id: str) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM discovery_candidates WHERE run_id=? ORDER BY position",
+            (run_id,),
+        ).fetchall()
+        return [
+            {
+                "publication_id": r["publication_id"],
+                "bank_id": r["central_bank"],
+                "bank_name": r["bank_name"],
+                "title": r["title"],
+                "url": r["url"],
+                "source_id": r["source_id"],
+                "method": r["method"],
+                "is_new": bool(r["is_new"]),
+                "discovered_at": r["discovered_at"],
+                "publication_date": r["publication_date"],
+            }
+            for r in rows
+        ]
+
+    # ------------------------------------------------------------------
+    # Overview counters (read-only aggregates for the GUI)
+    # ------------------------------------------------------------------
+
+    def count_publications(self) -> int:
+        return int(self._conn.execute("SELECT COUNT(*) AS n FROM publications").fetchone()["n"])
+
+    def count_documents(self) -> int:
+        return int(self._conn.execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"])
+
+    def count_normalized_documents(self) -> int:
+        return int(
+            self._conn.execute("SELECT COUNT(*) AS n FROM normalized_documents").fetchone()["n"]
+        )
+
+    def count_facts(self) -> int:
+        return int(self._conn.execute("SELECT COUNT(*) AS n FROM facts").fetchone()["n"])
 
     # ------------------------------------------------------------------
     # Phase 2A — normalization persistence
