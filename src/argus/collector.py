@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from . import models
 from .discovery import create as create_strategy
@@ -12,6 +16,37 @@ from .store import Store
 
 DEFAULT_STORE_PATH = "data/argus.db"
 DEFAULT_RAW_ROOT = "data/raw"
+
+# Bounded discovery worker pool: at most this many *sources* are discovered
+# simultaneously. Discovery is network/I-O bound, so a handful of threads is
+# enough to saturate the available parallelism without hammering hosts or the
+# store. Configurable per process via ARGUS_DISCOVERY_WORKERS (a future GUI
+# setting can reuse the same hook).
+DISCOVERY_WORKERS = 6
+_WORKERS_ENV = "ARGUS_DISCOVERY_WORKERS"
+
+
+def _worker_pool_size() -> int:
+    raw = os.environ.get(_WORKERS_ENV, "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return DISCOVERY_WORKERS
+
+
+@dataclass
+class _SourceDiscoveryResult:
+    """What one worker produced for one source — never touches the Store.
+
+    The scheduler collects these and performs every Store mutation serially
+    (the Store owns a single connection and is not thread-safe).
+    """
+
+    source: models.Source
+    publications: list[models.Publication]
+    ok: bool
+    error: str | None
+    strategy: object | None
+    native_error: Exception | None
 
 
 def in_bounds(pub, start, end) -> bool:
@@ -48,6 +83,12 @@ class CentralBankCollector:
     ) -> None:
         self.store = store if isinstance(store, Store) else Store(store or DEFAULT_STORE_PATH)
         self.registry = registry or SourceRegistry()
+        # An explicitly injected client (tests / callers) is shared as-is by the
+        # parallel workers; a collector-owned client is replaced by one fresh
+        # HttpClient per worker so a `requests.Session` is never used
+        # concurrently from several threads.
+        self._injected_client = client is not None
+        self._http_config = http_config
         self.client = client or HttpClient(http_config)
         self.fetcher = fetcher or Fetcher(
             self.client,
@@ -57,6 +98,16 @@ class CentralBankCollector:
         self.search_provider = search_provider
         self._now = now
         self.errors: list[CollectError] = []
+
+    def _new_client(self) -> HttpClient:
+        """A client for one discovery worker.
+
+        Collector-owned clients are per-worker (own session, own rate limiter
+        and robots cache); an injected client is the test double, shared.
+        """
+        if self._injected_client:
+            return self.client
+        return HttpClient(self._http_config)
 
     def _sync_sources(self) -> None:
         for source in self.registry.sources:
@@ -70,24 +121,74 @@ class CentralBankCollector:
         run_id: str | None = None,
         date_start=None,
         date_end=None,
+        progress: Callable[[int, int], None] | None = None,
     ) -> list[models.Publication]:
         """Discover and persist publications across the enabled sources.
 
+        The enabled sources are discovered by a **bounded pool of workers** (one
+        worker per source at a time, at most ``DISCOVERY_WORKERS``). Workers only
+        perform the network discovery and candidate generation — every Store
+        mutation is performed here, serially, on the main thread, because the
+        Store owns a single SQLite connection and is not thread-safe.
+
         ``date_start`` / ``date_end`` (datetime) restrict *what enters the
         store* to the publication-date window (start-inclusive, end-exclusive,
-        see :func:`in_bounds`). With no bounds the behaviour is unchanged:
-        every discovered publication is persisted. The window lives here, in
-        the Core, so the CLI and the GUI bridge apply it identically.
+        see :func:`in_bounds`); every worker receives the same bounds. With no
+        bounds the behaviour is unchanged: every discovered publication is
+        persisted. The window lives here, in the Core, so the CLI and the GUI
+        bridge apply it identically. An error on one source never fails the
+        campaign: it is recorded (logged + source result) and the other
+        sources proceed.
+
+        ``progress(completed, total)`` is called (on the caller's thread) after
+        each source finishes — ``completed`` / ``total`` are source counts, so a
+        future GUI progress bar needs no prior knowledge of the candidate count.
         """
         self._sync_sources()
         run_id = run_id or self.store.run_stamp()
+        sources = self.registry.enabled_sources(banks=banks, source_ids=source_ids)
         publications: list[models.Publication] = []
-        for source in self.registry.enabled_sources(banks=banks, source_ids=source_ids):
+        if not sources:
+            return publications
+
+        outcomes = self._run_sources(
+            sources, date_start=date_start, date_end=date_end, progress=progress
+        )
+
+        # Serialized Store writes, in source order (dedup makes the result
+        # independent of worker completion order).
+        for outcome in outcomes:
+            if outcome.native_error is not None:
+                # Native discovery was unavailable → run the search fallback when
+                # the source is configured for it; always log the native error so
+                # operators know native discovery failed.
+                self._log_error(outcome.source, outcome.strategy, outcome.native_error, run_id)
+            for publication in outcome.publications:
+                publications.append(self.store.upsert_publication(publication))
+            self.store.record_source_result(
+                outcome.source.id, ok=outcome.ok, error=outcome.error
+            )
+        return publications
+
+    def _discover_source_worker(
+        self,
+        source: models.Source,
+        date_start=None,
+        date_end=None,
+    ) -> _SourceDiscoveryResult:
+        """Discover **one arbitrary source** (never bank- or source-specific).
+
+        Pure network/candidate work: this must not touch the Store. Any error —
+        strategy, search fallback, or unexpected — is isolated into the result
+        so a failing source cannot kill the other workers.
+        """
+        client = self._new_client()
+        try:
             found: list[models.Publication] = []
             strategy = None
             native_error: Exception | None = None
             try:
-                strategy = create_strategy(source, self.client, now=self._now)
+                strategy = create_strategy(source, client, now=self._now)
                 found = strategy.discover()
             except Exception as exc:
                 native_error = exc
@@ -97,9 +198,8 @@ class CentralBankCollector:
             source_error: str | None = None
             if native_error is not None:
                 # Native discovery was unavailable → run the search fallback when
-                # the source is configured for it; always log the native error so
-                # operators know native discovery failed.
-                self._log_error(source, strategy, native_error, run_id)
+                # the source is configured for it (the native error is logged by
+                # the serialized writer).
                 if self._search_configured(source):
                     found = self._search_fallback(source)
                 if not found:
@@ -110,14 +210,51 @@ class CentralBankCollector:
                 # explicitly opts in to a search fallback on empty.
                 found = self._search_fallback(source)
 
-            for publication in found:
-                if not in_bounds(publication, date_start, date_end):
-                    continue
-                publications.append(self.store.upsert_publication(publication))
-            self.store.record_source_result(
-                source.id, ok=source_ok, error=source_error
+            in_window = [p for p in found if in_bounds(p, date_start, date_end)]
+            return _SourceDiscoveryResult(
+                source=source,
+                publications=in_window,
+                ok=source_ok,
+                error=source_error,
+                strategy=strategy,
+                native_error=native_error,
             )
-        return publications
+        except Exception as exc:  # pragma: no cover - defensive isolation
+            return _SourceDiscoveryResult(
+                source=source,
+                publications=[],
+                ok=False,
+                error=f"{exc.__class__.__name__}: {exc}",
+                strategy=None,
+                native_error=exc,
+            )
+
+    def _run_sources(self, sources, *, date_start=None, date_end=None, progress=None):
+        """Run the bounded worker pool over ``sources``, preserving source order.
+
+        ``progress(completed, total)`` is invoked on the caller's thread as each
+        source finishes. A stop request (``DiscoveryStopped`` raised on the main
+        thread by the SIGTERM handler, or any other unexpected failure) shuts
+        the pool down without waiting for in-flight workers and propagates — the
+        campaign lifecycle (Stop / app close) must never wait for a stuck worker.
+        """
+        executor = ThreadPoolExecutor(max_workers=_worker_pool_size())
+        total = len(sources)
+        try:
+            futures = [
+                executor.submit(self._discover_source_worker, source, date_start, date_end)
+                for source in sources
+            ]
+            results = []
+            for index, future in enumerate(futures):
+                results.append(future.result())
+                if progress is not None:
+                    progress(index + 1, total)
+        except BaseException:
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        executor.shutdown(wait=True)
+        return results
 
     def _search_configured(self, source) -> bool:
         return bool(source.discovery.search_query) and self.search_provider is not None
