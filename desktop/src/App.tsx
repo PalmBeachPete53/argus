@@ -19,7 +19,7 @@ export default function App() {
         <Sidebar active={view} onSelect={setView} />
         <MainContent view={view} discovery={discovery} />
       </div>
-      <Footer status={discovery.status} />
+      <Footer status={discovery.status} starting={discovery.starting} />
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </div>
   );

@@ -2,14 +2,17 @@ import type { DiscoveryRun } from "../types";
 
 interface FooterProps {
   status: DiscoveryRun;
+  /** True while a just-launched campaign is awaited to appear in the store. */
+  starting?: boolean;
 }
 
 // Minimal use of the footer: it becomes the global status bar, but stays sober
 // for V1. Discovery is the only activity surfaced so far; the text comes from
 // the Core's run state — never a simulated progress percentage.
-export default function Footer({ status }: FooterProps) {
+export default function Footer({ status, starting = false }: FooterProps) {
   let text = "";
-  if (status.status === "running") text = "Discovery running…";
+  if (starting) text = "Starting Discovery…";
+  else if (status.status === "running") text = "Discovery running…";
   else if (status.status === "paused") text = "Discovery paused";
   else if (status.status === "completed")
     text = `Discovery completed · ${status.candidates} candidates`;

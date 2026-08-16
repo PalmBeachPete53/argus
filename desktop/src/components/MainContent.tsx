@@ -7,6 +7,8 @@ export interface DiscoveryState {
   status: DiscoveryRun;
   candidates: DiscoveryCandidate[];
   error: string | null;
+  /** True while a just-launched campaign is awaited to appear in the store. */
+  starting: boolean;
   launch: (startDate?: string, endDate?: string) => Promise<boolean>;
   pause: () => Promise<boolean>;
   resume: () => Promise<boolean>;

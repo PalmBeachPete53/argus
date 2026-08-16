@@ -17,6 +17,18 @@ from .models import (
 )
 from .normalize import compute_dedup_key, from_iso, iso, now_utc
 
+
+def make_run_stamp() -> str:
+    """Mint a discovery-run identifier: local timestamp + process id.
+
+    A single function so the id format lives in exactly one place (the Core) —
+    the desktop launcher asks the bridge for a fresh stamp before spawning the
+    detached campaign, then passes it back in so ``run_discovery`` can return
+    the campaign's identity synchronously (no "guess the latest run" race).
+    """
+    return time_mod.strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sources (
     id TEXT PRIMARY KEY,
@@ -969,7 +981,7 @@ class Store:
         return errors
 
     def run_stamp(self) -> str:
-        return time_mod.strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
+        return make_run_stamp()
 
     # ------------------------------------------------------------------
     # Discovery campaign report layer (run lifecycle + result snapshot)

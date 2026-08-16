@@ -100,3 +100,9 @@ export interface ClearedCache {
   runs_preserved: number;
   candidates_cleared: number;
 }
+
+/** Identity returned by `run_discovery` so the frontend can follow exactly the
+ * campaign it just launched (never "the latest run"). */
+export interface DiscoveryRunId {
+  run_id: string;
+}

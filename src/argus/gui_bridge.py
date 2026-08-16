@@ -56,7 +56,7 @@ from .config import enabled_banks
 from .http import HttpConfig
 from .normalize import iso, now_utc
 from .registry import SourceRegistry
-from .store import ActiveDiscoveryError, Store
+from .store import ActiveDiscoveryError, Store, make_run_stamp
 
 USAGE = (
     "usage: python -m argus.gui_bridge "
@@ -592,6 +592,7 @@ def _run_discovery_campaign(
     banks: tuple[str, ...],
     date_start: datetime | None = None,
     date_end: datetime | None = None,
+    run_id: str | None = None,
 ) -> dict:
     """Run one discovery campaign and record its lifecycle in the store.
 
@@ -625,7 +626,7 @@ def _run_discovery_campaign(
         }
     store = Store(store_path)
     registry = SourceRegistry()
-    run_id = store.run_stamp()
+    run_id = run_id or make_run_stamp()
     bank_names = {b.id: b.name for b in registry.banks}
     # The number of sources the campaign will discover, fixed at launch so the
     # GUI reads 0 / N immediately; the Core advances `sources_completed` via the
@@ -713,15 +714,24 @@ def _cmd_discovery_run(argv: list[str]) -> int:
     persisted with the run. Exactly one campaign may be active; the Store
     claims the run in a locked transaction, so a concurrent or second launch
     (even racing) is refused here too.
+
+    ``--run-id <id>`` (optional) lets the desktop launcher pre-mint the run's
+    identity (via ``discovery-run-id``) so it can be returned to the frontend
+    *before* the detached subprocess records it — the campaign then starts
+    under that exact id instead of minting its own.
     """
     banks = enabled_banks()
     selected: list[str] = []
     date_start = None
     date_end = None
+    run_id = None
     index = 0
     while index < len(argv):
         if argv[index] == "--bank" and index + 1 < len(argv):
             selected.append(argv[index + 1])
+            index += 2
+        elif argv[index] == "--run-id" and index + 1 < len(argv):
+            run_id = argv[index + 1].strip() or None
             index += 2
         elif argv[index] == "--start-date" and index + 1 < len(argv):
             value = argv[index + 1].strip()
@@ -780,13 +790,27 @@ def _cmd_discovery_run(argv: list[str]) -> int:
         return 1
 
     try:
-        result = _run_discovery_campaign(_store_path(), _raw_root(), banks, date_start, date_end)
+        result = _run_discovery_campaign(
+            _store_path(), _raw_root(), banks, date_start, date_end, run_id=run_id
+        )
     except ActiveDiscoveryError as exc:
         # Lost the claim race — another campaign started first. This is the
         # backend's single-active invariant, never a client-side guess.
         print(json.dumps({"error": str(exc)}, indent=2))
         return 1
     print(json.dumps(result, indent=2))
+    return 0
+
+
+def _cmd_discovery_run_id(argv: list[str]) -> int:
+    """Mint a fresh discovery-run identifier (no store access, no side effect).
+
+    The desktop launcher calls this synchronously before spawning the detached
+    campaign, so ``run_discovery`` can return the run's identity immediately —
+    the frontend then waits for *that* id to appear instead of racing with the
+    previous terminal run.
+    """
+    print(json.dumps({"run_id": make_run_stamp()}, indent=2))
     return 0
 
 
@@ -1013,6 +1037,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_sources()
     if command == "discovery-run":
         return _cmd_discovery_run(argv[1:])
+    if command == "discovery-run-id":
+        return _cmd_discovery_run_id(argv[1:])
     if command == "discovery-control":
         return _cmd_discovery_control(argv[1:])
     if command == "discovery-clear":

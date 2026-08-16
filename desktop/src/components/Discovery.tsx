@@ -167,7 +167,7 @@ function ConfirmButton({
  * while a campaign is active.
  */
 export default function Discovery({ discovery }: DiscoveryProps) {
-  const { status, candidates, error, openUrl } = discovery;
+  const { status, candidates, error, starting, openUrl } = discovery;
   const [selected, setSelected] = useState<DiscoveryCandidate | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
@@ -175,7 +175,7 @@ export default function Discovery({ discovery }: DiscoveryProps) {
 
   const running = status.status === "running";
   const paused = status.status === "paused";
-  const active = running || paused;
+  const active = (running || paused) && !starting;
   const hasRun = status.run_id !== null;
 
   const range =
@@ -186,7 +186,7 @@ export default function Discovery({ discovery }: DiscoveryProps) {
       : "Unbounded";
 
   const windowStatus = rangeStatus(dateFrom, dateTo);
-  const runDisabled = active || windowStatus !== "valid";
+  const runDisabled = active || starting || windowStatus !== "valid";
 
   const handleRun = () => {
     // Both dates are guaranteed non-empty here (Run is disabled otherwise).
@@ -293,7 +293,7 @@ export default function Discovery({ discovery }: DiscoveryProps) {
             <dd>{hasRun ? range : "—"}</dd>
           </div>
         </dl>
-        {hasRun && status.status !== "idle" && <CampaignProgress status={status} />}
+        {hasRun && status.status !== "idle" && !starting && <CampaignProgress status={status} />}
         <div className="discovery-stats">
           <div className="stat-card">
             <span className="stat-value">{status.candidates.toLocaleString()}</span>
@@ -309,6 +309,12 @@ export default function Discovery({ discovery }: DiscoveryProps) {
           </div>
         </div>
       </section>
+
+      {starting && (
+        <div className="discovery-empty">
+          <p className="discovery-running-text">Starting Discovery…</p>
+        </div>
+      )}
 
       {active && (
         <div className="discovery-empty">

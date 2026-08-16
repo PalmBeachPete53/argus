@@ -200,7 +200,7 @@ impl Bridge {
     /// is re-read here *before* spawning, and a busy campaign surfaces a
     /// synchronous error instead of a silent no-op. The Core guard remains the
     /// authority for the racing case.
-    fn discovery_run(&self, start_date: Option<String>, end_date: Option<String>) -> Result<(), String> {
+    fn discovery_run(&self, start_date: Option<String>, end_date: Option<String>) -> Result<DiscoveryRunId, String> {
         let start = start_date.filter(|s| !s.trim().is_empty());
         let end = end_date.filter(|s| !s.trim().is_empty());
         if start.is_none() || end.is_none() {
@@ -214,12 +214,25 @@ impl Bridge {
             let run_id = active.run_id.as_deref().unwrap_or("<unknown>");
             return Err(format!("a discovery campaign is already active: {run_id}"));
         }
+        // Mint the campaign's identity *before* spawning, so the caller can
+        // return it synchronously and follow exactly this run — never "latest".
+        let run_id = self.discovery_run_id()?.run_id;
         let mut args = vec!["discovery-run".to_string()];
+        args.push("--run-id".into());
+        args.push(run_id.clone());
         args.push("--start-date".into());
         args.push(start.unwrap_or_default());
         args.push("--end-date".into());
         args.push(end.unwrap_or_default());
-        self.spawn_detached(&args)
+        self.spawn_detached(&args)?;
+        Ok(DiscoveryRunId { run_id })
+    }
+
+    /// Mint a fresh discovery-run identifier from the Core (no side effect).
+    /// The Core owns the id format; the launcher only relays it.
+    fn discovery_run_id(&self) -> Result<DiscoveryRunId, String> {
+        let out = self.run(&["discovery-run-id".into()])?;
+        serde_json::from_str(&out).map_err(|err| err.to_string())
     }
 
     /// Real lifecycle control of a campaign subprocess, targeted by its
@@ -391,6 +404,14 @@ struct ClearedCache {
     candidates_cleared: i64,
 }
 
+// The identity of a newly-launched discovery campaign (returned by
+// `run_discovery` so the frontend can follow exactly this run).
+#[derive(Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct DiscoveryRunId {
+    run_id: String,
+}
+
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
@@ -432,7 +453,7 @@ fn run_discovery(
     state: State<'_, Bridge>,
     start_date: Option<String>,
     end_date: Option<String>,
-) -> Result<(), String> {
+) -> Result<DiscoveryRunId, String> {
     state.discovery_run(start_date, end_date)
 }
 
@@ -656,6 +677,22 @@ mod tests {
     }
 
     #[test]
+    fn discovery_run_id_is_minted_by_core() {
+        // The launcher asks the Core to mint a run identity (no side effect).
+        // It must be non-empty and unique across mints — this is the id the
+        // frontend follows, so it can never be empty or reused.
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let a = bridge.discovery_run_id().expect("mint a run id");
+        let b = bridge.discovery_run_id().expect("mint another run id");
+        assert!(!a.run_id.is_empty());
+        assert!(!b.run_id.is_empty());
+        assert!(a.run_id != b.run_id, "run ids must be unique: {} vs {}", a.run_id, b.run_id);
+    }
+
+    #[test]
     fn discovery_run_requires_complete_ordered_window() {
         // The launch precondition must be enforced synchronously *before* any
         // store or subprocess access, so a valid-launch case is never tested
@@ -680,7 +717,7 @@ mod tests {
         // process-group leader (pgid == pid) — this is how the bridge kills the
         // whole tree on shutdown via a negative-pid signal, never unrelated
         // processes.
-        use std::io::{Read, Write};
+        use std::io::Read;
         use std::os::unix::process::CommandExt;
 
         let bridge = Bridge::new();

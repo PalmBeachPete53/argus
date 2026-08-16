@@ -414,6 +414,56 @@ def test_discovery_status_idle_when_no_runs(patched):
     assert data["sources_completed"] == 0
 
 
+def test_discovery_run_id_mints_unique_stamp(patched):
+    """discovery-run-id returns a well-formed run identity without touching the
+    store (the launcher uses it to follow the exact campaign). In production
+    each mint is a fresh bridge process, so the pid segment disambiguates two
+    launches in the same second; in-process the stamp is at least well-formed
+    and non-empty."""
+    code, first = patched(["discovery-run-id"])
+    assert code == 0
+    _, second = patched(["discovery-run-id"])
+    import re
+
+    for stamp in (first["run_id"], second["run_id"]):
+        assert re.fullmatch(r"\d{8}T\d{6}-\d+", stamp), stamp
+
+
+def test_make_run_stamp_format():
+    import re
+
+    from argus.store import make_run_stamp
+
+    assert re.fullmatch(r"\d{8}T\d{6}-\d+", make_run_stamp())
+
+
+def test_discovery_run_uses_preminted_run_id(monkeypatch, tmp_path, patched):
+    """A campaign launched with ``--run-id`` starts under exactly that id — the
+    id ``run_discovery`` returns, so the frontend follows the real campaign and
+    never guesses "latest"."""
+    monkeypatch.setattr(
+        gui_bridge, "CentralBankCollector", _fake_collector_factory([], lambda run_id: [])
+    )
+    _, minted = patched(["discovery-run-id"])
+    code, data = patched(
+        [
+            "discovery-run",
+            "--run-id",
+            minted["run_id"],
+            "--start-date",
+            "2026-01-01",
+            "--end-date",
+            "2026-02-01",
+        ]
+    )
+    assert code == 0
+    assert data["run_id"] == minted["run_id"]
+    assert data["status"] == "completed"
+    _, status = patched(["discovery-status"])
+    assert status["run_id"] == minted["run_id"]
+    assert status["status"] == "completed"
+
+
 def test_discovery_status_exposes_core_source_progression(monkeypatch, tmp_path, patched):
     """discovery-status carries the Core-driven source counts unchanged through
     every lifecycle state: running, paused (frozen), stopped / failed (partial,
