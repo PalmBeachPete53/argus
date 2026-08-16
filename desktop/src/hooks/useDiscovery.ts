@@ -13,6 +13,8 @@ const IDLE: DiscoveryRun = {
   pid: null,
   date_start: null,
   date_end: null,
+  sources_total: 0,
+  sources_completed: 0,
   new: 0,
   known: 0,
 };
@@ -115,7 +117,15 @@ export function useDiscovery() {
         return false;
       }
       setCandidates([]);
-      const optimistic: DiscoveryRun = { ...statusRef.current, status: "running" };
+      // Optimistic state: the campaign's real progression/totals are unknown
+      // until the first poll, so the stale previous run's numbers are cleared
+      // (never showing the *last* campaign's completed bar for a new run).
+      const optimistic: DiscoveryRun = {
+        ...statusRef.current,
+        status: "running",
+        sources_completed: 0,
+        sources_total: 0,
+      };
       setStatus(optimistic);
       statusRef.current = optimistic;
       startLoop();

@@ -410,6 +410,87 @@ def test_discovery_status_idle_when_no_runs(patched):
     assert code == 0
     assert data["status"] == "idle"
     assert data["run_id"] is None
+    assert data["sources_total"] == 0
+    assert data["sources_completed"] == 0
+
+
+def test_discovery_status_exposes_core_source_progression(monkeypatch, tmp_path, patched):
+    """discovery-status carries the Core-driven source counts unchanged through
+    every lifecycle state: running, paused (frozen), stopped / failed (partial,
+    never fabricated to total) and completed."""
+    # run_ids ascend with creation order (latest_discovery_run falls back to
+    # `run_id DESC` because started_at has second precision).
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_discovery_run("prog-01", ["fed"], sources_total=4)
+    store.set_discovery_progress("prog-01", completed=2, total=4)
+    store.close()
+
+    code, status = patched(["discovery-status"])
+    assert code == 0
+    assert status["run_id"] == "prog-01"
+    assert status["status"] == "running"
+    assert status["sources_total"] == 4
+    assert status["sources_completed"] == 2
+
+    # paused keeps the same (last reported) progression
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.set_discovery_run_control("prog-01", "paused")
+    store.close()
+    code, status = patched(["discovery-status"])
+    assert status["status"] == "paused"
+    assert status["sources_total"] == 4
+    assert status["sources_completed"] == 2
+
+    # completed keeps the store's final progression (4/4 in real campaigns;
+    # this synthetic run finalizes without advancing it further)
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.finish_discovery_run("prog-01", status="completed")
+    store.close()
+    code, status = patched(["discovery-status"])
+    assert status["status"] == "completed"
+    assert status["sources_total"] == 4
+    assert status["sources_completed"] == 2
+
+    # stopped: the last known partial value, never total / total
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_discovery_run("prog-02", ["fed"], sources_total=4)
+    store.set_discovery_progress("prog-02", completed=1, total=4)
+    store.finish_discovery_run("prog-02", status="stopped", error="stopped by user")
+    store.close()
+    code, status = patched(["discovery-status"])
+    assert code == 0
+    assert status["run_id"] == "prog-02"
+    assert status["status"] == "stopped"
+    assert status["sources_total"] == 4
+    assert status["sources_completed"] == 1
+
+    # failed: partial progression retained, error surfaced
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_discovery_run("prog-03", ["fed"], sources_total=4)
+    store.set_discovery_progress("prog-03", completed=3, total=4)
+    store.finish_discovery_run("prog-03", status="failed", error="boom")
+    store.close()
+    code, status = patched(["discovery-status"])
+    assert code == 0
+    assert status["run_id"] == "prog-03"
+    assert status["status"] == "failed"
+    assert status["sources_total"] == 4
+    assert status["sources_completed"] == 3
+
+
+def test_discovery_run_records_sources_total_at_launch(monkeypatch, tmp_path, patched):
+    """A real launch fixes `sources_total` from the Core's enabled-source count
+    (what `discover_all` actually schedules), so 0 / N is readable immediately."""
+    monkeypatch.setattr(
+        gui_bridge, "CentralBankCollector",
+        _fake_collector_factory([], lambda run_id: []),
+    )
+    code, data = patched(_RUN)
+    assert code == 0 and data["status"] == "completed"
+
+    _, status = patched(["discovery-status"])
+    assert status["sources_total"] >= 1, "the enabled source count must be recorded"
+    assert status["sources_completed"] == 0
 
 
 def test_discovery_respects_bank_toggle(monkeypatch, tmp_path, capsys, patched):

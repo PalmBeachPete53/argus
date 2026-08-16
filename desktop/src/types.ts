@@ -58,6 +58,12 @@ export interface DiscoveryRun {
   /** Publication-date window bounding the campaign (ISO, null = unbounded). */
   date_start: string | null;
   date_end: string | null;
+  /**
+   * Core-driven source progression (never candidates): total sources fixed at
+   * launch, and how many have actually finished so far.
+   */
+  sources_total: number;
+  sources_completed: number;
   /** Candidate snapshot split: not-yet-known vs already-known publications. */
   new: number;
   known: number;

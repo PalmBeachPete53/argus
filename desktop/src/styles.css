@@ -322,6 +322,46 @@ body {
   gap: 10px;
 }
 
+.discovery-progress {
+  margin: 12px 0;
+  max-width: 420px;
+}
+
+.discovery-progress-track {
+  height: 12px;
+  border: 1px solid var(--border-gray);
+  border-radius: 6px;
+  background: var(--light-gray);
+  overflow: hidden;
+}
+
+.discovery-progress-fill {
+  height: 100%;
+  border-radius: 6px 0 0 6px;
+  background: var(--indigo);
+  transition: width 0.2s ease;
+}
+
+.discovery-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.discovery-progress-count {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.discovery-progress-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .stat-card {
   flex: 0 0 auto;
   min-width: 130px;

@@ -99,7 +99,9 @@ CREATE TABLE IF NOT EXISTS discovery_runs (
     banks_json TEXT,
     pid INTEGER,
     date_start TEXT,
-    date_end TEXT
+    date_end TEXT,
+    sources_total INTEGER DEFAULT 0,
+    sources_completed INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_discovery_runs_started
     ON discovery_runs(started_at);
@@ -531,6 +533,18 @@ class Store:
             pass
         try:
             self._conn.execute("ALTER TABLE discovery_runs ADD COLUMN date_end TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute(
+                "ALTER TABLE discovery_runs ADD COLUMN sources_total INTEGER DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute(
+                "ALTER TABLE discovery_runs ADD COLUMN sources_completed INTEGER DEFAULT 0"
+            )
         except sqlite3.OperationalError:
             pass
         self._conn.commit()
@@ -968,6 +982,7 @@ class Store:
         pid: int | None = None,
         date_start: str | None = None,
         date_end: str | None = None,
+        sources_total: int | None = None,
     ) -> None:
         """Record that a discovery campaign started (status ``running``).
 
@@ -975,6 +990,10 @@ class Store:
         pause / resume / stop controls); it is optional so CLI-driven campaigns
         stay recordable too. ``date_start`` / ``date_end`` are the campaign's
         publication-date window (ISO), persisted as a property of that run.
+        ``sources_total`` is the number of sources the campaign will discover
+        (fixed at launch so the GUI can show ``0 / N`` immediately);
+        ``sources_completed`` starts at 0 and is advanced by the Core via
+        :meth:`set_discovery_progress` as each source actually finishes.
 
         Only one campaign may be active (``running`` or ``paused``) at a time.
         The claim is taken in a write-locked transaction so two launchers
@@ -996,8 +1015,9 @@ class Store:
             self._conn.execute(
                 """
                 INSERT INTO discovery_runs
-                    (run_id, started_at, status, candidates, banks_json, pid, date_start, date_end)
-                VALUES (?, ?, 'running', 0, ?, ?, ?, ?)
+                    (run_id, started_at, status, candidates, banks_json, pid, date_start, date_end,
+                     sources_total, sources_completed)
+                VALUES (?, ?, 'running', 0, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(run_id) DO UPDATE SET
                     started_at=excluded.started_at,
                     status='running',
@@ -1007,14 +1027,31 @@ class Store:
                     banks_json=excluded.banks_json,
                     pid=excluded.pid,
                     date_start=excluded.date_start,
-                    date_end=excluded.date_end
+                    date_end=excluded.date_end,
+                    sources_total=excluded.sources_total,
+                    sources_completed=0
                 """,
-                (run_id, started, banks_json, pid, date_start, date_end),
+                (run_id, started, banks_json, pid, date_start, date_end, sources_total or 0),
             )
             self._conn.commit()
         except BaseException:
             self._conn.rollback()
             raise
+
+    def set_discovery_progress(self, run_id: str, *, completed: int, total: int) -> None:
+        """Persist the Core-driven source progression of an active campaign.
+
+        Called on the campaign's serialized writer thread (never from a worker):
+        it only updates the two counters of an existing ``discovery_runs`` row,
+        so ``sources_completed`` reflects real source terminations as they
+        happen and ``sources_total`` stays fixed at its launch value. A run that
+        no longer exists is a no-op.
+        """
+        self._conn.execute(
+            "UPDATE discovery_runs SET sources_completed=?, sources_total=? WHERE run_id=?",
+            (completed, total, run_id),
+        )
+        self._conn.commit()
 
     def set_discovery_run_control(self, run_id: str, status: str) -> None:
         """Flip the status of a *running/paused* campaign (pause / resume) from
@@ -1103,6 +1140,8 @@ class Store:
             "pid": row["pid"],
             "date_start": row["date_start"],
             "date_end": row["date_end"],
+            "sources_total": row["sources_total"] or 0,
+            "sources_completed": row["sources_completed"] or 0,
         }
         new, known = self.discovery_candidate_counts(row["run_id"])
         run["new"] = new

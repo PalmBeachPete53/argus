@@ -352,6 +352,8 @@ struct DiscoveryRun {
     pid: Option<i64>,
     date_start: Option<String>,
     date_end: Option<String>,
+    sources_total: i64,
+    sources_completed: i64,
     new: i64,
     known: i64,
 }
@@ -643,6 +645,14 @@ mod tests {
             run.status
         );
         assert!(run.candidates >= 0);
+        // The Core-driven source progression is part of the discovery-status
+        // contract (an idle run guarantees 0/0).
+        assert!(run.sources_total >= 0);
+        assert!(run.sources_completed >= 0);
+        if run.status == "idle" {
+            assert_eq!(run.sources_total, 0);
+            assert_eq!(run.sources_completed, 0);
+        }
     }
 
     #[test]

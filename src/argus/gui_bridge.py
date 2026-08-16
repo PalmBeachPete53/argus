@@ -627,12 +627,17 @@ def _run_discovery_campaign(
     registry = SourceRegistry()
     run_id = store.run_stamp()
     bank_names = {b.id: b.name for b in registry.banks}
+    # The number of sources the campaign will discover, fixed at launch so the
+    # GUI reads 0 / N immediately; the Core advances `sources_completed` via the
+    # same registry-driven selection (the exact set `discover_all` schedules).
+    sources_total = len(registry.enabled_sources(banks=tuple(banks) if banks else None))
     store.start_discovery_run(
         run_id,
         banks,
         pid=os.getpid(),
         date_start=iso(date_start) if date_start else None,
         date_end=iso(date_end) if date_end else None,
+        sources_total=sources_total,
     )
     if detached and os.getppid() == 1:
         # The launcher vanished in the instant between the first check and the
@@ -912,6 +917,8 @@ def _cmd_discovery_status(argv: list[str]) -> int:
                     "pid": None,
                     "date_start": None,
                     "date_end": None,
+                    "sources_total": 0,
+                    "sources_completed": 0,
                     "new": 0,
                     "known": 0,
                 },

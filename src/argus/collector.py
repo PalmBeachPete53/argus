@@ -146,6 +146,14 @@ class CentralBankCollector:
         the candidate count. Progress follows worker completion order (a slow
         source never stalls the progress of already-finished sources), while
         the returned publications keep their logical source order.
+
+        When a ``run_id`` is given (the GUI campaign always passes one), the
+        Core also persists the progression into the store's ``discovery_runs``
+        row through the *same serialized writer* as every other Store mutation
+        — ``sources_total`` is fixed to the enabled-source count before the
+        pool starts (``0 / N`` is immediately observable) and
+        ``sources_completed`` is advanced on the caller's thread as each source
+        finishes. A failing or empty source still counts as one completed step.
         """
         self._sync_sources()
         run_id = run_id or self.store.run_stamp()
@@ -154,8 +162,20 @@ class CentralBankCollector:
         if not sources:
             return publications
 
+        # Persisted progression (serialized writer thread): N is fixed at the
+        # start, so 0 / N is readable before any source finishes.
+        self.store.set_discovery_progress(run_id, completed=0, total=len(sources))
+
+        def _on_progress(completed: int, total: int) -> None:
+            # Worker completions arrive on the caller's thread via
+            # `as_completed` — the same thread that owns the serialized Store
+            # writes, so this is never a concurrent SQLite mutation.
+            self.store.set_discovery_progress(run_id, completed=completed, total=total)
+            if progress is not None:
+                progress(completed, total)
+
         outcomes = self._run_sources(
-            sources, date_start=date_start, date_end=date_end, progress=progress
+            sources, date_start=date_start, date_end=date_end, progress=_on_progress
         )
 
         # Serialized Store writes, in source order (dedup makes the result

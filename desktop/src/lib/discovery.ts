@@ -22,3 +22,39 @@ export function rangeStatus(start: string, end: string): DiscoveryRangeStatus {
 
 export const REQUIRED_RANGE_HINT = "A start and end date are required to run Discovery.";
 export const INVALID_RANGE_HINT = "End date must be on or after start date.";
+
+/**
+ * Core-driven discovery progression. The Core is the single source of truth:
+ * `total` sources were fixed at launch and `completed` of them have actually
+ * finished (a failing or empty source still counts). This is *never* derived
+ * from candidate counts or elapsed time.
+ *
+ * The result is sanitized so the UI can render it without extra guards:
+ * counts are clamped to the valid range and the percentage never exceeds
+ * 100 (a stopped campaign keeps its last known progression — the Core never
+ * fabricates `total / total` for interrupted work).
+ */
+export interface DiscoveryProgress {
+  completed: number;
+  total: number;
+  /** Fraction of the track to fill, in [0, 1] (0 when total is 0). */
+  fraction: number;
+  /** Whole percentage, clamped to [0, 100]. */
+  percent: number;
+  /** "21 / 34 sources" when a campaign has sources, else "No sources to discover". */
+  label: string;
+}
+
+export function discoveryProgress(total: number, completed: number): DiscoveryProgress {
+  const t = Math.max(0, Number(total) || 0);
+  const c = Math.min(Math.max(0, Number(completed) || 0), t);
+  const fraction = t > 0 ? c / t : 0;
+  const percent = Math.round(fraction * 100);
+  return {
+    completed: c,
+    total: t,
+    fraction,
+    percent,
+    label: t > 0 ? `${c} / ${t} sources` : "No sources to discover",
+  };
+}

@@ -1,8 +1,8 @@
 import { useState } from "react";
-import type { DiscoveryCandidate } from "../types";
+import type { DiscoveryCandidate, DiscoveryRun } from "../types";
 import type { DiscoveryState } from "./MainContent";
 import { formatDate, formatDateTime } from "../lib/format";
-import { rangeStatus, REQUIRED_RANGE_HINT, INVALID_RANGE_HINT } from "../lib/discovery";
+import { rangeStatus, REQUIRED_RANGE_HINT, INVALID_RANGE_HINT, discoveryProgress } from "../lib/discovery";
 import ConfirmDialog from "./ConfirmDialog";
 
 interface DiscoveryProps {
@@ -11,6 +11,49 @@ interface DiscoveryProps {
 
 function StatusPill({ status }: { status: string }) {
   return <span className={`pill pill-${status}`}>{status}</span>;
+}
+
+/**
+ * The Core-driven source progression bar (never candidate ratio, never time).
+ * ``sources_completed / sources_total`` is read straight from the Core store:
+ * - running → live, advances as the Core reports each source done;
+ * - paused → frozen at the last Core-reported value;
+ * - completed → full bar (the Core reports total / total on a normal end);
+ * - stopped / failed → the *last known* progression — a Stop is never
+ *   transformed into 100%.
+ * A zero total (no enabled sources) renders a coherent empty state instead of
+ * an invalid ``0 / 0`` bar.
+ */
+function CampaignProgress({ status }: { status: DiscoveryRun }) {
+  const p = discoveryProgress(status.sources_total, status.sources_completed);
+  const active = status.status === "running" || status.status === "paused";
+  if (p.total === 0) {
+    return (
+      <div className="discovery-progress" aria-label="Discovery source progression">
+        <p className="discovery-progress-empty">{active ? "Starting…" : p.label}</p>
+      </div>
+    );
+  }
+  const remaining = p.total - p.completed;
+  return (
+    <div className="discovery-progress" aria-label="Discovery source progression">
+      <div
+        className="discovery-progress-track"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={p.total}
+        aria-valuenow={p.completed}
+      >
+        <div className="discovery-progress-fill" style={{ width: `${p.percent}%` }} />
+      </div>
+      <div className="discovery-progress-meta">
+        <span className="discovery-progress-count">{p.label}</span>
+        <span className="discovery-progress-detail">
+          {p.completed} completed · {remaining} remaining · {p.percent}%
+        </span>
+      </div>
+    </div>
+  );
 }
 
 function CandidateDetail({
@@ -250,6 +293,7 @@ export default function Discovery({ discovery }: DiscoveryProps) {
             <dd>{hasRun ? range : "—"}</dd>
           </div>
         </dl>
+        {hasRun && status.status !== "idle" && <CampaignProgress status={status} />}
         <div className="discovery-stats">
           <div className="stat-card">
             <span className="stat-value">{status.candidates.toLocaleString()}</span>
