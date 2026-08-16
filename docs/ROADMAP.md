@@ -188,7 +188,8 @@ Provenance / validation
 
 La **classification/reachability est un prérequis** de l'extraction : une
 publication doit être classifiée dans sa famille canonique avant que
-l'extracteur correspondant puisse être dispatché. Le travail Phase 4.x mené a
+l'extracteur correspondant puisse être dispatché. Le travail de
+classification/reachability multi-banques mené a
 établi que les familles de publications pertinentes peuvent effectivement
 atteindre les extracteurs appropriés sur les 10 banques initiales.
 
@@ -221,7 +222,7 @@ si/when planifiées.
   evidence ; les classifications live issues de `Source.publication_types`
   priment sur les hints périmés. Tests de classification et de CLI
   (`--classify`, `--report`).
-- **Correctif de collision (Phase 4.x)** — SNB « Summary of the monetary
+- **Correctif de collision (reachability multi-banques)** — SNB « Summary of the monetary
   policy assessment discussion » (résumé de discussion type minutes, publié
   depuis septembre 2025) : classé à tort `monetary_policy_decision` car son
   titre contenait la règle SNB de décision (`monetary policy assessment`).
@@ -269,7 +270,7 @@ si/when planifiées.
   vocabulaire canonique (subject/predicate/ValueKind), stratégie de provenance
   (`FactLocation`), identité déterministe (`fact_id`), contrat d'extraction
   (`ExtractionResult`) ; document de référence `docs/DATA_MODEL.md`.
-- **Dépendances** : Phases 3 et 4 (classification).
+- **Dépendances** : Phase 3 et prérequis Publication Classification.
 - **Critères de validation** : tout fait est remontable à la publication
   officielle ; aucune donnée n'est inventée (provenance requise).
 - **Statut** : `COMPLETE` — modèle `Fact`, persistance idempotente
@@ -280,11 +281,11 @@ si/when planifiées.
   confidence implémentés et testés. (Le champ `Publication.publication_type`
   reste un cache de classification, distinct du modèle `Fact`.)
 
-### Phase 4.x — Classification / reachability multi-banques
+### Prérequis — Multi-bank Classification & Reachability
 
 **Statut** : `COMPLETE`.
 
-Le travail Phase 4.x multi-banques a établi la **reachability** réelle des
+Le travail de classification/reachability multi-banques a établi la **reachability** réelle des
 familles de publications vers leurs extracteurs sur les 10 banques initiales.
 Famille **Statement** après le correctif :
 
@@ -300,7 +301,7 @@ Famille **Statement** après le correctif :
 - **Riksbank** — REPRESENTED par la décision de policy-rate
 - **Norges** — N/A
 
-**Correctif de reachability Statement BoJ (Phase 4.x)** : le « Statement on
+**Correctif de reachability Statement BoJ** : le « Statement on
 Monetary Policy » (publication fusionnée Decision+Statement, canoniquement
 `monetary_policy_statement`) est publié sous
 `/en/mopo/mpmdeci/mpr_<year>/k<date>.pdf`. L'ancienne forme
@@ -321,7 +322,7 @@ inchangés. Fed/SNB/BoE/BoC restent **intentionnellement représentés** par
 tests de classification existants le verrouillent) — pas de vraie absence de
 couverture, pas de nouveau family. Tests `test_boj_statement_*` ajoutés.
 
-**Validation Phase 4.x** : 1420 tests verts, 3 runs `pytest` consécutifs,
+**Validation** : 1420 tests verts, 3 runs `pytest` consécutifs,
 `compileall` propre, grep sémantique interdit propre, gaps précédemment fermés
 toujours verts, **Phase 16 reste `DEFERRED`.**
 
@@ -415,11 +416,12 @@ toujours verts, **Phase 16 reste `DEFERRED`.**
   rapport (Monetary Policy Report) est le contenu mixte (voir Phase 4.6 /
   Norges Report extractor).
 
-  **Reachability (Phase 4.x)** : le Statement réel de chaque banque est
-  désormais correctement classifié et dispatché (voir la matrice Phase 4.x) :
+  **Reachability** : le Statement réel de chaque banque est
+  désormais correctement classifié et dispatché (voir la matrice du prérequis
+  « Multi-bank Classification & Reachability ») :
   ECB et BoJ → `monetary_policy_statement` ; Fed/SNB/BoE/BoC/RBA/RBNZ/Riksbank
   → `monetary_policy_decision` (fusion intentionnelle) ; Norges → N/A. Le
-  correctif BoJ est documenté dans la section Phase 4.x ci-dessus.
+  correctif BoJ est documenté dans le prérequis ci-dessus.
 
   Implémenté par banque : justification de la décision (`monetary_policy/rationale`,
   verbatim), orientation future (`policy_guidance/statement`, verbatim, jamais
@@ -736,7 +738,7 @@ Phase 16 reste `DEFERRED`.
   **Extension Riksbank** : 25 nouveaux tests dédiés
   (`tests/test_reports_riksbank.py`), dispatch générique mis à jour (7 banques).
   **Phase 16 (validation historique) reste `DEFERRED`.**
-- **Correctif de coverage BoC MPR (Phase 4.x)** : le Monetary Policy Report de
+- **Correctif de coverage BoC MPR (reachability multi-banques)** : le Monetary Policy Report de
   la Banque du Canada était découvrable seulement indirectement via la page
   `key-interest-rate` (`boc_key_interest_rate_schedule`, typée
   `monetary_policy_decision`) — le hint de source Tier‑1 faisait classer le MPR
@@ -756,7 +758,7 @@ Phase 16 reste `DEFERRED`.
   officiel de juillet 2026 (découverte → fetch → normalize → classification →
   extraction → persistance, 7 faits canoniques, provenance verbatim).
   **Phase 16 (validation historique) reste `DEFERRED`.**
-- **Correctif de classification ECB Economic Bulletin (Phase 4.x)** : le
+- **Correctif de classification ECB Economic Bulletin (reachability multi-banques)** : le
   bulletin économique de l'ECB (`/press/economic-bulletin/html/eb<YYYYMM>.en.html`),
   publication de type Rapport pour la zone euro, était découvert via
   `ecb_publications_rss` mais classé `unknown` (aucune règle URL/titre ne
@@ -1096,7 +1098,7 @@ Divergences et observations entre cette roadmap et l'architecture actuelle :
   partageant `_shared.py` + `_pipeline.py` (`SpeechExtractorBase`),
   vocabulaire/ancres/classification propres à chaque banque (`COVERAGE_SOURCE`),
   fixtures + tests multi-banques.
-- **Phase 4.x — Classification / reachability multi-banques** :
+- **Prérequis — Multi-bank Classification & Reachability** :
   `COMPLETE` — la reachability réelle des familles de publications vers leurs
   extracteurs est établie sur les 10 banques (famille Statement : ECB et BoJ
   COVERED ; Fed/SNB/BoE/BoC/RBA/RBNZ/Riksbank REPRESENTED ; Norges N/A).
