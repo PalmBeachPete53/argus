@@ -1382,6 +1382,7 @@ class Store:
             FactLocation,
             FactPeriod,
             FactValue,
+            PeriodKind,
         )
 
         return Fact(
@@ -1399,7 +1400,11 @@ class Store:
             ),
             change=FactValue.from_dict(json.loads(row["change_json"])) if row["change_json"] else None,
             period=(
-                FactPeriod(kind=row["period_kind"], value=row["period_value"], label=row["period_label"])
+                FactPeriod(
+                    kind=PeriodKind(row["period_kind"]),
+                    value=row["period_value"],
+                    label=row["period_label"],
+                )
                 if row["period_kind"]
                 else None
             ),
@@ -1688,7 +1693,7 @@ class Store:
     @staticmethod
     def _change_from_row(row: sqlite3.Row):
         from .changes.base import ChangeType, FactChange
-        from .facts.base import FactPeriod, FactValue
+        from .facts.base import FactPeriod, FactValue, PeriodKind
 
         return FactChange(
             change_id=row["change_id"],
@@ -1713,7 +1718,7 @@ class Store:
             identity_qualifier=row["identity_qualifier"] or "",
             previous_period=(
                 FactPeriod(
-                    kind=row["previous_period_kind"],
+                    kind=PeriodKind(row["previous_period_kind"]),
                     value=row["previous_period_value"],
                     label=row["previous_period_label"],
                 )
@@ -1722,7 +1727,7 @@ class Store:
             ),
             current_period=(
                 FactPeriod(
-                    kind=row["current_period_kind"],
+                    kind=PeriodKind(row["current_period_kind"]),
                     value=row["current_period_value"],
                     label=row["current_period_label"],
                 )
@@ -2040,7 +2045,7 @@ class Store:
 
     @staticmethod
     def _reaction_from_row(row: sqlite3.Row):
-        from .facts.base import FactPeriod, FactValue
+        from .facts.base import FactPeriod, PeriodKind, FactValue
         from .reactions.base import PolicyReaction
 
         return PolicyReaction(
@@ -2063,7 +2068,7 @@ class Store:
             ),
             condition_period=(
                 FactPeriod(
-                    kind=row["condition_period_kind"],
+                    kind=PeriodKind(row["condition_period_kind"]),
                     value=row["condition_period_value"],
                     label=row["condition_period_label"],
                 )
@@ -2091,7 +2096,7 @@ class Store:
             ),
             policy_period=(
                 FactPeriod(
-                    kind=row["policy_period_kind"],
+                    kind=PeriodKind(row["policy_period_kind"]),
                     value=row["policy_period_value"],
                     label=row["policy_period_label"],
                 )
@@ -2381,7 +2386,7 @@ class Store:
 
     @staticmethod
     def _state_from_row(row: sqlite3.Row):
-        from .facts.base import FactPeriod, FactValue
+        from .facts.base import FactPeriod, PeriodKind, FactValue
         from .states.base import MonetaryPolicyState
 
         return MonetaryPolicyState(
@@ -2396,7 +2401,7 @@ class Store:
             qualifier=row["qualifier"] or "",
             period=(
                 FactPeriod(
-                    kind=row["period_kind"],
+                    kind=PeriodKind(row["period_kind"]),
                     value=row["period_value"],
                     label=row["period_label"],
                 )
@@ -2717,7 +2722,7 @@ class Store:
 
     @staticmethod
     def _fundamental_from_row(row: sqlite3.Row):
-        from .facts.base import FactPeriod, FactValue
+        from .facts.base import FactPeriod, PeriodKind, FactValue
         from .forex.base import ForexFundamental
 
         return ForexFundamental(
@@ -2735,7 +2740,7 @@ class Store:
             qualifier=row["qualifier"] or "",
             period=(
                 FactPeriod(
-                    kind=row["period_kind"],
+                    kind=PeriodKind(row["period_kind"]),
                     value=row["period_value"],
                     label=row["period_label"],
                 )
@@ -3126,7 +3131,7 @@ class Store:
 
     @staticmethod
     def _differential_from_row(row: sqlite3.Row):
-        from .facts.base import FactPeriod, FactValue
+        from .facts.base import FactPeriod, PeriodKind, FactValue
         from .forex.base import ForexDifferential
 
         return ForexDifferential(
@@ -3141,7 +3146,7 @@ class Store:
             qualifier=row["qualifier"] or "",
             period=(
                 FactPeriod(
-                    kind=row["period_kind"],
+                    kind=PeriodKind(row["period_kind"]),
                     value=row["period_value"],
                     label=row["period_label"],
                 )

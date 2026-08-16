@@ -158,7 +158,7 @@ class NorgesDecisionExtractor(DecisionExtractor):
         else:
             result.warnings.append("no_policy_rate")
 
-        for index, source, amount, delta in self._rate_changes(document):
+        for ordinal, (index, source, amount, delta) in enumerate(self._rate_changes(document)):
             result.add(
                 Fact(
                     publication_id=result.publication_id,
@@ -171,6 +171,7 @@ class NorgesDecisionExtractor(DecisionExtractor):
                     extraction_method=METHOD_REGEX,
                     extraction_version=EXTRACTION_VERSION,
                     confidence=Confidence.HIGH,
+                    identity_qualifier=f"change:{ordinal}",
                 )
             )
 

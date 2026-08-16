@@ -829,3 +829,54 @@ def test_extract_decision_batch_generic_dispatch(tmp_path):
         assert facts, f"{bank}: no facts persisted"
         subjects = {f.subject for f in facts}
         assert EXPECTED_SUBJECTS[bank].issubset(subjects), f"{bank}: missing expected subjects"
+
+def test_multiple_change_mentions_have_distinct_fact_ids():
+    """Regression: a decision document that states the same rate change more
+    than once must not collide on fact_id (each mention is a distinct
+    ``policy_rate/change`` with an ordinal identity_qualifier)."""
+    from argus.documents.base import DocumentSection, NormalizedDocument
+    from argus.decisions.riksbank import RiksbankDecisionExtractor
+
+    text = (
+        "At its meeting today, the Executive Board decided to raise the policy rate "
+        "by 0.25 percentage points to 3.75 per cent. The Executive Board has therefore "
+        "decided to raise the policy rate by 0.25 percentage points. A press release "
+        "summarises: the Riksbank raises the policy rate by 0.25 percentage points."
+    )
+    doc = NormalizedDocument(
+        publication_id="pub-riksbank-multi",
+        document_id="sha-multi-change",
+        source_url="https://www.riksbank.se/en-gb/monetary-policy/monetary-policy-decision/",
+        local_path=None,
+        document_kind="html",
+        extraction_method="regex",
+        sections=[
+            DocumentSection(order=0, heading="", level=0, text="28 June 2023"),
+            DocumentSection(order=1, heading="Decision", level=1, text=text),
+        ],
+    )
+    pub = Publication(central_bank="riksbank", title="Decision", url="https://www.riksbank.se/decision", source_id="s", source_url="u", id="pub-riksbank-multi")
+    result = RiksbankDecisionExtractor().extract(pub, doc)
+    ids = [f.resolve_id() for f in result.facts]
+    assert len(ids) == len(set(ids)), "duplicate fact_ids for multiple change mentions"
+    changes = [f for f in result.facts if f.predicate == "change"]
+    assert len(changes) >= 3
+    assert all(f.identity_qualifier.startswith("change:") for f in changes)
+    # persistence must not raise a uniqueness error
+    import tempfile
+    from pathlib import Path
+    from argus.store import Store
+    from conftest import make_store
+
+    store = make_store(Path(tempfile.mkdtemp()))
+    store.upsert_publication(pub)
+    store.upsert_normalized_document(doc)
+    from argus.decisions import extract_decision
+    from argus.classification.base import Confidence
+
+    store.set_classification(pub.id, central_bank="riksbank", publication_type="monetary_policy_decision",
+                             confidence=Confidence.HIGH.value, method="test", evidence=["x"], classified_at=None)
+    results = extract_decision(store, pub)
+    assert len(results) == 1
+    persisted = store.get_facts(publication_id=pub.id)
+    assert {f.resolve_id() for f in persisted} == set(ids)
