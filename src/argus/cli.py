@@ -8,7 +8,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .collector import CentralBankCollector
+from .collector import CentralBankCollector, in_bounds
 from .config import enabled_banks, filter_enabled, is_bank_enabled
 from .registry import SourceRegistry
 
@@ -68,18 +68,6 @@ def parse_date_bounds(year: int | None, month: str | None) -> tuple[datetime | N
             datetime(year + 1, 1, 1, tzinfo=timezone.utc),
         )
     return None, None
-
-
-def _in_bounds(pub, start, end) -> bool:
-    if start is None and end is None:
-        return True
-    if pub.publication_date is None:
-        return False
-    if start is not None and pub.publication_date < start:
-        return False
-    if end is not None and pub.publication_date >= end:
-        return False
-    return True
 
 
 def _remove_any(path: Path) -> int:
@@ -302,8 +290,9 @@ def main(argv=None) -> int:
     date_start, date_end = parse_date_bounds(args.year, args.month)
 
     if args.discover_only:
-        publications = collector.discover_all(banks=banks, source_ids=source_ids)
-        publications = [p for p in publications if _in_bounds(p, date_start, date_end)]
+        publications = collector.discover_all(
+            banks=banks, source_ids=source_ids, date_start=date_start, date_end=date_end
+        )
         print(f"Discovered {len(publications)} publications")
         for pub in publications:
             _print_publication(pub)
@@ -320,7 +309,7 @@ def main(argv=None) -> int:
             for error in result.errors:
                 print(f"  ERROR {error.bank_id}/{error.source_id}: {error.error_type} - {error.message}")
         for pub in result.publications:
-            if _in_bounds(pub, date_start, date_end):
+            if in_bounds(pub, date_start, date_end):
                 _print_publication(pub)
     return 0
 

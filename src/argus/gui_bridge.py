@@ -16,7 +16,15 @@ Commands (``python -m argus.gui_bridge <command>``):
 - ``sources``        → JSON view of the real ``SourceRegistry`` (read-only)
 - ``discovery-run``  → run a discovery campaign over the enabled banks (long;
   designed to be spawned detached by the Rust shell and observed via
-  ``discovery-status`` / ``discovery-results``)
+  ``discovery-status`` / ``discovery-results``). Optional ``--start-date`` /
+  ``--end-date`` limit the campaign to a publication-date window, applied by
+  the Core (start-inclusive, end-exclusive).
+- ``discovery-control <pause|resume|stop>`` → the real lifecycle controls:
+  the campaign subprocess is frozen (SIGSTOP), resumed (SIGCONT) or asked to
+  stop (SIGTERM, the campaign records itself as ``stopped``). The PID is read
+  from the store's `discovery_runs.pid`, never invented.
+- ``discovery-clear``  → drop the discovery report cache (the ``discovery_runs``
+  and ``discovery_candidates`` tables only — pipeline data is untouched).
 - ``discovery-status``→ JSON summary of the latest discovery run (or ``idle``)
 - ``discovery-results``→ JSON candidates produced by the latest (or a given) run
 - ``stats``          → read-only store aggregates for the Overview (publications,
@@ -32,8 +40,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -48,8 +58,10 @@ from .store import Store
 USAGE = (
     "usage: python -m argus.gui_bridge "
     "banks|banks-set <id> on|off|data-root|list-dir <relative-path>|"
-    "open-file <relative-path>|sources|discovery-run|discovery-status|"
-    "discovery-results [<run-id>]|stats|open-url <url>"
+    "open-file <relative-path>|sources|"
+    "discovery-run [--bank <id>]... [--start-date YYYY-MM-DD|--end-date YYYY-MM-DD]|"
+    "discovery-control <pause|resume|stop>|discovery-clear|"
+    "discovery-status|discovery-results [<run-id>]|stats|open-url <url>"
 )
 
 # Repository root, resolved from this module's own location
@@ -270,10 +282,42 @@ def _raw_root() -> Path:
     return _data_root() / "raw"
 
 
+class DiscoveryStopped(Exception):
+    """Raised inside the campaign process when a stop (SIGTERM) is requested.
+
+    SIGTERM is a normal lifecycle control, never a "failed" signal — the
+    campaign finalizes itself as ``stopped`` instead of ``failed`` so the GUI
+    shows exactly what happened.
+    """
+
+
+def _raise_discovery_stopped(_signum, _frame):
+    raise DiscoveryStopped("stop requested")
+
+
+def _parse_date_arg(value: str, name: str) -> datetime:
+    """Parse an optional discovery ``--start-date`` / ``--end-date`` argument.
+
+    Accepts an ISO date (``YYYY-MM-DD``) or a full ISO datetime; the result is
+    always timezone-aware (UTC) so the Core's bounds comparison never mixes
+    naive and aware datetimes.
+    """
+    value = value.strip()
+    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            parsed = datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+        return parsed.replace(tzinfo=timezone.utc)
+    raise ValueError(f"{name} must be a date (YYYY-MM-DD or ISO datetime): {value!r}")
+
+
 def _run_discovery_campaign(
     store_path: Path,
     raw_root: Path,
     banks: tuple[str, ...],
+    date_start: datetime | None = None,
+    date_end: datetime | None = None,
 ) -> dict:
     """Run one discovery campaign and record its lifecycle in the store.
 
@@ -282,12 +326,18 @@ def _run_discovery_campaign(
     existing ``CentralBankCollector.discover_all``. ``banks`` is the enabled
     selection resolved by the caller (the GUI always passes the toggle-respecting
     ``enabled_banks()``), so an OFF bank can never be launched.
+
+    ``date_start`` / ``date_end`` bound the campaign's publication-date window
+    (start-inclusive, end-exclusive) and are handed to the Core, which is the
+    single place a window is applied. The campaign process records its own PID
+    with the run so the GUI's pause/resume/stop can signal it.
     """
+    signal.signal(signal.SIGTERM, _raise_discovery_stopped)
     store = Store(store_path)
     registry = SourceRegistry()
     run_id = store.run_stamp()
     bank_names = {b.id: b.name for b in registry.banks}
-    store.start_discovery_run(run_id, banks)
+    store.start_discovery_run(run_id, banks, pid=os.getpid())
     known = {p.id for p in store.list_publications()}
     try:
         config = HttpConfig(respect_robots=True, min_interval=1.0)
@@ -299,8 +349,14 @@ def _run_discovery_campaign(
             search_provider=_search_provider_from_env(),
         )
         publications = collector.discover_all(
-            banks=tuple(banks) if banks else None, run_id=run_id
+            banks=tuple(banks) if banks else None,
+            run_id=run_id,
+            date_start=date_start,
+            date_end=date_end,
         )
+    except DiscoveryStopped:
+        store.finish_discovery_run(run_id, status="stopped", error="stopped by user")
+        return {"run_id": run_id, "status": "stopped", "error": "stopped by user", "candidates": 0}
     except Exception as exc:  # pragma: no cover - defensive (Core raises are logged)
         message = f"{exc.__class__.__name__}: {exc}"
         store.finish_discovery_run(run_id, status="failed", error=message)
@@ -335,13 +391,31 @@ def _cmd_discovery_run(argv: list[str]) -> int:
     Optional ``--bank <id>`` (repeatable) selects a subset; without one, the
     run uses every currently enabled bank. Either way the selection is the
     Core's toggle-respecting enabled set — never a GUI-side bank list.
+    Optional ``--start-date`` / ``--end-date`` (ISO dates) bound the campaign
+    to a publication-date window, applied by the Core.
     """
     banks = enabled_banks()
     selected: list[str] = []
+    date_start = None
+    date_end = None
     index = 0
     while index < len(argv):
         if argv[index] == "--bank" and index + 1 < len(argv):
             selected.append(argv[index + 1])
+            index += 2
+        elif argv[index] == "--start-date" and index + 1 < len(argv):
+            try:
+                date_start = _parse_date_arg(argv[index + 1], "start-date")
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 2
+            index += 2
+        elif argv[index] == "--end-date" and index + 1 < len(argv):
+            try:
+                date_end = _parse_date_arg(argv[index + 1], "end-date")
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 2
             index += 2
         else:
             print(f"unexpected argument: {argv[index]}", file=sys.stderr)
@@ -350,8 +424,89 @@ def _cmd_discovery_run(argv: list[str]) -> int:
         from .config import filter_enabled
 
         banks = filter_enabled(selected) or ()
-    result = _run_discovery_campaign(_store_path(), _raw_root(), banks)
+    result = _run_discovery_campaign(_store_path(), _raw_root(), banks, date_start, date_end)
     print(json.dumps(result, indent=2))
+    return 0
+
+
+def _await_run_status(store: Store, run_id: str, terminal: tuple[str, ...], timeout: float) -> dict | None:
+    """Poll a run until it reaches a terminal status (used after a stop signal
+    so the campaign's own ``stopped`` finalization wins over a forced one)."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        run = store.get_discovery_run(run_id)
+        if run and run["status"] in terminal:
+            return run
+        time.sleep(0.2)
+    return None
+
+
+def _cmd_discovery_control(argv: list[str]) -> int:
+    """Real lifecycle control of the active campaign subprocess.
+
+    The campaign records its PID in the store; the controlling command reads it
+    and signals the process directly (SIGSTOP / SIGCONT / SIGTERM) — the GUI
+    never fabricates a state. The status is flipped in the store by the
+    controller, because a SIGSTOPped process cannot write to the store itself,
+    except for ``stop`` where the campaign is asked to finalize itself as
+    ``stopped`` (a SIGTERMped process records an honest status).
+    """
+    if len(argv) < 1:
+        print(USAGE, file=sys.stderr)
+        return 2
+    action = argv[0].strip().lower()
+    if action not in ("pause", "resume", "stop"):
+        print(f"unknown discovery-control action: {action} (pause|resume|stop)", file=sys.stderr)
+        return 2
+    store = Store(_store_path())
+    run = store.latest_discovery_run()
+    if run is None or run["status"] in ("idle", "completed", "failed", "stopped"):
+        print(json.dumps({"error": f"no active campaign to {action}"}, indent=2))
+        return 1
+    run_id = run["run_id"]
+    pid = run.get("pid")
+    if not pid:
+        print(json.dumps({"error": "campaign has no recorded pid (started outside the desktop GUI)"}, indent=2))
+        return 1
+    try:
+        if action == "pause":
+            os.kill(pid, signal.SIGSTOP)
+        elif action == "resume":
+            os.kill(pid, signal.SIGCONT)
+        else:  # stop: deliver after un-freezing a paused campaign, so the
+            # process' own stop handler can actually run and record `stopped`.
+            os.kill(pid, signal.SIGCONT)
+            os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        if action != "stop":
+            print(json.dumps({"error": f"campaign process {pid} is no longer running"}, indent=2))
+            return 1
+        # The campaign is already gone → record an honest stopped lifecycle.
+    except OSError as exc:
+        print(json.dumps({"error": f"cannot {action} campaign process {pid}: {exc}"}, indent=2))
+        return 1
+
+    if action == "stop":
+        # Give the campaign a moment to finalize itself as `stopped`; if it
+        # cannot (already dead, stuck frozen), the controller records it.
+        run = _await_run_status(store, run_id, ("stopped", "failed", "completed"), timeout=2.0)
+        if run is None:
+            store.finish_discovery_run(run_id, status="stopped", error="stopped by user (process did not finalize)")
+            run = store.get_discovery_run(run_id)
+    else:
+        store.set_discovery_run_control(run_id, "paused" if action == "pause" else "running")
+        run = store.get_discovery_run(run_id)
+    print(json.dumps(run, indent=2))
+    return 0
+
+
+def _cmd_discovery_clear(argv: list[str]) -> int:
+    """Drop the discovery report cache (runs + candidate snapshots only)."""
+    store = Store(_store_path())
+    runs, candidates = store.clear_discovery_cache()
+    print(json.dumps({"runs_cleared": runs, "candidates_cleared": candidates}, indent=2))
     return 0
 
 
@@ -462,6 +617,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_sources()
     if command == "discovery-run":
         return _cmd_discovery_run(argv[1:])
+    if command == "discovery-control":
+        return _cmd_discovery_control(argv[1:])
+    if command == "discovery-clear":
+        return _cmd_discovery_clear(argv[1:])
     if command == "discovery-status":
         return _cmd_discovery_status(argv[1:])
     if command == "discovery-results":

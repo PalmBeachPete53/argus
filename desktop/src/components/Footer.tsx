@@ -10,8 +10,10 @@ interface FooterProps {
 export default function Footer({ status }: FooterProps) {
   let text = "";
   if (status.status === "running") text = "Discovery running…";
+  else if (status.status === "paused") text = "Discovery paused";
   else if (status.status === "completed")
     text = `Discovery completed · ${status.candidates} candidates`;
+  else if (status.status === "stopped") text = "Discovery stopped";
   else if (status.status === "failed") text = "Discovery failed";
 
   if (!text) return <footer className="footer" aria-hidden="true" />;

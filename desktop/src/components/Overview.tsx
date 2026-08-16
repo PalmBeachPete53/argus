@@ -32,6 +32,7 @@ export default function Overview({ discovery, onGoToDiscovery }: OverviewProps) 
   }, []);
 
   const last = stats?.last_discovery ?? null;
+  const active = discovery.status.status === "running" || discovery.status.status === "paused";
 
   const handleRun = async () => {
     const started = await discovery.launch();
@@ -75,9 +76,9 @@ export default function Overview({ discovery, onGoToDiscovery }: OverviewProps) 
           type="button"
           className="primary-button"
           onClick={() => void handleRun()}
-          disabled={discovery.status.status === "running"}
+          disabled={active}
         >
-          {discovery.status.status === "running" ? "Running…" : "Run Discovery"}
+          {active ? (discovery.status.status === "paused" ? "Paused" : "Running…") : "Run Discovery"}
         </button>
       </section>
     </div>

@@ -14,6 +14,25 @@ DEFAULT_STORE_PATH = "data/argus.db"
 DEFAULT_RAW_ROOT = "data/raw"
 
 
+def in_bounds(pub, start, end) -> bool:
+    """Publication-date window check (start-inclusive, end-exclusive, None = open).
+
+    The single definition of a discovery/fetch date range in the Core — shared
+    by the CLI and the GUI bridge so a window is always applied the same way. A
+    publication without a publication date is out of bounds once a window is
+    set.
+    """
+    if start is None and end is None:
+        return True
+    if pub.publication_date is None:
+        return False
+    if start is not None and pub.publication_date < start:
+        return False
+    if end is not None and pub.publication_date >= end:
+        return False
+    return True
+
+
 class CentralBankCollector:
     def __init__(
         self,
@@ -49,7 +68,17 @@ class CentralBankCollector:
         banks: tuple[str, ...] | list[str] | None = None,
         source_ids: tuple[str, ...] | list[str] | None = None,
         run_id: str | None = None,
+        date_start=None,
+        date_end=None,
     ) -> list[models.Publication]:
+        """Discover and persist publications across the enabled sources.
+
+        ``date_start`` / ``date_end`` (datetime) restrict *what enters the
+        store* to the publication-date window (start-inclusive, end-exclusive,
+        see :func:`in_bounds`). With no bounds the behaviour is unchanged:
+        every discovered publication is persisted. The window lives here, in
+        the Core, so the CLI and the GUI bridge apply it identically.
+        """
         self._sync_sources()
         run_id = run_id or self.store.run_stamp()
         publications: list[models.Publication] = []
@@ -82,6 +111,8 @@ class CentralBankCollector:
                 found = self._search_fallback(source)
 
             for publication in found:
+                if not in_bounds(publication, date_start, date_end):
+                    continue
                 publications.append(self.store.upsert_publication(publication))
             self.store.record_source_result(
                 source.id, ok=source_ok, error=source_error

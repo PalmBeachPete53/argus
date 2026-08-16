@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS discovery_runs (
     status TEXT,
     error TEXT,
     candidates INTEGER DEFAULT 0,
-    banks_json TEXT
+    banks_json TEXT,
+    pid INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_discovery_runs_started
     ON discovery_runs(started_at);
@@ -503,6 +504,10 @@ class Store:
             pass
         try:
             self._conn.execute("ALTER TABLE normalized_documents ADD COLUMN pages_json TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute("ALTER TABLE discovery_runs ADD COLUMN pid INTEGER")
         except sqlite3.OperationalError:
             pass
         self._conn.commit()
@@ -933,23 +938,50 @@ class Store:
     # Discovery campaign report layer (run lifecycle + result snapshot)
     # ------------------------------------------------------------------
 
-    def start_discovery_run(self, run_id: str, banks) -> None:
-        """Record that a discovery campaign started (status ``running``)."""
+    def start_discovery_run(self, run_id: str, banks, pid: int | None = None) -> None:
+        """Record that a discovery campaign started (status ``running``).
+
+        ``pid`` is the OS process running the campaign (for the desktop GUI's
+        pause / resume / stop controls). It is optional so CLI-driven campaigns
+        stay recordable too.
+        """
         self._conn.execute(
             """
-            INSERT INTO discovery_runs (run_id, started_at, status, candidates, banks_json)
-            VALUES (?, ?, 'running', 0, ?)
+            INSERT INTO discovery_runs (run_id, started_at, status, candidates, banks_json, pid)
+            VALUES (?, ?, 'running', 0, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 started_at=excluded.started_at,
                 status='running',
                 candidates=0,
                 error=NULL,
                 finished_at=NULL,
-                banks_json=excluded.banks_json
+                banks_json=excluded.banks_json,
+                pid=excluded.pid
             """,
-            (run_id, iso(now_utc()), json.dumps(list(banks or ()))),
+            (run_id, iso(now_utc()), json.dumps(list(banks or ())), pid),
         )
         self._conn.commit()
+
+    def set_discovery_run_control(self, run_id: str, status: str) -> None:
+        """Flip the status of a *running/paused* campaign (pause / resume) from
+        the controlling process; the campaign process itself is not involved
+        (a SIGSTOPped process cannot write to the store)."""
+        self._conn.execute(
+            "UPDATE discovery_runs SET status=? WHERE run_id=?", (status, run_id)
+        )
+        self._conn.commit()
+
+    def clear_discovery_cache(self) -> tuple[int, int]:
+        """Drop every discovery report (runs + their candidate snapshots).
+
+        The discovery cache is exactly the two report tables: the run lifecycle
+        and the per-candidate snapshot. Publications/documents/facts are
+        pipeline data, never cache, and are untouched.
+        """
+        candidates = self._conn.execute("DELETE FROM discovery_candidates").rowcount
+        runs = self._conn.execute("DELETE FROM discovery_runs").rowcount
+        self._conn.commit()
+        return runs, candidates
 
     def finish_discovery_run(
         self,
@@ -1012,6 +1044,7 @@ class Store:
             "error": row["error"],
             "candidates": row["candidates"] or 0,
             "banks": json.loads(row["banks_json"] or "[]"),
+            "pid": row["pid"],
         }
 
     def get_discovery_run(self, run_id: str) -> dict | None:

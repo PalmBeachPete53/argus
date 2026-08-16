@@ -47,12 +47,14 @@ export type SettingsSection = "general" | "banks";
 /** A discovery campaign lifecycle (from the Core store, read-only). */
 export interface DiscoveryRun {
   run_id: string | null;
-  status: "idle" | "running" | "completed" | "failed";
+  status: "idle" | "running" | "paused" | "completed" | "failed" | "stopped";
   started_at: string | null;
   finished_at: string | null;
   error: string | null;
   candidates: number;
   banks: string[];
+  /** OS PID of the campaign subprocess (null when none is recorded). */
+  pid: number | null;
 }
 
 /** One publication candidate produced by a discovery campaign. */
@@ -78,6 +80,12 @@ export interface DiscoveryResults {
   finished_at: string | null;
   candidates: DiscoveryCandidate[];
   total: number;
+}
+
+/** Result of clearing the discovery report cache (runs + candidates only). */
+export interface ClearedCache {
+  runs_cleared: number;
+  candidates_cleared: number;
 }
 
 /** Read-only Core/Store aggregates shown on the Overview. */

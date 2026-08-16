@@ -38,6 +38,35 @@ def test_discover_all_persists_publications(tmp_path, fixture_bytes):
     assert len(store.list_publications()) == 2
 
 
+def test_discover_all_applies_date_window_before_persisting(tmp_path, fixture_bytes):
+    """The Core applies the publication-date window itself (start-inclusive,
+    end-exclusive): out-of-window publications never enter the store."""
+    from conftest import make_store, make_client
+
+    session = FakeSession({FED_URL: response(fixture_bytes(FED_FIXTURE), url=FED_URL, content_type="application/xml")})
+    collector, store = build_collector(tmp_path, session)
+    window = collector.discover_all(
+        date_start=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        date_end=datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    assert len(window) == 1  # fixture holds 2026-06-17 and 2026-07-29
+    assert window[0].publication_date.date() == datetime(2026, 7, 29).date()
+    assert [p.id for p in store.list_publications()] == [window[0].id]
+    assert store.count_publications() == 1
+
+    # without bounds the behaviour is unchanged: every discovery is persisted
+    clean_session = FakeSession({FED_URL: response(fixture_bytes(FED_FIXTURE), url=FED_URL, content_type="application/xml")})
+    store2 = make_store(tmp_path / "nowindow")
+    collector2 = CentralBankCollector(
+        store=store2,
+        client=make_client(clean_session),
+        raw_root=tmp_path / "nowindow" / "raw",
+    )
+    pub2 = collector2.discover_all()
+    assert len(pub2) == 2
+    assert store2.count_publications() == 2
+
+
 def test_run_twice_is_idempotent(tmp_path, fixture_bytes):
     from argus.registry import SourceRegistry
 

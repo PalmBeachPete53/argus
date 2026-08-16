@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use serde::Serialize;
+use tauri::Manager;
 use tauri::State;
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,24 @@ impl Bridge {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
+    /// Spawn a `python -m argus.gui_bridge` command detached, with output sent
+    /// to the void. Used for long-running or fire-and-forget work: discovery
+    /// campaigns and exit-time cleanup of an active campaign.
+    fn spawn_detached(&self, args: &[String]) -> Result<(), String> {
+        Command::new(&self.python)
+            .arg("-m")
+            .arg("argus.gui_bridge")
+            .args(args)
+            .current_dir(&self.root)
+            .env("PYTHONPATH", self.root.join("src"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|err| format!("failed to launch bridge command {args:?}: {err}"))?;
+        Ok(())
+    }
+
     fn banks(&self) -> Result<Vec<BankInfo>, String> {
         let out = self.run(&["banks".into()])?;
         let value: serde_json::Value = serde_json::from_str(&out).map_err(|err| err.to_string())?;
@@ -154,22 +173,41 @@ impl Bridge {
     /// Launch a discovery campaign as a *detached* background subprocess.
     ///
     /// Discovery is a long-running operation; the Rust shell only starts the
-    /// Core's campaign (which records its lifecycle in the store) and returns
-    /// immediately. The frontend observes it via ``discovery_status`` /
-    /// ``discovery_results`` — the interface never blocks on the run.
-    fn discovery_run(&self) -> Result<(), String> {
-        Command::new(&self.python)
-            .arg("-m")
-            .arg("argus.gui_bridge")
-            .arg("discovery-run")
-            .current_dir(&self.root)
-            .env("PYTHONPATH", self.root.join("src"))
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|err| format!("failed to launch discovery: {err}"))?;
-        Ok(())
+    /// Core's campaign (which records its lifecycle — and its PID — in the
+    /// store) and returns immediately. The frontend observes it via
+    /// ``discovery_status`` / ``discovery_results`` and controls it via
+    /// ``discovery_control``; the interface never blocks on the run.
+    /// ``start_date`` / ``end_date`` (ISO dates, optional) bound the campaign
+    /// to a publication-date window, applied by the Core itself.
+    fn discovery_run(&self, start_date: Option<String>, end_date: Option<String>) -> Result<(), String> {
+        let mut args = vec!["discovery-run".to_string()];
+        if let Some(date) = start_date {
+            args.push("--start-date".into());
+            args.push(date);
+        }
+        if let Some(date) = end_date {
+            args.push("--end-date".into());
+            args.push(date);
+        }
+        self.spawn_detached(&args)
+    }
+
+    /// Real lifecycle control of the active campaign subprocess: the bridge
+    /// signals the recorded PID (SIGSTOP / SIGCONT / SIGTERM) and returns the
+    /// updated run lifecycle.
+    fn discovery_control(&self, action: &str) -> Result<DiscoveryRun, String> {
+        let out = self.run(&["discovery-control".into(), action.to_string()])?;
+        let value: serde_json::Value = serde_json::from_str(&out).map_err(|err| err.to_string())?;
+        if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
+            return Err(err.to_string());
+        }
+        serde_json::from_value(value).map_err(|err| err.to_string())
+    }
+
+    /// Drop the discovery report cache (runs + candidate snapshots only).
+    fn clear_discovery_cache(&self) -> Result<ClearedCache, String> {
+        let out = self.run(&["discovery-clear".into()])?;
+        serde_json::from_str(&out).map_err(|err| err.to_string())
     }
 
     /// JSON summary of the most recent discovery campaign.
@@ -255,12 +293,13 @@ struct BankSources {
 #[serde(rename_all = "snake_case")]
 struct DiscoveryRun {
     run_id: Option<String>,
-    status: String, // idle | running | completed | failed
+    status: String, // idle | running | paused | completed | failed | stopped
     started_at: Option<String>,
     finished_at: Option<String>,
     error: Option<String>,
     candidates: i64,
     banks: Vec<String>,
+    pid: Option<i64>,
 }
 
 #[derive(Serialize, serde::Deserialize)]
@@ -287,6 +326,13 @@ struct DiscoveryResults {
     finished_at: Option<String>,
     candidates: Vec<DiscoveryCandidate>,
     total: i64,
+}
+
+#[derive(Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct ClearedCache {
+    runs_cleared: i64,
+    candidates_cleared: i64,
 }
 
 #[derive(Serialize, serde::Deserialize)]
@@ -336,8 +382,22 @@ fn get_sources(state: State<'_, Bridge>) -> Result<std::collections::HashMap<Str
 }
 
 #[tauri::command]
-fn run_discovery(state: State<'_, Bridge>) -> Result<(), String> {
-    state.discovery_run()
+fn run_discovery(
+    state: State<'_, Bridge>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+) -> Result<(), String> {
+    state.discovery_run(start_date, end_date)
+}
+
+#[tauri::command]
+fn discovery_control(state: State<'_, Bridge>, action: String) -> Result<DiscoveryRun, String> {
+    state.discovery_control(&action)
+}
+
+#[tauri::command]
+fn clear_discovery_cache(state: State<'_, Bridge>) -> Result<ClearedCache, String> {
+    state.clear_discovery_cache()
 }
 
 #[tauri::command]
@@ -373,13 +433,24 @@ pub fn run() {
             open_file,
             get_sources,
             run_discovery,
+            discovery_control,
+            clear_discovery_cache,
             get_discovery_status,
             get_discovery_results,
             get_stats,
             open_url
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Argus");
+        .build(tauri::generate_context!())
+        .expect("error while building Argus")
+        .run(|app_handle, event| {
+            // When the app closes while a discovery campaign is running, ask
+            // the campaign to stop so no orphan process survives the app.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Some(bridge) = app_handle.try_state::<Bridge>() {
+                    let _ = bridge.spawn_detached(&["discovery-control".into(), "stop".into()]);
+                }
+            }
+        });
 }
 
 #[cfg(test)]

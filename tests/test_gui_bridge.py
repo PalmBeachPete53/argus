@@ -302,14 +302,17 @@ def _publication(*, id_, bank, title, url, source_id, extra=None):
 
 def _fake_collector_factory(calls, pubs_fn):
     """A CentralBankCollector stand-in recording the requested banks and
-    returning the campaign's publications — no network is ever touched."""
+    date bounds and returning the campaign's publications — no network is ever
+    touched."""
     class _FakeCollector:
         def __init__(self, **kwargs):
             self.called_banks = None
+            self.called_bounds = (None, None)
 
-        def discover_all(self, *, banks=None, run_id=None):
+        def discover_all(self, *, banks=None, run_id=None, date_start=None, date_end=None):
             self.called_banks = banks
-            calls.append(banks)
+            self.called_bounds = (date_start, date_end)
+            calls.append((banks, (date_start, date_end)))
             return pubs_fn(run_id)
 
     return _FakeCollector
@@ -353,7 +356,7 @@ def test_discovery_run_records_completed_campaign(monkeypatch, tmp_path, capsys,
     assert code == 0
     assert data["status"] == "completed"
     assert data["candidates"] == 3
-    assert "rbnz" not in (calls[0] or ()), "an OFF bank must never run"
+    assert "rbnz" not in (calls[0][0] or ()), "an OFF bank must never run"
 
     # status
     code2, status = patched(["discovery-status"])
@@ -385,7 +388,7 @@ def test_discovery_run_failure_records_failed_status(monkeypatch, tmp_path, caps
         def __init__(self, **kwargs):
             pass
 
-        def discover_all(self, *, banks=None, run_id=None):
+        def discover_all(self, *, banks=None, run_id=None, date_start=None, date_end=None):
             raise RuntimeError("boom")
 
     monkeypatch.setattr(gui_bridge, "CentralBankCollector", _FailingCollector)
@@ -428,9 +431,9 @@ def test_discovery_respects_bank_toggle(monkeypatch, tmp_path, capsys, patched):
 
     code, data = patched(["discovery-run"])
     assert code == 0 and data["status"] == "completed"
-    assert calls and calls[-1] is not None
-    assert "rbnz" not in calls[-1]
-    assert "fed" in calls[-1]
+    assert calls and calls[-1][0] is not None
+    assert "rbnz" not in calls[-1][0]
+    assert "fed" in calls[-1][0]
 
     # re-enable RBNZ through the Core toggle → participates
     from argus.config import set_bank_enabled
@@ -439,7 +442,7 @@ def test_discovery_respects_bank_toggle(monkeypatch, tmp_path, capsys, patched):
     assert is_bank_enabled("rbnz") is True
     code2, data2 = patched(["discovery-run"])
     assert code2 == 0 and data2["status"] == "completed"
-    assert "rbnz" in calls[-1]
+    assert "rbnz" in calls[-1][0]
 
 
 def test_stats_reflect_core_store(patched, tmp_path, monkeypatch):
@@ -494,3 +497,170 @@ def test_open_url_rejects_non_http(monkeypatch, capsys):
         assert not opened, f"must not open {bad!r}"
         data = json.loads(capsys.readouterr().out)
         assert "http" in data["error"]
+
+
+# ---------------------------------------------------------------------------
+# Discovery lifecycle controls (pause / resume / stop) and date window
+# ---------------------------------------------------------------------------
+
+def _completed_campaign(monkeypatch, patched):
+    """Run a discovery campaign through the fake collector (no network)."""
+    def pubs_fn(run_id):
+        return [_publication(
+            id_="c1", bank="fed", title="Candidate", url="https://fed.gov/c1", source_id="fed_rss"
+        )]
+
+    monkeypatch.setattr(gui_bridge, "CentralBankCollector", _fake_collector_factory([], pubs_fn))
+    patched(["discovery-run"])
+
+
+def test_discovery_run_records_own_pid(monkeypatch, patched):
+    _completed_campaign(monkeypatch, patched)
+    _, status = patched(["discovery-status"])
+    assert status["pid"] == __import__("os").getpid()
+
+
+def test_discovery_run_passes_date_bounds(monkeypatch, patched):
+    from datetime import datetime, timezone
+
+    calls: list = []
+    monkeypatch.setattr(
+        gui_bridge, "CentralBankCollector",
+        _fake_collector_factory(calls, lambda run_id: []),
+    )
+    code, data = patched(["discovery-run", "--start-date", "2026-01-01", "--end-date", "2026-02-01"])
+    assert code == 0 and data["status"] == "completed"
+    start, end = calls[-1][1]
+    assert start == datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert end == datetime(2026, 2, 1, tzinfo=timezone.utc)
+    assert start is not None and end is not None
+
+
+def test_discovery_run_rejects_invalid_dates(monkeypatch, tmp_path, capsys):
+    _make_data(tmp_path)
+    monkeypatch.setattr(gui_bridge, "ROOT", tmp_path)
+    assert gui_bridge.main(["discovery-run", "--start-date", "not-a-date"]) == 2
+    assert "start-date must be a date" in capsys.readouterr().err
+
+
+def test_discovery_run_stop_records_stopped_status(monkeypatch, patched):
+    """A SIGTERMped campaign records itself as ``stopped`` (never ``failed``)."""
+
+    class _StoppedCollector:
+        def __init__(self, **kwargs):
+            pass
+
+        def discover_all(self, *, banks=None, run_id=None, date_start=None, date_end=None):
+            raise gui_bridge.DiscoveryStopped("stop requested")
+
+    monkeypatch.setattr(gui_bridge, "CentralBankCollector", _StoppedCollector)
+    code, data = patched(["discovery-run"])
+    assert code == 0
+    assert data["status"] == "stopped"
+    _, status = patched(["discovery-status"])
+    assert status["status"] == "stopped"
+    assert status["error"]
+
+
+def test_discovery_control_pause_resume_stop(monkeypatch, tmp_path, patched):
+    """Real signals to the campaign subprocess: SIGSTOP freezes it, SIGCONT
+    resumes it, SIGTERM ends it — the store reflects each transition."""
+    import os
+    import subprocess
+    import sys
+
+    if os.name == "nt":
+        import pytest
+
+        pytest.skip("POSIX signals required")
+
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+        store.start_discovery_run("ctrl-1", ["fed"], pid=sleeper.pid)
+        store.close()
+
+        code, run = patched(["discovery-control", "pause"])
+        assert code == 0
+        assert run["status"] == "paused"
+        assert run["pid"] == sleeper.pid
+        assert sleeper.poll() is None  # frozen, not dead
+
+        code, run = patched(["discovery-control", "resume"])
+        assert code == 0
+        assert run["status"] == "running"
+
+        code, run = patched(["discovery-control", "stop"])
+        assert code == 0
+        assert run["status"] == "stopped"
+        assert sleeper.wait(5) is not None  # terminated
+    finally:
+        if sleeper.poll() is None:
+            sleeper.kill()
+            sleeper.wait()
+
+
+def test_discovery_control_stop_of_dead_campaign_records_stopped(monkeypatch, tmp_path, patched):
+    import subprocess
+    import sys
+
+    if sys.platform == "win32":
+        import pytest
+
+        pytest.skip("POSIX signals required")
+    # a pid whose process has already exited (safe: never an out-of-range value)
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_discovery_run("dead-1", ["fed"], pid=gone.pid)
+    store.close()
+    code, run = patched(["discovery-control", "stop"])
+    assert code == 0
+    assert run["status"] == "stopped"
+
+
+def test_discovery_control_requires_active_campaign(monkeypatch, patched):
+    code, data = patched(["discovery-control", "pause"])
+    assert code == 1
+    assert "no active campaign" in data["error"]
+
+    _completed_campaign(monkeypatch, patched)
+    code2, data2 = patched(["discovery-control", "stop"])
+    assert code2 == 1
+    assert "no active campaign to stop" in data2["error"]
+
+
+def test_discovery_control_unknown_action(patched):
+    assert gui_bridge.main(["discovery-control", "explode"]) == 2
+
+
+def test_discovery_clear_removes_only_report_cache(monkeypatch, tmp_path, patched):
+    from argus.models import Document, DocumentStatus
+
+    _seed_store(
+        tmp_path,
+        [_publication(id_="p1", bank="fed", title="FOMC", url="https://fed.gov/1", source_id="fed_rss")],
+    )
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.upsert_document(
+        Document(publication_id="p1", url="https://fed.gov/1.html", kind="html", status=DocumentStatus.FETCHED)
+    )
+    store.close()
+
+    _completed_campaign(monkeypatch, patched)
+    _, status = patched(["discovery-status"])
+    assert status["status"] == "completed"
+
+    code, cleared = patched(["discovery-clear"])
+    assert code == 0
+    assert cleared["runs_cleared"] == 1
+    assert cleared["candidates_cleared"] == 1
+
+    # the report cache is gone…
+    _, status = patched(["discovery-status"])
+    assert status["status"] == "idle"
+    # …but pipeline data (publications, documents) is untouched
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    assert store.count_publications() == 1
+    assert store.count_documents() == 1
+    store.close()

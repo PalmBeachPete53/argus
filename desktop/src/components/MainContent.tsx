@@ -8,7 +8,11 @@ export interface DiscoveryState {
   status: DiscoveryRun;
   candidates: DiscoveryCandidate[];
   error: string | null;
-  launch: () => Promise<boolean>;
+  launch: (startDate?: string, endDate?: string) => Promise<boolean>;
+  pause: () => Promise<boolean>;
+  resume: () => Promise<boolean>;
+  stop: () => Promise<boolean>;
+  clearCache: () => Promise<import("../types").ClearedCache | null>;
   openUrl: (url: string) => Promise<void>;
 }
 
