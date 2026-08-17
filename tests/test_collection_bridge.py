@@ -97,14 +97,15 @@ class _FakeCollector:
         return list(pubs)
 
     def collect_campaign(self, *, banks=None, force=False, date_start=None, date_end=None,
-                         run_id=None, progress=None, should_stop=None):
+                         run_id=None, progress=None, should_stop=None, publications=None):
         self.force = force
         self.calls.append((banks, force, run_id))
         from argus.models import FetchResult
 
-        total = len(self._plan)
+        plan = list(publications) if publications is not None else list(self._plan)
+        total = len(plan)
         results = []
-        for i, pub in enumerate(self._plan, start=1):
+        for i, pub in enumerate(plan, start=1):
             if should_stop is not None and should_stop():
                 from argus.collector import CollectionStopped
 

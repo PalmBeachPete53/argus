@@ -1078,9 +1078,6 @@ def _run_collection_campaign(
     store = Store(store_path)
     run_id = run_id or make_run_stamp()
     registry = SourceRegistry()
-    # The number of publications the campaign will collect, fixed at launch so
-    # the GUI reads 0 / N immediately; the Core advances it via the same
-    # selection (what `collect_campaign` actually schedules).
     collector = CentralBankCollector(
         store=store,
         registry=registry,
@@ -1088,14 +1085,17 @@ def _run_collection_campaign(
         raw_root=raw_root,
         search_provider=_search_provider_from_env(),
     )
-    publications_total = len(
-        collector.plan_collection(
-            banks=tuple(banks) if banks else None,
-            force=force,
-            date_start=date_start,
-            date_end=date_end,
-        )
+    # The campaign's *frozen plan*: computed once, recorded as the run's total,
+    # and handed to collect_campaign so the total always equals the exact set of
+    # publications that will be submitted — even if a concurrent Discovery adds
+    # or modifies publications while this campaign runs.
+    plan = collector.plan_collection(
+        banks=tuple(banks) if banks else None,
+        force=force,
+        date_start=date_start,
+        date_end=date_end,
     )
+    publications_total = len(plan)
     store.start_collection_run(
         run_id,
         banks,
@@ -1128,6 +1128,7 @@ def _run_collection_campaign(
             date_end=date_end,
             run_id=run_id,
             should_stop=lambda: stop_flag[0],
+            publications=plan,
         )
     except CollectionStopped:
         store.finish_collection_run(run_id, status="cancelled", error="cancelled by user")
@@ -1153,7 +1154,7 @@ def _run_collection_campaign(
         "error": None,
         "collected": completed,
         "failed": failed,
-        "publications_total": len(results),
+        "publications_total": publications_total,
     }
 
 

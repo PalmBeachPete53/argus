@@ -64,20 +64,43 @@ class HttpResponse:
 
 
 class RateLimiter:
-    def __init__(self, min_interval: float) -> None:
+    """A thread-safe, per-host request-spacing limiter.
+
+    Each host keeps its own last-request timestamp, so concurrent callers for
+    *different* hosts are not serialized against each other, while callers for
+    the *same* host are spaced by ``min_interval``. The limiter is shared by
+    injecting it into several :class:`HttpClient` instances (e.g. all workers of
+    one Collection campaign), so the interval is honoured globally per host —
+    not once per client.
+
+    ``now_fn`` / ``sleeper`` are injectable for deterministic tests (a fake
+    clock + a recording sleeper); by default they use the monotonic clock and
+    ``time.sleep``.
+    """
+
+    def __init__(
+        self,
+        min_interval: float,
+        *,
+        now_fn=time.monotonic,
+        sleeper=time.sleep,
+    ) -> None:
         self.min_interval = min_interval
         self._last: dict[str, float] = {}
         self._lock = threading.Lock()
+        self._now_fn = now_fn
+        self._sleeper = sleeper
 
-    def wait(self, url: str, sleeper=time.sleep) -> None:
+    def wait(self, url: str, sleeper=None) -> None:
         if not self.min_interval or self.min_interval <= 0:
             return
         host = (urlparse(url).hostname or "").lower()
         if not host:
             return
+        sleep = sleeper or self._sleeper
         with self._lock:
             last = self._last.get(host, 0.0)
-            now = time.monotonic()
+            now = self._now_fn()
             delay = last + self.min_interval - now
             if delay > 0:
                 self._last[host] = now + delay
@@ -85,7 +108,7 @@ class RateLimiter:
                 self._last[host] = now
                 delay = 0.0
         if delay > 0:
-            sleeper(delay)
+            sleep(delay)
 
 
 class HttpClient:
@@ -95,11 +118,15 @@ class HttpClient:
         *,
         session=None,
         sleeper=None,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         self.config = config or HttpConfig()
         self._session = session
         self.sleeper = sleeper or time.sleep
-        self.rate_limiter = RateLimiter(self.config.min_interval)
+        # A campaign/collector-owned RateLimiter can be injected so several
+        # clients (one per worker) share a single per-host limiter; without one
+        # each client builds its own (the historical behaviour).
+        self.rate_limiter = rate_limiter or RateLimiter(self.config.min_interval)
         self.robots = RobotsGate(
             self._raw_get,
             token=self.config.robots_token,

@@ -1,158 +1,235 @@
 #!/usr/bin/env python3
-"""Benchmark: sequential vs parallel Collection on real sources with a temp store.
+"""Deterministic, offline Collection benchmark (no network, CI-friendly).
 
-Runs a real Discovery pass over the enabled banks (bounded window) to populate
-a temporary store, then runs Collection twice on *separate copies* of that store
-(workers=1 vs workers=N) and reports the wall-clock and the persisted outcome.
+Builds a controlled synthetic workload (publications + documents spread over
+several hosts, with artificial per-publication latency and one controlled
+failure) in a temporary store, then runs the SAME workload with workers=1..N
+and reports elapsed time, speedup, and persisted business state.
 
-The production ``data/argus.db`` is never touched: everything lives under a
-temporary directory.
+The workload is identical across worker counts; only the concurrency changes,
+so the speedup is real and reproducible. The script also asserts *business
+equivalence* across worker counts: same publications, documents, statuses,
+errors, dedup keys and retries.
+
+The production ``data/argus.db`` is never touched.
 
 Usage:
-    python scripts/benchmark_collection.py [--banks fed,ecb,boe] [--start 2026-07-01] [--end 2026-08-01]
+    python scripts/benchmark_collection.py [--workers 1,4,8] [--latency-ms 100] [--publications 24]
 """
 
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
 import tempfile
 import time
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-from argus.collector import COLLECTION_WORKERS, CentralBankCollector
+from argus.collector import CentralBankCollector, _collection_worker_pool_size
 from argus.http import HttpConfig
+from argus.models import Document, DocumentStatus, FetchResult, Publication, PublicationStatus
 from argus.store import Store
 
 
-def _bank_list(values: str | None) -> tuple[str, ...] | None:
-    if not values:
-        return None
-    return tuple(b.strip() for b in values.split(",") if b.strip())
-
-
-def _discover(tmp: Path, banks, date_start, date_end) -> int:
-    store = Store(tmp / "seed.db")
-    collector = CentralBankCollector(
-        store=store,
-        http_config=HttpConfig(respect_robots=True, min_interval=0.2),
-        raw_root=tmp / "raw-seed",
+def _pub(index: int, *, bank: str, host: str, documents: int,
+         latency_ms: float, fail: bool) -> Publication:
+    pub = Publication(
+        central_bank=bank,
+        title=f"Statement {index}",
+        url=f"https://{host}/pubs/{index}.htm",
+        document_urls=tuple(f"https://{host}/pubs/{index}/doc{j}.pdf" for j in range(documents)),
+        source_id="src",
+        source_url=f"https://{host}/feed.xml",
+        publication_date=datetime(2026, 7, (index % 28) + 1, tzinfo=timezone.utc),
+        status=PublicationStatus.DISCOVERED,
     )
-    start = time.monotonic()
-    pubs = collector.discover_all(
-        banks=banks, date_start=date_start, date_end=date_end
-    )
-    elapsed = time.monotonic() - start
-    print(f"  discovery: {len(pubs)} publications in {elapsed:.2f}s")
-    store.close()
-    return len(pubs)
-
-
-def _run_collection(tmp: Path, db_name: str, workers: int, banks, date_start, date_end,
-                    min_interval: float) -> dict:
-    """Copy the seeded store (and raw tree) and collect it with a given pool."""
-    import os
-
-    seed_db = tmp / "seed.db"
-    run_dir = tmp / db_name
-    run_dir.mkdir(exist_ok=True)
-    db = run_dir / "argus.db"
-    shutil.copy2(seed_db, db)
-    if os.path.exists(str(seed_db) + "-wal"):
-        shutil.copy2(str(seed_db) + "-wal", str(db) + "-wal")
-    if os.path.exists(str(seed_db) + "-shm"):
-        shutil.copy2(str(seed_db) + "-shm", str(db) + "-shm")
-    raw = run_dir / "raw"
-    raw.mkdir(exist_ok=True)
-
-    store = Store(db)
-    collector = CentralBankCollector(
-        store=store,
-        http_config=HttpConfig(respect_robots=True, min_interval=min_interval),
-        raw_root=raw,
-    )
-    start = time.monotonic()
-    results = collector.collect_campaign(
-        banks=banks, date_start=date_start, date_end=date_end,
-    )
-    elapsed = time.monotonic() - start
-
-    pubs = store.list_publications(bank=banks)
-    by_status: dict[str, int] = {}
-    docs = 0
-    for pub in pubs:
-        by_status[pub.status.value] = by_status.get(pub.status.value, 0) + 1
-        docs += store.document_count(pub.id)
-    fetched = sum(1 for r in results if r.ok)
-    failed = sum(1 for r in results if not r.ok)
-    errors = len(store.list_errors())
-    store.close()
-
-    return {
-        "workers": workers,
-        "elapsed": elapsed,
-        "publications": len(pubs),
-        "documents": docs,
-        "status": by_status,
-        "fetched": fetched,
-        "failed": failed,
-        "errors": errors,
+    # deterministic, injectable through the extra dict so the fake fetcher can
+    # reproduce the exact workload
+    pub.extra = {
+        "bench_latency_ms": latency_ms,
+        "bench_fail": fail,
+        "bench_documents": documents,
     }
+    return pub
+
+
+class _BenchmarkFetcher:
+    """Deterministic fetcher: sleeps `latency_ms` per publication, returns one
+    document per URL (or a FAILED document when the publication is the
+    controlled failure). No network, no Store access in collect()."""
+
+    def __init__(self, store):
+        self.store = store
+
+    def collect(self, publication, existing_by_url, *, force=False):
+        latency_ms = float(publication.extra.get("bench_latency_ms", 0.0))
+        time.sleep(latency_ms / 1000.0)
+        fail = bool(publication.extra.get("bench_fail", False))
+        pub_id = publication.id or ""
+        targets = list(publication.document_urls) or ([publication.url] if publication.url else [])
+        documents = []
+        for url in targets:
+            if fail:
+                documents.append(Document(publication_id=pub_id, url=url, kind="pdf",
+                                          status=DocumentStatus.FAILED, error="benchmark failure",
+                                          retries=1))
+            else:
+                documents.append(Document(publication_id=pub_id, url=url, kind="pdf",
+                                          status=DocumentStatus.FETCHED, sha256="x" * 64, size=1))
+        ok = bool(documents) and not fail
+        status = PublicationStatus.FAILED if fail else PublicationStatus.FETCHED
+        return (FetchResult(publication_id=pub_id, documents=documents, ok=ok,
+                            failed_urls=[url for d in documents if d.status == DocumentStatus.FAILED]),
+                status)
+
+    def persist(self, publication_id, documents, status):
+        for document in documents:
+            self.store.upsert_document(document)
+        if status is not None:
+            self.store.set_publication_status(publication_id, status)
+
+
+def _build_workload(tmp: Path, *, publications: int, documents: int,
+                    latency_ms: float, hosts: int, failures: int, bank: str) -> Store:
+    store = Store(tmp / "seed.db")
+    for i in range(publications):
+        host = f"bank-{(i % hosts)}.example"
+        fail = i < failures
+        store.upsert_publication(_pub(i, bank=bank, host=host, documents=documents,
+                                       latency_ms=latency_ms, fail=fail))
+    return store
+
+
+def _business_state(store, bank) -> dict:
+    """A sortable, comparable snapshot of the persisted business state."""
+    pubs = sorted(
+        (p.id, p.title, p.status.value, p.url, p.dedup_key or "") for p in store.list_publications(bank=bank)
+    )
+    docs = []
+    for p in store.list_publications(bank=bank):
+        for d in store.list_documents(p.id):
+            docs.append((p.id, d.url, d.kind, d.status.value, d.retries))
+    docs = sorted(docs)
+    errors = sorted((e.source_id, e.error_type, e.message) for e in store.list_errors())
+    return {"publications": pubs, "documents": docs, "errors": errors}
+
+
+def _run(tmp: Path, run_name: str, workers: int, bank: str) -> dict:
+    """Run the workload with a given worker count on a fresh store copy."""
+    import shutil
+
+    seed = tmp / "seed.db"
+    db = tmp / f"{run_name}.db"
+    shutil.copy2(seed, db)
+    for suffix in ("-wal", "-shm"):
+        src = str(seed) + suffix
+        if Path(src).exists():
+            shutil.copy2(src, str(db) + suffix)
+
+    old = os.environ.get("ARGUS_COLLECTION_WORKERS")
+    os.environ["ARGUS_COLLECTION_WORKERS"] = str(workers)
+    try:
+        store = Store(db)
+        fetcher = _BenchmarkFetcher(store)
+        collector = CentralBankCollector(
+            store=store,
+            http_config=HttpConfig(respect_robots=False, min_interval=0.0),
+            raw_root=tmp / f"raw-{run_name}",
+            fetcher=fetcher,
+        )
+        start = time.monotonic()
+        results = collector.collect_campaign(banks=(bank,))
+        elapsed = time.monotonic() - start
+
+        state = _business_state(store, bank)
+        statuses: dict[str, int] = {}
+        for pub in store.list_publications(bank=bank):
+            statuses[pub.status.value] = statuses.get(pub.status.value, 0) + 1
+        store.close()
+        return {
+            "workers": workers,
+            "elapsed": elapsed,
+            "publications": len(state["publications"]),
+            "documents": len(state["documents"]),
+            "status": statuses,
+            "errors": len(state["errors"]),
+            "results": len(results),
+            "state": state,
+        }
+    finally:
+        if old is None:
+            os.environ.pop("ARGUS_COLLECTION_WORKERS", None)
+        else:
+            os.environ["ARGUS_COLLECTION_WORKERS"] = old
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--banks", help="comma-separated bank ids (default: all enabled)")
-    parser.add_argument("--start", default="2026-06-01", help="publication date window start")
-    parser.add_argument("--end", default="2026-08-01", help="publication date window end (exclusive)")
-    parser.add_argument("--workers", type=int, default=COLLECTION_WORKERS,
-                        help="worker count for the parallel leg (default: %(default)s)")
-    parser.add_argument("--min-interval", type=float, default=0.2,
-                        help="per-host request interval in seconds. NOTE: this is the "
-                             "dominant serializing factor when many documents share a host "
-                             "(central banks serve most pages from one host); use 0.0 to "
-                             "observe the raw pool speedup, or a polite value for the "
-                             "realistic politeness-constrained gain.")
+    parser.add_argument("--publications", type=int, default=24, help="publications in the workload")
+    parser.add_argument("--documents", type=int, default=2, help="documents per publication")
+    parser.add_argument("--latency-ms", type=float, default=100.0, help="artificial latency per publication (ms)")
+    parser.add_argument("--hosts", type=int, default=3, help="distinct hosts to spread the workload across")
+    parser.add_argument("--failures", type=int, default=1, help="number of publications that fail (controlled)")
+    parser.add_argument("--bank", default="fed", help="bank id for the synthetic workload")
+    parser.add_argument("--workers", default="1,4,8", help="comma-separated worker counts to benchmark")
     args = parser.parse_args()
 
-    banks = _bank_list(args.banks)
-    date_start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
-    date_end = datetime.fromisoformat(args.end).replace(tzinfo=timezone.utc)
+    workers = [int(w.strip()) for w in args.workers.split(",") if w.strip()]
+    assert args.failures <= args.publications
 
     tmp = Path(tempfile.mkdtemp(prefix="argus-bench-"))
     try:
-        print("seeding store via real discovery…")
-        n = _discover(tmp, banks, date_start, date_end)
-        if n == 0:
-            print("no publications discovered in the window — nothing to benchmark")
-            return 1
+        store = _build_workload(
+            tmp, publications=args.publications, documents=args.documents,
+            latency_ms=args.latency_ms, hosts=args.hosts, failures=args.failures,
+            bank=args.bank,
+        )
+        store.close()
 
-        seq = _run_collection(tmp, "seq", 1, banks, date_start, date_end, args.min_interval)
-        par = _run_collection(tmp, "par", args.workers, banks, date_start, date_end, args.min_interval)
+        print("Collection Parallel Benchmark")
+        print()
+        print("Workload:")
+        print(f"  publications: {args.publications}")
+        print(f"  documents:    {args.publications * args.documents}")
+        print(f"  hosts:        {args.hosts}")
+        print(f"  artificial latency: {args.latency_ms}ms/publication")
+        print(f"  failures:     {args.failures}")
+        print()
 
-        print("\n=== Collection benchmark ===")
-        for row in (seq, par):
-            print(
-                f"workers={row['workers']}: {row['elapsed']:.2f}s "
-                f"| {row['publications']} pubs | {row['documents']} docs "
-                f"| {row['status']} | ok={row['fetched']} failed={row['failed']} "
-                f"errors={row['errors']}"
+        runs = [_run(tmp, f"w{w}", w, args.bank) for w in workers]
+        baseline = runs[0]  # the first listed worker count is the baseline
+
+        print(f"{'workers':<8} {'elapsed':<10} {'speedup':<10} {'pubs':<6} {'docs':<6} {'errors':<6} {'status'}")
+        for run in runs:
+            speedup = baseline["elapsed"] / run["elapsed"] if run["elapsed"] > 0 else float("inf")
+            print(f"{run['workers']:<8} {run['elapsed']:<10.2f} {speedup:<8.2f}x "
+                  f"{run['publications']:<6} {run['documents']:<6} {run['errors']:<6} {run['status']}")
+
+        # Business equivalence across worker counts: identical state, and a
+        # meaningful speedup over the baseline.
+        for run in runs[1:]:
+            assert run["state"] == baseline["state"], (
+                f"workers={run['workers']} business state differs from baseline"
             )
-        speedup = seq["elapsed"] / par["elapsed"] if par["elapsed"] > 0 else float("inf")
-        print(f"\nspeedup: {speedup:.2f}x")
-        # coverage must not be lost by parallelism
-        assert seq["publications"] == par["publications"]
-        assert seq["documents"] == par["documents"]
-        assert seq["status"] == par["status"]
-        assert seq["errors"] == par["errors"]
-        print("coverage: sequential == parallel (publications/documents/status/errors)")
+            assert run["status"] == baseline["status"]
+        print("\nBusiness equivalence: identical publications/documents/statuses/errors/dedup/retries "
+              "across all worker counts")
+
+        if len(runs) > 1:
+            best = min(runs[1:], key=lambda r: r["elapsed"])
+            speedup = baseline["elapsed"] / best["elapsed"] if best["elapsed"] > 0 else float("inf")
+            if speedup < 1.5:
+                print(f"\nWARNING: speedup only {speedup:.2f}x — the workload/latency may be too small "
+                      "to demonstrate parallelism.")
         return 0
     finally:
+        import shutil
+
         shutil.rmtree(tmp, ignore_errors=True)
 
 

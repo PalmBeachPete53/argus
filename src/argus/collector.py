@@ -179,15 +179,18 @@ class CentralBankCollector:
         self._now = now
         self.errors: list[CollectError] = []
 
-    def _new_client(self) -> HttpClient:
-        """A client for one discovery worker.
+    def _new_client(self, *, rate_limiter: "RateLimiter | None" = None) -> HttpClient:
+        """A client for one discovery/collection worker.
 
-        Collector-owned clients are per-worker (own session, own rate limiter
-        and robots cache); an injected client is the test double, shared.
+        Collector-owned clients are per-worker (own session, own robots cache)
+        but share the injected ``rate_limiter`` when one is given (the campaign
+        limiter) so per-host spacing is global across the campaign — a single
+        ``requests.Session`` is still never used from several threads. An
+        injected client is the test double, shared as-is.
         """
         if self._injected_client:
             return self.client
-        return HttpClient(self._http_config)
+        return HttpClient(self._http_config, rate_limiter=rate_limiter)
 
     def _new_fetcher(self, client: HttpClient) -> Fetcher:
         """A Fetcher bound to one worker's client (own session / rate limiter).
@@ -456,13 +459,24 @@ class CentralBankCollector:
         run_id: str | None = None,
         progress: Callable[[int, int], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
+        publications: list[models.Publication] | None = None,
     ) -> list[FetchResult]:
         """Run a **parallel** collection campaign over the selected publications.
 
         The lifecycle-aware counterpart of :meth:`fetch_all`, mirroring
         :meth:`discover_all`: the campaign owns a ``run_id``, fixes its scope
-        (``plan_collection``) before the pool starts, and reports progression
-        through the store's ``collection_runs`` row via the serialized writer.
+        before the pool starts, and reports progression through the store's
+        ``collection_runs`` row via the serialized writer.
+
+        **Frozen plan / total coherence.** The campaign works on a *logical
+        snapshot* of its plan: either ``publications`` (explicitly handed in —
+        the bridge passes the exact list whose length it recorded at launch), or
+        ``plan_collection()`` evaluated once here. ``publications_total`` is
+        fixed to the length of that frozen list *before* the pool starts
+        (``0 / N`` is immediately observable) and can always be reached unless
+        the campaign is stopped — a publication added/modified by a concurrent
+        Discovery *after* the plan is frozen never appears in the total nor in
+        the workers of this campaign.
 
         Publications are collected by a **bounded pool of workers**
         (``COLLECTION_WORKERS`` / ``ARGUS_COLLECTION_WORKERS``) — one worker per
@@ -470,7 +484,8 @@ class CentralBankCollector:
         and atomic raw-file writes; every Store mutation (``upsert_document``,
         ``set_publication_status``, ``collect_errors``, progress) happens here,
         serially, on the caller's thread, because the Store owns a single SQLite
-        connection and is not thread-safe.
+        connection and is not thread-safe. All workers share one campaign-scoped
+        per-host ``RateLimiter`` (own sessions/clients, one limiter).
 
         ``progress(completed, total)`` fires on the caller's thread in **real
         completion order** (``as_completed``), so a slow publication never
@@ -487,9 +502,10 @@ class CentralBankCollector:
         (a worker that failed before producing a result is logged but absent).
         """
         run_id = run_id or self.store.run_stamp()
-        publications = self.plan_collection(
-            banks=banks, force=force, date_start=date_start, date_end=date_end
-        )
+        if publications is None:
+            publications = self.plan_collection(
+                banks=banks, force=force, date_start=date_start, date_end=date_end
+            )
         total = len(publications)
         if run_id:
             self.store.set_collection_progress(run_id, completed=0, total=total)
@@ -502,12 +518,22 @@ class CentralBankCollector:
             if progress is not None:
                 progress(completed, campaign_total)
 
+        # A single campaign-scoped per-host rate limiter shared by every worker's
+        # client: concurrent downloads to the same host are spaced globally while
+        # different hosts remain parallel. (A per-client limiter would let N
+        # workers hit one host simultaneously.)
+        from .http import RateLimiter
+
+        min_interval = self._http_config.min_interval if self._http_config else HttpConfig().min_interval
+        rate_limiter = RateLimiter(min_interval)
+
         return self._run_collection(
             publications,
             force=force,
             run_id=run_id,
             progress=_on_progress,
             should_stop=should_stop,
+            rate_limiter=rate_limiter,
         )
 
     def _collect_publication_worker(
@@ -515,6 +541,7 @@ class CentralBankCollector:
         publication: models.Publication,
         existing_by_url: dict,
         force: bool,
+        rate_limiter,
     ) -> _CollectionWorkerResult:
         """Collect **one arbitrary publication** (never bank- or source-specific).
 
@@ -522,9 +549,10 @@ class CentralBankCollector:
         isolated into the result so a failing publication cannot kill the other
         workers. ``existing_by_url`` is the snapshot of the publication's stored
         documents taken by the scheduler (the serialized writer) before
-        submission — it is read here, never written.
+        submission — it is read here, never written. ``rate_limiter`` is the
+        campaign's single per-host limiter, shared by every worker's client.
         """
-        fetcher = self._new_fetcher(self._new_client())
+        fetcher = self._new_fetcher(self._new_client(rate_limiter=rate_limiter))
         try:
             fetch_result, status = fetcher.collect(publication, existing_by_url, force=force)
             return _CollectionWorkerResult(
@@ -570,6 +598,7 @@ class CentralBankCollector:
         run_id: str,
         progress: Callable[[int, int], None] | None,
         should_stop: Callable[[], bool] | None,
+        rate_limiter=None,
     ) -> list[FetchResult]:
         """Run the bounded worker pool over ``publications``.
 
@@ -582,6 +611,10 @@ class CentralBankCollector:
         * the returned results keep the publication *submission* order, so the
           serialized Store writes (and the logical result order / dedup) are
           unchanged by the completion order.
+
+        Every worker shares ``rate_limiter`` (the campaign's single per-host
+        limiter), so concurrent downloads to the same host are spaced globally
+        while different hosts stay parallel.
 
         A stop request (``CollectionStopped`` raised on the main thread by the
         stop poll or SIGTERM handler) shuts the pool down without waiting for
@@ -600,7 +633,7 @@ class CentralBankCollector:
                     raise CollectionStopped("collection cancelled by user")
                 existing_by_url = {d.url: d for d in self.store.list_documents(publication.id or "")}
                 future = executor.submit(
-                    self._collect_publication_worker, publication, existing_by_url, force
+                    self._collect_publication_worker, publication, existing_by_url, force, rate_limiter
                 )
                 future_to_index[future] = index
             results: list[FetchResult | None] = [None] * total
