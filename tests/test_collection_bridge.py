@@ -239,6 +239,120 @@ def test_collection_run_id_mints_unique_stamp(patched):
         assert re.fullmatch(r"\d{8}T\d{6}-\d+", stamp), stamp
 
 
+def test_collection_run_begin_preregisters_observable_row(patched, tmp_path):
+    """`collection-run-begin` makes the run observable *in the launcher*: the
+    row exists (status running, the just-spawned subprocess's PID) the instant
+    the GUI receives its id — before the detached campaign has booted."""
+    import os
+
+    _, minted = patched(["collection-run-id"])
+    code, run = patched(["collection-run-begin", "--run-id", minted["run_id"], "--pid", str(os.getpid())])
+    assert code == 0
+    assert run["run_id"] == minted["run_id"]
+    assert run["status"] == "running"
+    assert run["pid"] == os.getpid()
+    assert run["publications_total"] == 0
+
+    _, status = patched(["collection-status"])
+    assert status["run_id"] == minted["run_id"]
+    assert status["status"] == "running"
+
+
+def test_collection_run_begin_requires_run_id_and_pid(patched):
+    code, data = patched(["collection-run-begin"])
+    assert code == 2
+    assert "requires --run-id" in data["error"]
+    code, data = patched(["collection-run-begin", "--run-id", "x"])
+    assert code == 2
+    assert "requires --run-id" in data["error"]
+
+
+def test_collection_run_begin_refused_when_different_campaign_active(patched, tmp_path):
+    """Pre-registration is a claim on the single-active slot: a *different*
+    active campaign is refused (the launcher then kills its child), exactly like
+    a normal launch."""
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_collection_run("active-other", ["fed"], pid=0)
+    store.close()
+
+    _, minted = patched(["collection-run-id"])
+    code, data = patched(["collection-run-begin", "--run-id", minted["run_id"], "--pid", "4242"])
+    assert code == 1
+    assert "already active" in data["error"]
+
+
+def test_collection_run_begin_then_run_self_adopts(monkeypatch, tmp_path, patched):
+    """The campaign launched with a pre-registered id self-adopts the launcher's
+    row (same run_id) instead of being refused as a competing campaign — and the
+    status reflects the adopted run, not the pre-registration."""
+    import os
+
+    _seed_publication(tmp_path)
+    _install_fake_collector(monkeypatch)
+    _, minted = patched(["collection-run-id"])
+    _, begun = patched(["collection-run-begin", "--run-id", minted["run_id"], "--pid", str(os.getpid())])
+    assert begun["status"] == "running"
+
+    code, data = patched(["collection-run", "--run-id", minted["run_id"]])
+    assert code == 0
+    assert data["status"] == "completed"
+    assert data["run_id"] == minted["run_id"]
+
+    _, status = patched(["collection-status"])
+    assert status["run_id"] == minted["run_id"]
+    assert status["status"] == "completed"
+    assert "fed" in status["banks"]
+
+
+def test_collection_run_begin_does_not_clobber_adopted_row(patched, tmp_path):
+    """If the child booted fast and already adopted the row (with its real
+    banks/pid), a late `collection-run-begin` returns the authoritative record
+    instead of overwriting it with the empty pre-registration."""
+    import os
+
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_collection_run("fast-child", ["fed"], pid=os.getpid(), publications_total=3)
+    store.close()
+
+    code, run = patched(["collection-run-begin", "--run-id", "fast-child", "--pid", str(os.getpid())])
+    assert code == 0
+    assert run["run_id"] == "fast-child"
+    assert run["status"] == "running"
+    assert run["banks"] == ["fed"]
+    assert run["publications_total"] == 3
+
+
+def test_collection_status_explicit_run_id_never_substitutes_latest(patched, tmp_path):
+    """`collection-status --run-id <id>` addresses exactly that campaign: an
+    unknown id reports `idle` (never the latest run the poll loop could be
+    confused into adopting), and a known id returns exactly that run even when a
+    newer terminal run exists."""
+    import os
+
+    store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+    store.start_collection_run("old-a", ["fed"], pid=os.getpid(), publications_total=1)
+    store.set_collection_progress("old-a", completed=1, total=1)
+    store.finish_collection_run("old-a", status="completed")
+    store.close()
+
+    # Unknown id → idle, never the stale-but-present "old-a".
+    code, data = patched(["collection-status", "--run-id", "never-minted"])
+    assert code == 0
+    assert data["status"] == "idle"
+    assert data["run_id"] is None
+
+    # Known id → exactly that run.
+    code, data = patched(["collection-status", "--run-id", "old-a"])
+    assert code == 0
+    assert data["run_id"] == "old-a"
+    assert data["status"] == "completed"
+
+    # No id → latest (legacy convenience, unchanged).
+    code, data = patched(["collection-status"])
+    assert code == 0
+    assert data["run_id"] == "old-a"
+
+
 def test_collection_run_records_completed_campaign(monkeypatch, tmp_path, patched):
     _seed_publication(tmp_path)
     _install_fake_collector(monkeypatch)
@@ -550,6 +664,48 @@ def test_collection_control_stop_during_startup_waits_for_late_run(
         assert recorded["done"], "the wait loop must have let the run appear"
         assert code == 0
         assert run["run_id"] == minted["run_id"]
+        assert run["status"] == "cancelled"
+        assert campaign.wait(5) is not None  # really gone before `cancelled`
+        assert not gui_bridge._process_alive(campaign.pid)
+    finally:
+        if campaign.poll() is None:
+            campaign.kill()
+            campaign.wait()
+
+
+def test_collection_control_stop_during_startup_with_pre_registered_row(
+    monkeypatch, tmp_path, patched
+):
+    """A Cancel issued while the detached campaign is cold-booting succeeds
+    *immediately*: the launcher's `collection-run-begin` already recorded the
+    row (status running, with the child's pid), so the stop addresses the real
+    campaign — it never waits for a row that may never appear, and never errors
+    with `no collection campaign found` for a run the GUI just launched."""
+    import os
+
+    if os.name == "nt":
+        pytest.skip("POSIX signals required")
+
+    monkeypatch.setattr(gui_bridge, "STOP_WAIT_STEP_S", 0.01)
+    monkeypatch.setattr(gui_bridge, "STOP_WAIT_CYCLES", 60)
+    campaign = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)", "argus.gui_bridge", "collection-run"]
+    )
+    try:
+        # The launcher side pre-registers the row (with the child's pid) right
+        # after spawning — the child itself is still booting.
+        code, begun = patched(["collection-run-id"])
+        assert code == 0
+        run_id = begun["run_id"]
+        code, _ = patched(
+            ["collection-run-begin", "--run-id", run_id, "--pid", str(campaign.pid)]
+        )
+        assert code == 0
+
+        # Cancel during cold boot: the row already exists with a live pid.
+        code, run = patched(["collection-control", "stop", run_id])
+        assert code == 0
+        assert run["run_id"] == run_id
         assert run["status"] == "cancelled"
         assert campaign.wait(5) is not None  # really gone before `cancelled`
         assert not gui_bridge._process_alive(campaign.pid)

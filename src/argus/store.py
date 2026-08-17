@@ -1263,6 +1263,13 @@ class Store:
         Only one campaign may be active at a time. The claim is taken in a
         write-locked transaction so two launchers racing cannot both start: the
         second one raises :class:`ActiveCollectionError`.
+
+        A *second* claim of the same ``run_id`` is not a competing campaign: it
+        is the detached subprocess adopting the row the desktop launcher
+        pre-registered (``collection-run-begin``) so the run is observable the
+        instant the GUI receives its id. Self-adoption just updates the row in
+        place — the single-active invariant (one *different* campaign) is
+        untouched.
         """
         started = iso(now_utc())
         banks_json = json.dumps(list(banks or ()))
@@ -1272,7 +1279,7 @@ class Store:
                 "SELECT run_id FROM collection_runs "
                 "WHERE status IN ('running', 'paused') LIMIT 1"
             ).fetchone()
-            if existing is not None:
+            if existing is not None and existing["run_id"] != run_id:
                 raise ActiveCollectionError(
                     f"a collection campaign is already active: {existing['run_id']}"
                 )

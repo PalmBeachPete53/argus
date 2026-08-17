@@ -56,7 +56,13 @@ export function useCollection() {
   const loopTokenRef = useRef(0);
 
   const readStatus = useCallback(async (): Promise<CollectionRun> => {
-    return invoke<CollectionRun>("get_collection_status");
+    // Ask for exactly the campaign being followed: the backend's
+    // `collection-status --run-id <id>` reports that run alone (never silently
+    // substituting the latest terminal run), so poll data can never drift to a
+    // different campaign than the one the user is watching.
+    const target = targetRunIdRef.current;
+    const args = target ? { runId: target } : {};
+    return invoke<CollectionRun>("get_collection_status", args);
   }, []);
 
   const applyStatus = useCallback((run: CollectionRun) => {

@@ -53,15 +53,15 @@ def _http_server():
     log(f"[server] local HTTP on 127.0.0.1:{PORT}")
 
 
-def bridge(*args: str, detached: bool = False) -> dict:
+def bridge(*args: str, detached: bool = False, detached_env: str | None = None) -> dict:
     env = dict(
         os.environ,
         PYTHONPATH=str(REPO / "src"),
         ARGUS_ROOT=TMP,
     )
     if detached:
-        env["ARGUS_COLLECTION_DETACHED"] = "1"
-        subprocess.Popen(
+        env["ARGUS_COLLECTION_DETACHED"] = "1" if detached_env is None else detached_env
+        child = subprocess.Popen(
             [PY, "-m", "argus.gui_bridge", *args],
             env=env,
             cwd=REPO,
@@ -69,7 +69,7 @@ def bridge(*args: str, detached: bool = False) -> dict:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        return {}
+        return {"pid": child.pid}
     p = subprocess.run(
         [PY, "-m", "argus.gui_bridge", *args],
         env=env, cwd=REPO, capture_output=True, text=True, timeout=120,
@@ -107,13 +107,25 @@ def poll_until(run_id: str, terminal_statuses: set[str], *, max_s: float = 90.0)
     deadline = time.monotonic() + max_s
     last = None
     while time.monotonic() < deadline:
-        status = bridge("collection-status")
+        status = bridge("collection-status", "--run-id", run_id)
         if status.get("run_id") == run_id:
             last = status
             if status["status"] in terminal_statuses:
                 return status
         time.sleep(0.4)
     raise SystemExit(f"timed out waiting for run {run_id}; last={last}")
+
+
+def launch_collection(run_id: str) -> dict:
+    """Mimic the Rust launcher exactly: spawn the detached campaign, then
+    pre-register the run *in the launcher* (with the child's pid) so the row
+    exists the instant the frontend receives its id — the child then adopts the
+    same row itself once booted."""
+    spawned = bridge("collection-run", "--run-id", run_id, detached=True)
+    begun = bridge("collection-run-begin", "--run-id", run_id, "--pid", str(spawned["pid"]))
+    assert begun.get("run_id") == run_id, begun
+    assert begun["status"] == "running", begun
+    return begun
 
 
 def main() -> int:
@@ -129,8 +141,17 @@ def main() -> int:
     # --- first campaign: run then cancel midway ---
     run_id = bridge("collection-run-id")["run_id"]
     log(f"[2] minted run-id {run_id}")
-    bridge("collection-run", "--run-id", run_id, detached=True)
-    log("[3] detached collection-run launched")
+    begun = launch_collection(run_id)
+    log(f"[3] detached collection-run launched + pre-registered "
+        f"(running, pid {begun['pid']})")
+
+    # Since the launcher pre-registered the row, the frontend can already stop
+    # the campaign during cold boot. Verify the row is observable immediately.
+    early = bridge("collection-status", "--run-id", run_id)
+    assert early["run_id"] == run_id and early["status"] == "running", early
+    log("[3b] run observable immediately after launch (pre-registered) ✓")
+
+    # Watch the followed run progress live (0/N → …), then cancel.
 
     # Watch the followed run appear and progress live (0/N → …), then cancel.
     deadline = time.monotonic() + 60
@@ -138,7 +159,7 @@ def main() -> int:
     progressed = None
     samples = []
     while time.monotonic() < deadline:
-        st = bridge("collection-status")
+        st = bridge("collection-status", "--run-id", run_id)
         if st.get("run_id") == run_id:
             appeared = st
             samples.append((st["publications_completed"], st["publications_total"]))
@@ -167,7 +188,7 @@ def main() -> int:
     # --- relaunch: must reach completed ---
     run2 = bridge("collection-run-id")["run_id"]
     log(f"[7] relaunch minted run-id {run2}")
-    bridge("collection-run", "--run-id", run2, detached=True)
+    launch_collection(run2)
 
     done = poll_until(run2, {"completed"})
     assert done["status"] == "completed", done

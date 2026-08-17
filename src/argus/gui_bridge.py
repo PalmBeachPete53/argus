@@ -36,10 +36,17 @@ Commands (``python -m argus.gui_bridge <command>``):
   ``--force`` re-collects already-fetched documents; ``--run-id`` lets the
   launcher pre-mint the campaign's identity.
 - ``collection-run-id`` → mint a fresh collection-run identifier (no side effect)
+- ``collection-run-begin --run-id <id> --pid <pid>`` → pre-register a collection
+  campaign row *in the launcher* (with the just-spawned subprocess's PID), so
+  the run is observable the instant the GUI receives its id — even while the
+  detached subprocess is still booting. The campaign later adopts the same row
+  itself (self-adoption). Refused when a different campaign is active (the
+  launcher then kills the child).
 - ``collection-control <stop> [<run-id>]`` → cancel a running collection
   campaign (SIGTERM with escalation; the campaign records itself as
   ``cancelled``).
-- ``collection-status``→ JSON summary of the latest collection run (or ``idle``)
+- ``collection-status [--run-id <id>]``→ JSON summary of a collection campaign
+  (explicit ``--run-id``, or the latest); ``idle`` when no matching run exists.
 - ``stats``          → read-only store aggregates for the Overview (publications,
   documents, facts, last discovery, last collection)
 - ``open-url <url>`` → open an http(s) URL with the OS-default application
@@ -78,7 +85,8 @@ USAGE = (
     "discovery-control <pause|resume|stop> [<run-id>]|discovery-clear|"
     "discovery-status|discovery-results [<run-id>]|"
     "collection-run [--bank <id>]... [--force] [--run-id <id>]|"
-    "collection-run-id|collection-control <stop> [<run-id>]|collection-status|"
+    "collection-run-id|collection-run-begin --run-id <id> --pid <pid>|"
+    "collection-control <stop> [<run-id>]|collection-status [--run-id <id>]|"
     "stats|open-url <url>"
 )
 
@@ -1299,7 +1307,14 @@ def _cmd_collection_run(argv: list[str]) -> int:
     store = Store(_store_path())
     _reconcile_run(store, store.latest_collection_run(), kind="collection")
     active = store.latest_collection_run()
-    if active is not None and active["status"] in _ACTIVE_STATUSES:
+    # A pre-registered row (collection-run-begin) for *this* run_id is not a
+    # competing campaign: it is the launcher's own row the campaign is about to
+    # self-adopt. Only a *different* active campaign is a conflict.
+    if (
+        active is not None
+        and active["status"] in _ACTIVE_STATUSES
+        and active["run_id"] != run_id
+    ):
         print(
             json.dumps(
                 {"error": f"a collection campaign is already active: {active['run_id']}"},
@@ -1332,6 +1347,67 @@ def _cmd_collection_run_id(argv: list[str]) -> int:
     run.
     """
     print(json.dumps({"run_id": make_run_stamp()}, indent=2))
+    return 0
+
+
+def _cmd_collection_run_begin(argv: list[str]) -> int:
+    """Pre-register a collection campaign row *in the launcher*, before the
+    detached subprocess has booted far enough to record it itself.
+
+    ``collection-run-begin --run-id <id> --pid <pid>`` is the launcher-side
+    counterpart of the campaign's own ``start_collection_run``: it claims the
+    run (status ``running``, the just-spawned subprocess's PID) so the row
+    exists the instant the frontend receives its id. A Stop issued during cold
+    boot then addresses the real campaign instead of failing with "no collection
+    campaign found", and ``collection-status`` never surfaces a stale previous
+    run in its place.
+
+    The claim is taken in the same locked single-active transaction as a normal
+    launch: a *different* active campaign is refused here too (so the launcher
+    can kill the child it just spawned). The campaign later *adopts* the same
+    row via :meth:`Store.start_collection_run` (self-adoption of the same
+    ``run_id``), filling in the real banks, dates and plan total.
+    """
+    run_id = None
+    pid = None
+    index = 0
+    while index < len(argv):
+        if argv[index] == "--run-id" and index + 1 < len(argv):
+            run_id = argv[index + 1].strip() or None
+            index += 2
+        elif argv[index] == "--pid" and index + 1 < len(argv):
+            value = argv[index + 1].strip()
+            if value:
+                try:
+                    pid = int(value)
+                except ValueError:
+                    print(f"invalid --pid: {argv[index + 1]}", file=sys.stderr)
+                    return 2
+            index += 2
+        else:
+            print(f"unexpected argument: {argv[index]}", file=sys.stderr)
+            return 2
+    if not run_id or not pid:
+        print(
+            json.dumps({"error": "collection-run-begin requires --run-id <id> and --pid <pid>"}, indent=2)
+        )
+        return 2
+    store = Store(_store_path())
+    _reconcile_run(store, store.latest_collection_run(), kind="collection")
+    existing = store.get_collection_run(run_id)
+    if existing is not None and existing["status"] in _ACTIVE_STATUSES:
+        # The detached child booted fast and already adopted the row itself
+        # (self-adoption with its real banks/dates): the pre-registration has
+        # nothing to add — never clobber the child's authoritative record.
+        print(json.dumps(existing, indent=2))
+        return 0
+    try:
+        store.start_collection_run(run_id, (), pid=pid, publications_total=0)
+    except ActiveCollectionError as exc:
+        print(json.dumps({"error": str(exc)}, indent=2))
+        return 1
+    run = store.get_collection_run(run_id)
+    print(json.dumps(run, indent=2))
     return 0
 
 
@@ -1409,14 +1485,33 @@ def _cmd_collection_control(argv: list[str]) -> int:
 
 
 def _cmd_collection_status(argv: list[str]) -> int:
-    """JSON summary of the most recent collection campaign (or ``idle``).
+    """JSON summary of a collection campaign (or ``idle``).
 
-    Runs the dead-PID reconciliation first, so an active-looking campaign whose
-    process is gone is surfaced as ``failed`` rather than left ``running``
-    forever (the GUI polls this command).
+    ``collection-status [--run-id <id>]`` — with an explicit id, the campaign
+    is returned as-is (an unknown id yields ``idle``); without one, the most
+    recent campaign is used (legacy convenience; the GUI always passes the
+    explicit id). ``latest`` is never substituted for a requested-but-absent
+    run, and a requested run is never reconciled away: the caller asks about
+    exactly one campaign.
+
+    Runs the dead-PID reconciliation on the campaign it is reporting, so an
+    active-looking campaign whose process is gone is surfaced as ``failed``
+    rather than left ``running`` forever (the GUI polls this command).
     """
+    run_id = None
+    index = 0
+    while index < len(argv):
+        if argv[index] == "--run-id" and index + 1 < len(argv):
+            run_id = argv[index + 1].strip() or None
+            index += 2
+        else:
+            print(f"unexpected argument: {argv[index]}", file=sys.stderr)
+            return 2
     store = Store(_store_path())
-    run = _reconcile_run(store, store.latest_collection_run(), kind="collection")
+    if run_id:
+        run = _reconcile_run(store, store.get_collection_run(run_id), kind="collection")
+    else:
+        run = _reconcile_run(store, store.latest_collection_run(), kind="collection")
     if run is None:
         print(
             json.dumps(
@@ -1514,6 +1609,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_collection_run(argv[1:])
     if command == "collection-run-id":
         return _cmd_collection_run_id(argv[1:])
+    if command == "collection-run-begin":
+        return _cmd_collection_run_begin(argv[1:])
     if command == "collection-control":
         return _cmd_collection_control(argv[1:])
     if command == "collection-status":

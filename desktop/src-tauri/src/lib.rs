@@ -5,8 +5,8 @@
 //! reached by spawning `python -m argus.gui_bridge` (single source of truth).
 //! The bridge resolves and confines every path to the Argus `data/` directory.
 
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::Serialize;
@@ -109,6 +109,9 @@ impl Bridge {
 
     /// Spawn a `python -m argus.gui_bridge` command detached, with output sent
     /// to the void. Used for the discovery / collection campaign subprocesses.
+    /// Returns the spawned ``Child`` so the caller can read its PID (to
+    /// pre-register the run with the Core) and can terminate it if the
+    /// pre-registration is refused — the running child is never abandoned.
     ///
     /// The campaign is launched as the leader of its own process group
     /// (``process_group(0)``, pgid == pid) so that on shutdown the bridge can
@@ -118,7 +121,7 @@ impl Bridge {
     /// to arm its parent watchdog (a campaign must never outlive Argus):
     /// ``ARGUS_DISCOVERY_DETACHED`` for discovery, ``ARGUS_COLLECTION_DETACHED``
     /// for collection — the Core distinguishes them, never invents a value here.
-    fn spawn_detached(&self, args: &[String], detached_env: &str) -> Result<(), String> {
+    fn spawn_detached(&self, args: &[String], detached_env: &str) -> Result<Child, String> {
         let repo = resolve_root();
         let mut cmd = Command::new(&self.python);
         cmd.arg("-m")
@@ -137,8 +140,7 @@ impl Bridge {
             cmd.process_group(0);
         }
         cmd.spawn()
-            .map_err(|err| format!("failed to launch bridge command {args:?}: {err}"))?;
-        Ok(())
+            .map_err(|err| format!("failed to launch bridge command {args:?}: {err}"))
     }
 
     fn banks(&self) -> Result<Vec<BankInfo>, String> {
@@ -352,7 +354,7 @@ impl Bridge {
         if start.as_deref() > end.as_deref() {
             return Err("start_date must be <= end_date".to_string());
         }
-        let active = self.collection_status()?;
+        let active = self.collection_status("")?;
         if active.status == "running" {
             let run_id = active.run_id.as_deref().unwrap_or("<unknown>");
             return Err(format!("a collection campaign is already active: {run_id}"));
@@ -371,7 +373,19 @@ impl Bridge {
             args.push("--end-date".into());
             args.push(e);
         }
-        self.spawn_detached(&args, "ARGUS_COLLECTION_DETACHED")?;
+        let mut child = self.spawn_detached(&args, "ARGUS_COLLECTION_DETACHED")?;
+        let pid = child.id();
+        // Pre-register the run *in the launcher* so it is observable the instant
+        // the frontend receives its id — the detached subprocess is still
+        // booting and will adopt the same row itself. If the Core refuses the
+        // claim (a competing campaign already owns the slot — the detached spawn
+        // would have swallowed that), the just-spawned child must not be left
+        // running: terminate it and surface the refusal synchronously.
+        if let Err(err) = self.collection_run_begin(&run_id, pid) {
+            let _ = child.kill();
+            return Err(err);
+        }
+        drop(child); // the campaign continues as a detached background process
         Ok(CollectionRunId { run_id })
     }
 
@@ -393,13 +407,29 @@ impl Bridge {
         serde_json::from_str(&out).map_err(|err| err.to_string())
     }
 
+    /// Pre-register a collection campaign row *in the launcher* (the bridge's
+    /// ``collection-run-begin``), with the just-spawned subprocess's PID, so the
+    /// run is observable the instant the frontend receives its id — even while
+    /// the detached subprocess is still booting. The campaign later adopts the
+    /// same row itself (self-adoption in the Core).
+    fn collection_run_begin(&self, run_id: &str, pid: u32) -> Result<CollectionRun, String> {
+        let out = self.run(&[
+            "collection-run-begin".into(),
+            "--run-id".into(),
+            run_id.to_string(),
+            "--pid".into(),
+            pid.to_string(),
+        ])?;
+        serde_json::from_str(&out).map_err(|err| err.to_string())
+    }
+
     /// Synchronously stop any active collection campaign, mirroring a user Stop.
     ///
     /// Called at application exit. Reads the real campaign state; only an
     /// active (``running``) campaign is stopped, targeted by its explicit
     /// ``run_id``. Terminal campaigns are left untouched.
     fn stop_active_collection(&self) -> Result<CollectionRun, String> {
-        let run = self.collection_status()?;
+        let run = self.collection_status("")?;
         if run.status != "running" {
             return Ok(run);
         }
@@ -410,9 +440,16 @@ impl Bridge {
         self.collection_control("stop", run_id)
     }
 
-    /// JSON summary of the most recent collection campaign.
-    fn collection_status(&self) -> Result<CollectionRun, String> {
-        let out = self.run(&["collection-status".into()])?;
+    /// JSON summary of a collection campaign (``run_id`` explicit, or the most
+    /// recent when empty). The frontend passes the id it is following so the
+    /// report never drifts to a different campaign than the one being polled.
+    fn collection_status(&self, run_id: &str) -> Result<CollectionRun, String> {
+        let args = if run_id.is_empty() {
+            vec!["collection-status".to_string()]
+        } else {
+            vec!["collection-status".to_string(), "--run-id".into(), run_id.to_string()]
+        };
+        let out = self.run(&args)?;
         serde_json::from_str(&out).map_err(|err| err.to_string())
     }
 }
@@ -532,7 +569,7 @@ struct DiscoveryRunId {
 // is fixed at launch and `publications_completed` advances as workers really
 // finish, so the GUI only reflects what the Core recorded. Statuses:
 // idle | running | completed | failed | cancelled.
-#[derive(Serialize, serde::Deserialize)]
+#[derive(Debug, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct CollectionRun {
     run_id: Option<String>,
@@ -640,8 +677,11 @@ fn collection_control(state: State<'_, Bridge>, action: String, run_id: String) 
 }
 
 #[tauri::command]
-fn get_collection_status(state: State<'_, Bridge>) -> Result<CollectionRun, String> {
-    state.collection_status()
+fn get_collection_status(
+    state: State<'_, Bridge>,
+    run_id: Option<String>,
+) -> Result<CollectionRun, String> {
+    state.collection_status(run_id.as_deref().unwrap_or(""))
 }
 
 #[tauri::command]
@@ -973,7 +1013,7 @@ mod tests {
         if !bridge.root.join(".venv").join("bin").join("python").is_file() {
             return;
         }
-        let run = bridge.collection_status().expect("bridge must return collection status");
+        let run = bridge.collection_status("").expect("bridge must return collection status");
         assert!(
             matches!(run.status.as_str(), "idle" | "running" | "completed" | "failed" | "cancelled"),
             "unexpected status: {}",
@@ -1008,6 +1048,76 @@ mod tests {
     }
 
     #[test]
+    fn collection_run_begin_pre_registers_observable_run() {
+        // `collection-run-begin` claims the run *in the launcher* with the
+        // just-spawned subprocess's PID, so the row exists (status running) the
+        // instant the frontend receives the id — the detailed bootstrap comes
+        // later, when the detached subprocess self-adopts the same row.
+        let bridge = temp_bridge();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let id = bridge.collection_run_id().expect("mint a run id");
+        let me = std::process::id();
+        let run = bridge
+            .collection_run_begin(&id.run_id, me)
+            .expect("pre-registration must succeed");
+        assert_eq!(run.run_id.as_deref(), Some(id.run_id.as_str()));
+        assert_eq!(run.status, "running");
+        assert_eq!(run.pid, Some(me as i64));
+        assert_eq!(run.publications_total, 0);
+    }
+
+    #[test]
+    fn collection_run_begin_refused_when_different_campaign_active() {
+        // A pre-registration is a claim on the single-active slot: a *different*
+        // active campaign is refused (the launcher then kills its child), so a
+        // racing begin cannot silently double-book.
+        let bridge = temp_bridge();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let me = std::process::id();
+        bridge
+            .collection_run_begin("occupier", me)
+            .expect("first pre-registration claims the slot");
+        let id = bridge.collection_run_id().expect("mint a run id");
+        let err = match bridge.collection_run_begin(&id.run_id, me) {
+            Ok(run) => panic!("a competing campaign must refuse the claim: {run:?}"),
+            Err(err) => err,
+        };
+        assert!(err.contains("already active"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn collection_status_never_substitutes_latest_for_unknown_run() {
+        // An explicit `--run-id` addresses exactly that campaign: an unknown id
+        // is reported as idle — never silently replaced by a more recent run
+        // that happens to exist (the poll-loop bug that resurrected a stale
+        // terminal campaign during cold boot).
+        let bridge = temp_bridge();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let known = bridge.collection_run_id().expect("mint a run id");
+        let me = std::process::id();
+        bridge
+            .collection_run_begin(&known.run_id, me)
+            .expect("pre-register a run");
+        let explicit = bridge
+            .collection_status(&known.run_id)
+            .expect("explicit status must return the requested run");
+        assert_eq!(explicit.run_id.as_deref(), Some(known.run_id.as_str()));
+        assert_eq!(explicit.status, "running");
+
+        let unknown = bridge
+            .collection_status("never-minted")
+            .expect("unknown run must be reported as idle — never substituted");
+        assert_eq!(unknown.run_id, None);
+        assert_eq!(unknown.status, "idle");
+    }
+
+    #[test]
     fn collection_run_rejects_imbalanced_or_reversed_window() {
         // Collection's date window is optional, but when given it must be
         // complete and ordered. These refusals are enforced synchronously
@@ -1036,7 +1146,7 @@ mod tests {
         if !bridge.root.join(".venv").join("bin").join("python").is_file() {
             return;
         }
-        let run = bridge.collection_status().expect("bridge must return collection status");
+        let run = bridge.collection_status("").expect("bridge must return collection status");
         if run.status == "running" {
             return;
         }

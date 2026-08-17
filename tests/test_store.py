@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 
 from argus.models import Document, DocumentStatus, Publication, PublicationStatus
@@ -244,3 +245,45 @@ def test_collection_run_releases_active_after_finish(tmp_path):
     store.finish_collection_run("c-x", status="cancelled")
     store.start_collection_run("c-y", ["ecb"], pid=2)  # no longer active
     assert store.latest_collection_run()["run_id"] == "c-y"
+
+
+def test_start_collection_run_self_adoption_same_run_id(tmp_path):
+    """A second claim of the *same* run_id is the detached subprocess adopting
+    the launcher's pre-registered row (collection-run-begin), not a competing
+    campaign: it updates the row in place, never raising ActiveCollectionError."""
+    store = Store(tmp_path / "s.db")
+    store.start_collection_run("c-begin", [], pid=4242, publications_total=0)
+    begun = store.get_collection_run("c-begin")
+    assert begun["status"] == "running"
+    assert begun["pid"] == 4242
+    assert begun["banks"] == []
+
+    store.start_collection_run("c-begin", ["fed"], pid=os.getpid(), publications_total=3)
+    adopted = store.get_collection_run("c-begin")
+    assert adopted["status"] == "running"
+    assert adopted["pid"] == os.getpid()
+    assert adopted["banks"] == ["fed"]
+    assert adopted["publications_total"] == 3
+    assert store.latest_collection_run()["run_id"] == "c-begin"
+
+
+def test_start_collection_run_ab_isolation(tmp_path):
+    """A stale run A must never adopt run B's pre-registered row (nor a fresh
+    begin claim run B while a *different* A is active)."""
+    store = Store(tmp_path / "s.db")
+    store.start_collection_run("A", ["fed"], pid=1)
+    store.finish_collection_run("A", status="completed")
+
+    store.start_collection_run("B", [], pid=4242, publications_total=0)  # begin B
+    assert store.get_collection_run("B")["status"] == "running"
+
+    # A's stale subprocess trying to re-claim run A while B is active: refused.
+    try:
+        store.start_collection_run("A", ["fed"], pid=2)
+    except ActiveCollectionError as exc:
+        assert "B" in str(exc)
+    else:
+        raise AssertionError("run A must not adopt while B holds the active slot")
+    assert store.get_collection_run("A")["status"] == "completed"  # untouched
+
+
