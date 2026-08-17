@@ -166,6 +166,92 @@ def test_collection_run_idle_when_no_runs(patched):
     assert data["publications_completed"] == 0
 
 
+def test_collection_status_exposes_partial_progress_on_cancel(monkeypatch, tmp_path, patched):
+    """A campaign cancelled mid-flight keeps its *real* partial publication
+    progression in collection-status (never fabricated to total/total)."""
+    from argus.models import Publication
+
+    for index in range(3):
+        store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+        store.upsert_publication(
+            Publication(
+                id=f"partial-{index}",
+                central_bank="fed",
+                title=f"Statement {index}",
+                url=f"https://fed.gov/stmt-{index}.htm",
+                source_id="fed_rss",
+                source_url="https://fed.gov/feed.xml",
+                status=PublicationStatus.DISCOVERED,
+            )
+        )
+        store.close()
+
+    class _PartialFake(_FakeCollector):
+        def collect_campaign(self, *, run_id=None, should_stop=None, publications=None, **kwargs):
+            from argus.collector import CollectionStopped
+            from argus.models import FetchResult
+
+            plan = list(publications) if publications is not None else list(self._plan)
+            total = len(plan)
+            for i, pub in enumerate(plan, start=1):
+                if i >= 2:  # stop after the first publication finished
+                    raise CollectionStopped("stop requested")
+                if run_id:
+                    self.store.set_collection_progress(run_id, completed=i, total=total)
+            return [FetchResult(publication_id=pub.id or "", documents=[], ok=True)]
+
+    _install_fake_collector(monkeypatch, _PartialFake)
+    code, data = patched(["collection-run"])
+    assert code == 0
+    assert data["status"] == "cancelled"
+
+    _, status = patched(["collection-status"])
+    assert status["status"] == "cancelled"
+    assert status["publications_total"] == 3
+    assert status["publications_completed"] == 1
+    assert status["publications_completed"] != status["publications_total"]
+
+
+def test_collection_run_forwards_date_window(monkeypatch, tmp_path, patched):
+    """collection-run forwards an optional publication-date window to the Core's
+    plan (the same window the user just discovered) and persists it with the run."""
+    _seed_publication(tmp_path)
+
+    class _RecordingFake(_FakeCollector):
+        instances = []
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            _RecordingFake.instances.append(self)
+
+    _install_fake_collector(monkeypatch, _RecordingFake)
+    code, data = patched(["collection-run", "--start-date", "2026-01-01", "--end-date", "2026-02-01"])
+    assert code == 0
+    assert data["status"] == "completed"
+
+    from datetime import datetime, timezone
+
+    recorded = _RecordingFake.instances[-1]
+    start, end = recorded.passed[2], recorded.passed[3]
+    assert start == datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert end == datetime(2026, 2, 1, tzinfo=timezone.utc)
+
+    _, status = patched(["collection-status"])
+    assert status["date_start"].startswith("2026-01-01")
+    assert status["date_end"].startswith("2026-02-01")
+
+
+def test_collection_run_rejects_incomplete_window(patched):
+    """A window with only one bound is refused (never silently ignored)."""
+    code, data = patched(["collection-run", "--start-date", "2026-01-01"])
+    assert code == 1
+    assert "also requires --end-date" in data["error"]
+
+    code, data = patched(["collection-run", "--end-date", "2026-02-01"])
+    assert code == 1
+    assert "also requires --start-date" in data["error"]
+
+
 def test_collection_run_uses_preminted_run_id(monkeypatch, tmp_path, patched):
     _seed_publication(tmp_path)
     _install_fake_collector(monkeypatch)

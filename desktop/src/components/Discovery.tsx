@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { DiscoveryCandidate, DiscoveryRun } from "../types";
-import type { DiscoveryState } from "./MainContent";
+import type { CollectionRun, DiscoveryCandidate, DiscoveryRun } from "../types";
+import type { CollectionState, DiscoveryState } from "./MainContent";
 import { formatDate, formatDateTime } from "../lib/format";
 import {
   discoveryProgress,
@@ -8,6 +8,7 @@ import {
   REQUIRED_RANGE_HINT,
   INVALID_RANGE_HINT,
 } from "../lib/discovery";
+import { collectionProgress, collectionView } from "../lib/collection";
 import {
   dateInputStatus,
   discoveryWindowStatus,
@@ -21,6 +22,7 @@ import DateField from "./DateField";
 
 interface DiscoveryProps {
   discovery: DiscoveryState;
+  collection: CollectionState;
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -165,15 +167,175 @@ function ConfirmButton({
 }
 
 /**
+ * Collection per-publication progression, mirroring `CampaignProgress` — the
+ * exact same visual and semantic conventions, applied to `publications_{total,completed}`:
+ * - running → live, advances as the Core reports each publication really fetched;
+ * - completed → full bar (the Core reports total / total on a normal end);
+ * - cancelled / failed → no active bar at all (the panel renders the last known
+ *   counts statically, never fabricated into 100%).
+ * A zero total (no publications need work) renders a coherent empty state
+ * instead of an invalid `0 / 0` bar.
+ */
+function CollectionProgress({ status }: { status: CollectionRun }) {
+  const p = collectionProgress(status.publications_total, status.publications_completed);
+  const active = status.status === "running";
+  if (p.total === 0) {
+    return (
+      <div className="discovery-progress" aria-label="Collection publication progression">
+        <p className="discovery-progress-empty">{active ? "Starting…" : p.label}</p>
+      </div>
+    );
+  }
+  const remaining = p.total - p.completed;
+  return (
+    <div className="discovery-progress" aria-label="Collection publication progression">
+      <div
+        className="discovery-progress-track"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={p.total}
+        aria-valuenow={p.completed}
+      >
+        <div className="discovery-progress-fill" style={{ width: `${p.percent}%` }} />
+      </div>
+      <div className="discovery-progress-meta">
+        <span className="discovery-progress-count">{p.label}</span>
+        <span className="discovery-progress-detail">
+          {p.completed} completed · {remaining} remaining · {p.percent}%
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The Collection panel — the second, natural step of the same workflow:
+ * Discovery persists publications, Collection fetches their documents. It is
+ * integrated in the Discovery screen (no separate navigation), reuses the
+ * Discovery status/progress/poll conventions, and never invents work: the
+ * collectable set is the Core's own plan (`collection-run` selects the
+ * publications that need work), the frontend only forwards the publication-date
+ * window the user just discovered. Stop is a real cancellation.
+ */
+function CollectionPanel({ collection, discovery }: { collection: CollectionState; discovery: DiscoveryState }) {
+  const { status, error, starting } = collection;
+  const active = status.status === "running" && !starting;
+  const view = collectionView(status);
+  const runDisabled = active || starting;
+  const range =
+    status.date_start || status.date_end
+      ? [status.date_start && formatDateInput(status.date_start), status.date_end && formatDateInput(status.date_end)]
+          .filter(Boolean)
+          .join(" → ")
+      : "All publications";
+
+  const handleRun = () => {
+    // Bound the Core's collection plan to the same publication-date window the
+    // user just discovered (optional; the Core applies it itself — the frontend
+    // never constructs a list of publications to collect).
+    const start = discovery.status.date_start ?? undefined;
+    const end = discovery.status.date_end ?? undefined;
+    void collection.launch(start, end);
+  };
+
+  return (
+    <section className="discovery-card" aria-label="Collection">
+      <div className="discovery-head">
+        <h2 className="view-title">Collection</h2>
+        {view.showStatusPill && <StatusPill status={status.status} />}
+      </div>
+
+      {error && <div className="data-browser-error">{error}</div>}
+
+      <div className="discovery-controls">
+        <button
+          type="button"
+          className="primary-button"
+          disabled={runDisabled}
+          onClick={() => void handleRun()}
+        >
+          {active ? "Collection in progress…" : "Run Collection"}
+        </button>
+        {active && (
+          <ConfirmButton label="Cancel Collection" confirmLabel="Confirm cancel?" onClick={() => void collection.stop()} />
+        )}
+      </div>
+
+      {view.showCurrentCard && (
+        <>
+          <dl className="discovery-summary">
+            <div className="discovery-summary-row">
+              <dt>Status</dt>
+              <dd>{status.status}</dd>
+            </div>
+            <div className="discovery-summary-row">
+              <dt>Run ID</dt>
+              <dd>{status.run_id ?? "—"}</dd>
+            </div>
+            <div className="discovery-summary-row">
+              <dt>Date range</dt>
+              <dd>{range}</dd>
+            </div>
+          </dl>
+          {view.showProgressBar && <CollectionProgress status={status} />}
+        </>
+      )}
+
+      {starting && (
+        <div className="discovery-empty">
+          <p className="discovery-running-text">Starting Collection…</p>
+        </div>
+      )}
+
+      {active && (
+        <div className="discovery-empty">
+          <p className="discovery-running-text">Collection running…</p>
+        </div>
+      )}
+
+      {status.status === "completed" && !starting && (
+        <div className="discovery-empty">
+          <p className="data-browser-muted">Collection completed</p>
+        </div>
+      )}
+
+      {status.status === "cancelled" && !active && (
+        <div className="discovery-empty">
+          <p className="data-browser-muted">
+            Collection cancelled
+            {status.publications_total > 0
+              ? ` · ${status.publications_completed} of ${status.publications_total} publications completed`
+              : ""}
+          </p>
+        </div>
+      )}
+
+      {status.status === "failed" && !active && (
+        <div className="discovery-empty">
+          <p className="data-browser-muted">{status.error || "Collection failed."}</p>
+        </div>
+      )}
+
+      {!active && !starting && view.emptyHeading && (
+        <div className="discovery-empty">
+          <p className="data-browser-muted">{view.emptyHeading}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
  * The single, operational Discovery screen. Everything shown comes from the
  * Core store through `useDiscovery` (the bridge is the source of truth — no
  * parallel React copy). Launching forwards the selected date window to the
  * Core; Run/Pause/Resume/Stop signal the campaign's recorded run_id/PID via
  * `discovery_control`; Clear Cache is only offered once a campaign has ended
  * (completed/cancelled/stopped/failed) and goes through the bridge, which refuses it
- * while a campaign is active.
+ * while a campaign is active. Collection is the screen's second natural step
+ * (see `CollectionPanel`).
  */
-export default function Discovery({ discovery }: DiscoveryProps) {
+export default function Discovery({ discovery, collection }: DiscoveryProps) {
   const { status, candidates, error, starting, openUrl } = discovery;
   const [selected, setSelected] = useState<DiscoveryCandidate | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -333,6 +495,8 @@ export default function Discovery({ discovery }: DiscoveryProps) {
           </dl>
         </section>
       )}
+
+      <CollectionPanel collection={collection} discovery={discovery} />
 
       {starting && (
         <div className="discovery-empty">

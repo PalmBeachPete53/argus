@@ -106,3 +106,42 @@ export interface ClearedCache {
 export interface DiscoveryRunId {
   run_id: string;
 }
+
+/**
+ * A collection campaign lifecycle (from the Core store, read-only).
+ *
+ * Collection is the second half of the discovery→collect workflow: after
+ * Discovery persists publications into `publications`, the Core builds its own
+ * collection plan (never the frontend) and fetches documents for every
+ * publication that needs work. Statuses are `idle | running | completed |
+ * failed | cancelled` — there is no pause, and Stop means a real cancellation.
+ */
+export interface CollectionRun {
+  run_id: string | null;
+  status: "idle" | "running" | "completed" | "failed" | "cancelled";
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  banks: string[];
+  /** OS PID of the campaign subprocess (null when none is recorded). */
+  pid: number | null;
+  /** Whether the campaign re-collected already-fetched documents. */
+  force: boolean;
+  /** Optional publication-date window bounding the campaign (ISO, null = all). */
+  date_start: string | null;
+  date_end: string | null;
+  /**
+   * Core-driven per-publication progression: `publications_total` is fixed at
+   * launch and `publications_completed` advances as workers really finish
+   * (failing publications still count). Never derived, never fabricated to
+   * total/total for interrupted work.
+   */
+  publications_total: number;
+  publications_completed: number;
+}
+
+/** Identity returned by `run_collection` so the frontend can follow exactly the
+ * campaign it just launched (never "the latest run"). */
+export interface CollectionRunId {
+  run_id: string;
+}

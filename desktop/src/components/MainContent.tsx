@@ -1,4 +1,4 @@
-import type { DataView, DiscoveryCandidate, DiscoveryRun } from "../types";
+import type { CollectionRun, DataView, DiscoveryCandidate, DiscoveryRun } from "../types";
 import DataBrowser from "./DataBrowser";
 import Discovery from "./Discovery";
 import Sources from "./Sources";
@@ -17,12 +17,22 @@ export interface DiscoveryState {
   openUrl: (url: string) => Promise<void>;
 }
 
+export interface CollectionState {
+  status: CollectionRun;
+  error: string | null;
+  /** True while a just-launched campaign is awaited to appear in the store. */
+  starting: boolean;
+  launch: (startDate?: string, endDate?: string) => Promise<boolean>;
+  stop: () => Promise<boolean>;
+}
+
 interface MainContentProps {
   view: DataView;
   discovery: DiscoveryState;
+  collection: CollectionState;
 }
 
-export default function MainContent({ view, discovery }: MainContentProps) {
+export default function MainContent({ view, discovery, collection }: MainContentProps) {
   switch (view) {
     case "sources":
       return (
@@ -33,7 +43,7 @@ export default function MainContent({ view, discovery }: MainContentProps) {
     case "discovery":
       return (
         <main className="main">
-          <Discovery discovery={discovery} />
+          <Discovery discovery={discovery} collection={collection} />
         </main>
       );
     case "files":

@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::Serialize;
 use tauri::Manager;
@@ -74,14 +75,27 @@ impl Bridge {
         Bridge { python, root }
     }
 
+    /// Build a bridge whose store root is pinned via ``ARGUS_ROOT`` to ``root``
+    /// while the Python interpreter and sources still resolve from the
+    /// repository. Automated tests use this to keep the real `data/` pristine.
+    fn with_root(root: PathBuf) -> Self {
+        let repo = resolve_root();
+        let python = resolve_python(&repo);
+        Bridge { python, root }
+    }
+
     /// Run one `argus.gui_bridge` command and return stdout as a string.
     fn run(&self, args: &[String]) -> Result<String, String> {
+        // The interpreter, import path and working directory always come from
+        // the repository; ARGUS_ROOT alone pins where the Core stores state.
+        let repo = resolve_root();
         let output = Command::new(&self.python)
             .arg("-m")
             .arg("argus.gui_bridge")
             .args(args)
-            .current_dir(&self.root)
-            .env("PYTHONPATH", self.root.join("src"))
+            .current_dir(&repo)
+            .env("PYTHONPATH", repo.join("src"))
+            .env("ARGUS_ROOT", &self.root)
             .output()
             .map_err(|err| format!("failed to launch the Argus Core bridge: {err}"))?;
         if !output.status.success() {
@@ -94,22 +108,26 @@ impl Bridge {
     }
 
     /// Spawn a `python -m argus.gui_bridge` command detached, with output sent
-    /// to the void. Used for the discovery campaign subprocess.
+    /// to the void. Used for the discovery / collection campaign subprocesses.
     ///
     /// The campaign is launched as the leader of its own process group
     /// (``process_group(0)``, pgid == pid) so that on shutdown the bridge can
     /// terminate the *whole* tree (the campaign plus any descendants it spawned)
-    /// via a negative-pid kill — never an unrelated process. The
-    /// ``ARGUS_DISCOVERY_DETACHED`` marker lets the campaign arm its
-    /// launcher-liveness watchdog (a campaign must never outlive Argus).
-    fn spawn_detached(&self, args: &[String]) -> Result<(), String> {
+    /// via a negative-pid kill — never an unrelated process. ``detached_env``
+    /// is the marker env var that tells the campaign it is launcher-owned and
+    /// to arm its parent watchdog (a campaign must never outlive Argus):
+    /// ``ARGUS_DISCOVERY_DETACHED`` for discovery, ``ARGUS_COLLECTION_DETACHED``
+    /// for collection — the Core distinguishes them, never invents a value here.
+    fn spawn_detached(&self, args: &[String], detached_env: &str) -> Result<(), String> {
+        let repo = resolve_root();
         let mut cmd = Command::new(&self.python);
         cmd.arg("-m")
             .arg("argus.gui_bridge")
             .args(args)
-            .current_dir(&self.root)
-            .env("PYTHONPATH", self.root.join("src"))
-            .env("ARGUS_DISCOVERY_DETACHED", "1")
+            .current_dir(&repo)
+            .env("PYTHONPATH", repo.join("src"))
+            .env("ARGUS_ROOT", &self.root)
+            .env(detached_env, "1")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -224,7 +242,7 @@ impl Bridge {
         args.push(start.unwrap_or_default());
         args.push("--end-date".into());
         args.push(end.unwrap_or_default());
-        self.spawn_detached(&args)?;
+        self.spawn_detached(&args, "ARGUS_DISCOVERY_DETACHED")?;
         Ok(DiscoveryRunId { run_id })
     }
 
@@ -299,6 +317,103 @@ impl Bridge {
             return Err(err.to_string());
         }
         Ok(())
+    }
+
+    /// Launch a collection campaign as a *detached* background subprocess.
+    ///
+    /// Exactly the discovery pattern: the Core's ``collect_campaign`` is a long
+    /// operation, so the Rust shell only starts it (the Core records the run's
+    /// lifecycle — and its PID — in the store) and returns immediately. The
+    /// frontend observes it via ``collection_status`` and stops it via
+    /// ``collection_control``; the interface never blocks on the run.
+    ///
+    /// ``start_date`` / ``end_date`` (ISO dates) are **optional**: when given,
+    /// both must be present and ordered (``start_date <= end_date``) — they are
+    /// forwarded so the Core can bound its collection plan to the same
+    /// publication-date window the user just discovered. A detached spawn would
+    /// swallow a bridge refusal, so the precondition is enforced here
+    /// synchronously.
+    ///
+    /// Only one campaign may run at a time: the Core refuses a second launch,
+    /// but the detached spawn would swallow that refusal — so the active state
+    /// is re-read here *before* spawning, and a busy campaign surfaces a
+    /// synchronous error instead of a silent no-op. The Core guard remains the
+    /// authority for the racing case.
+    fn collection_run(
+        &self,
+        start_date: Option<String>,
+        end_date: Option<String>,
+    ) -> Result<CollectionRunId, String> {
+        let start = start_date.filter(|s| !s.trim().is_empty());
+        let end = end_date.filter(|s| !s.trim().is_empty());
+        if start.is_some() != end.is_some() {
+            return Err("Collection's date window requires both start_date and end_date.".to_string());
+        }
+        if start.as_deref() > end.as_deref() {
+            return Err("start_date must be <= end_date".to_string());
+        }
+        let active = self.collection_status()?;
+        if active.status == "running" {
+            let run_id = active.run_id.as_deref().unwrap_or("<unknown>");
+            return Err(format!("a collection campaign is already active: {run_id}"));
+        }
+        // Mint the campaign's identity *before* spawning, so the caller can
+        // return it synchronously and follow exactly this run — never "latest".
+        let run_id = self.collection_run_id()?.run_id;
+        let mut args = vec!["collection-run".to_string()];
+        args.push("--run-id".into());
+        args.push(run_id.clone());
+        if let Some(s) = start {
+            args.push("--start-date".into());
+            args.push(s);
+        }
+        if let Some(e) = end {
+            args.push("--end-date".into());
+            args.push(e);
+        }
+        self.spawn_detached(&args, "ARGUS_COLLECTION_DETACHED")?;
+        Ok(CollectionRunId { run_id })
+    }
+
+    /// Mint a fresh collection-run identifier from the Core (no side effect).
+    /// The Core owns the id format; the launcher only relays it.
+    fn collection_run_id(&self) -> Result<CollectionRunId, String> {
+        let out = self.run(&["collection-run-id".into()])?;
+        serde_json::from_str(&out).map_err(|err| err.to_string())
+    }
+
+    /// Real lifecycle control of a collection campaign, targeted by its
+    /// ``run_id``: the bridge signals the recorded PID and returns the updated
+    /// run lifecycle. Collection has exactly one control — ``stop``, which is a
+    /// real cancellation (SIGTERM→SIGKILL escalation, ``cancelled`` recorded
+    /// only once the process is verified gone). The id addresses an explicit
+    /// campaign, never an implicit "latest".
+    fn collection_control(&self, action: &str, run_id: &str) -> Result<CollectionRun, String> {
+        let out = self.run(&["collection-control".into(), action.to_string(), run_id.to_string()])?;
+        serde_json::from_str(&out).map_err(|err| err.to_string())
+    }
+
+    /// Synchronously stop any active collection campaign, mirroring a user Stop.
+    ///
+    /// Called at application exit. Reads the real campaign state; only an
+    /// active (``running``) campaign is stopped, targeted by its explicit
+    /// ``run_id``. Terminal campaigns are left untouched.
+    fn stop_active_collection(&self) -> Result<CollectionRun, String> {
+        let run = self.collection_status()?;
+        if run.status != "running" {
+            return Ok(run);
+        }
+        let run_id = run.run_id.as_deref().unwrap_or("");
+        if run_id.is_empty() {
+            return Err("active collection run has no run_id".to_string());
+        }
+        self.collection_control("stop", run_id)
+    }
+
+    /// JSON summary of the most recent collection campaign.
+    fn collection_status(&self) -> Result<CollectionRun, String> {
+        let out = self.run(&["collection-status".into()])?;
+        serde_json::from_str(&out).map_err(|err| err.to_string())
     }
 }
 
@@ -412,6 +527,36 @@ struct DiscoveryRunId {
     run_id: String,
 }
 
+// Collection campaign contract (mirrors the bridge's snake_case JSON). The
+// Core is the single source of truth for every counter: `publications_total`
+// is fixed at launch and `publications_completed` advances as workers really
+// finish, so the GUI only reflects what the Core recorded. Statuses:
+// idle | running | completed | failed | cancelled.
+#[derive(Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct CollectionRun {
+    run_id: Option<String>,
+    status: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+    error: Option<String>,
+    banks: Vec<String>,
+    pid: Option<i64>,
+    force: bool,
+    date_start: Option<String>,
+    date_end: Option<String>,
+    publications_total: i64,
+    publications_completed: i64,
+}
+
+// The identity of a newly-launched collection campaign (returned by
+// `run_collection` so the frontend can follow exactly this run).
+#[derive(Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct CollectionRunId {
+    run_id: String,
+}
+
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
@@ -481,24 +626,53 @@ fn get_discovery_results(
 }
 
 #[tauri::command]
+fn run_collection(
+    state: State<'_, Bridge>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+) -> Result<CollectionRunId, String> {
+    state.collection_run(start_date, end_date)
+}
+
+#[tauri::command]
+fn collection_control(state: State<'_, Bridge>, action: String, run_id: String) -> Result<CollectionRun, String> {
+    state.collection_control(&action, &run_id)
+}
+
+#[tauri::command]
+fn get_collection_status(state: State<'_, Bridge>) -> Result<CollectionRun, String> {
+    state.collection_status()
+}
+
+#[tauri::command]
 fn open_url(state: State<'_, Bridge>, url: String) -> Result<(), String> {
     state.open_url(&url)
 }
 
-/// Stop any active discovery campaign when the application is closing.
+/// Stop any active discovery or collection campaign when the application is
+/// closing.
 ///
 /// Called from the run loop on both ``ExitRequested`` (the documented
 /// interception point) and ``Exit`` (which is what macOS actually emits on a
 /// terminate/AppleScript quit — see the shutdown smoke tests). Runs entirely in
-/// Rust, independent of the React frontend, and blocks until the campaign is
-/// verified gone (or reported as error), so no orphan process survives Argus.
-fn stop_active_discovery_on_exit<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
+/// Rust, independent of the React frontend, and blocks until each active
+/// campaign is verified gone (or reported as error), so no orphan process
+/// survives Argus.
+fn stop_active_campaigns_on_exit<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
     let Some(bridge) = app_handle.try_state::<Bridge>() else {
         return;
     };
     match bridge.stop_active_discovery() {
         Ok(run) => eprintln!(
             "argus: shutdown: discovery run {} finalized as {}",
+            run.run_id.as_deref().unwrap_or("(none)"),
+            run.status
+        ),
+        Err(err) => eprintln!("argus: shutdown: {err}"),
+    }
+    match bridge.stop_active_collection() {
+        Ok(run) => eprintln!(
+            "argus: shutdown: collection run {} finalized as {}",
             run.run_id.as_deref().unwrap_or("(none)"),
             run.status
         ),
@@ -521,16 +695,19 @@ pub fn run() {
             clear_discovery_cache,
             get_discovery_status,
             get_discovery_results,
+            run_collection,
+            collection_control,
+            get_collection_status,
             open_url
         ])
         .build(tauri::generate_context!())
         .expect("error while building Argus")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                stop_active_discovery_on_exit(&app_handle);
+                stop_active_campaigns_on_exit(&app_handle);
             }
             if let tauri::RunEvent::Exit = event {
-                stop_active_discovery_on_exit(&app_handle);
+                stop_active_campaigns_on_exit(&app_handle);
             }
         });
 }
@@ -538,6 +715,21 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static TEST_ROOT_SEQ: AtomicUsize = AtomicUsize::new(0);
+
+    /// A bridge pinned to a unique per-test temp root, so store-opening tests
+    /// never create or touch the repository's real `data/` directory. The
+    /// interpreter and `PYTHONPATH` still come from the repository venv.
+    fn temp_bridge() -> Bridge {
+        let seq = TEST_ROOT_SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "argus-test-{}-{seq}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp test store root");
+        Bridge::with_root(dir)
+    }
 
     #[test]
     fn resolve_root_finds_repo_from_executable() {
@@ -654,8 +846,8 @@ mod tests {
     #[test]
     fn bridge_discovery_status_is_readable() {
         // Read-only: never launches a campaign, never mutates the store. The
-        // real store may hold zero runs (idle) or a previous campaign.
-        let bridge = Bridge::new();
+        // temp store may hold zero runs (idle) or a previous campaign.
+        let bridge = temp_bridge();
         if !bridge.root.join(".venv").join("bin").join("python").is_file() {
             return;
         }
@@ -681,7 +873,7 @@ mod tests {
         // The launcher asks the Core to mint a run identity (no side effect).
         // It must be non-empty and unique across mints — this is the id the
         // frontend follows, so it can never be empty or reused.
-        let bridge = Bridge::new();
+        let bridge = temp_bridge();
         if !bridge.root.join(".venv").join("bin").join("python").is_file() {
             return;
         }
@@ -747,9 +939,9 @@ mod tests {
     #[test]
     fn shutdown_noop_when_no_active_campaign() {
         // The exit handler must never transform a terminal campaign. Read the
-        // real store; only when nothing is active is stop_active_discovery
+        // temp store; only when nothing is active is stop_active_discovery
         // exercised (a live active campaign is never stopped from a unit test).
-        let bridge = Bridge::new();
+        let bridge = temp_bridge();
         if !bridge.root.join(".venv").join("bin").join("python").is_file() {
             return;
         }
@@ -771,5 +963,96 @@ mod tests {
         for bad in ["ftp://example.org", "file:///etc/passwd", "javascript:alert(1)"] {
             assert!(bridge.open_url(bad).is_err(), "expected rejection for {bad:?}");
         }
+    }
+
+    #[test]
+    fn collection_status_is_readable() {
+        // Read-only: never launches a campaign, never mutates the store. The
+        // temp store may hold zero runs (idle) or a previous campaign.
+        let bridge = temp_bridge();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let run = bridge.collection_status().expect("bridge must return collection status");
+        assert!(
+            matches!(run.status.as_str(), "idle" | "running" | "completed" | "failed" | "cancelled"),
+            "unexpected status: {}",
+            run.status
+        );
+        // The Core-driven publication progression is part of the
+        // collection-status contract (an idle run guarantees 0/0).
+        assert!(run.publications_total >= 0);
+        assert!(run.publications_completed >= 0);
+        assert!(run.publications_completed <= run.publications_total);
+        if run.status == "idle" {
+            assert_eq!(run.publications_total, 0);
+            assert_eq!(run.publications_completed, 0);
+            assert!(run.run_id.is_none());
+        }
+    }
+
+    #[test]
+    fn collection_run_id_is_minted_by_core() {
+        // The launcher asks the Core to mint a run identity (no side effect).
+        // It must be non-empty and unique across mints — this is the id the
+        // frontend follows, so it can never be empty or reused.
+        let bridge = temp_bridge();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let a = bridge.collection_run_id().expect("mint a run id");
+        let b = bridge.collection_run_id().expect("mint another run id");
+        assert!(!a.run_id.is_empty());
+        assert!(!b.run_id.is_empty());
+        assert!(a.run_id != b.run_id, "run ids must be unique: {} vs {}", a.run_id, b.run_id);
+    }
+
+    #[test]
+    fn collection_run_rejects_imbalanced_or_reversed_window() {
+        // Collection's date window is optional, but when given it must be
+        // complete and ordered. These refusals are enforced synchronously
+        // *before* any store access or detached spawn, so a valid-launch case
+        // (both empty, or a complete window) is never tested here — those would
+        // spawn a real detached campaign against the real store.
+        let bridge = Bridge::new();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        // One bound without the other.
+        assert!(bridge.collection_run(None, Some("2026-01-01".into())).is_err());
+        assert!(bridge.collection_run(Some("2026-01-01".into()), None).is_err());
+        // Reversed window.
+        assert!(bridge
+            .collection_run(Some("2026-12-31".into()), Some("2026-01-01".into()))
+            .is_err());
+    }
+
+    #[test]
+    fn shutdown_noop_when_no_active_collection() {
+        // The exit handler must never transform a terminal campaign. Read the
+        // temp store; only when nothing is active is stop_active_collection
+        // exercised (a live active campaign is never stopped from a unit test).
+        let bridge = temp_bridge();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        let run = bridge.collection_status().expect("bridge must return collection status");
+        if run.status == "running" {
+            return;
+        }
+        let after = bridge.stop_active_collection().expect("shutdown no-op must succeed");
+        assert_eq!(after.status, run.status, "terminal state must be unchanged");
+    }
+
+    #[test]
+    fn collection_control_rejects_unknown_action() {
+        // The bridge refuses actions other than `stop` (collection has no
+        // pause/resume), surfaced as a command failure — never a silent no-op.
+        let bridge = temp_bridge();
+        if !bridge.root.join(".venv").join("bin").join("python").is_file() {
+            return;
+        }
+        assert!(bridge.collection_control("pause", "whatever").is_err());
+        assert!(bridge.collection_control("resume", "whatever").is_err());
     }
 }

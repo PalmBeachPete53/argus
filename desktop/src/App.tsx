@@ -5,19 +5,21 @@ import MainContent from "./components/MainContent";
 import Footer from "./components/Footer";
 import SettingsModal from "./components/SettingsModal";
 import { useDiscovery } from "./hooks/useDiscovery";
+import { useCollection } from "./hooks/useCollection";
 import type { DataView } from "./types";
 
 export default function App() {
   const [view, setView] = useState<DataView>("discovery");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const discovery = useDiscovery();
+  const collection = useCollection();
 
   return (
     <div className="app">
       <Header onOpenSettings={() => setSettingsOpen(true)} />
       <div className="app-body">
         <Sidebar active={view} onSelect={setView} />
-        <MainContent view={view} discovery={discovery} />
+        <MainContent view={view} discovery={discovery} collection={collection} />
       </div>
       <Footer status={discovery.status} starting={discovery.starting} />
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}

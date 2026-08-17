@@ -85,8 +85,18 @@ USAGE = (
 # Repository root, resolved from this module's own location
 # (`<root>/src/argus/gui_bridge.py`), never from the process working directory —
 # so the bridge behaves identically whether spawned from a shell, `tauri dev` or
-# a Finder-launched `.app`.
-ROOT = Path(__file__).resolve().parents[2]
+# a Finder-launched `.app`. An explicit ``ARGUS_ROOT`` env override (the same
+# override the Rust launcher honours) redirects the whole bridge to another
+# repository root — used by the launcher and by tests to point campaigns at a
+# disposable data directory.
+def _resolve_root() -> Path:
+    env_root = os.environ.get("ARGUS_ROOT", "").strip()
+    if env_root:
+        return Path(env_root)
+    return Path(__file__).resolve().parents[2]
+
+
+ROOT = _resolve_root()
 
 # File types the Data browser can open externally (case-insensitive).
 OPENABLE_EXTENSIONS = (".html", ".htm", ".pdf")
@@ -1211,6 +1221,9 @@ def _cmd_collection_run(argv: list[str]) -> int:
             return 2
     if date_start is not None and date_end is None:
         print(json.dumps({"error": "Collection with --start-date also requires --end-date"}, indent=2))
+        return 1
+    if date_start is None and date_end is not None:
+        print(json.dumps({"error": "Collection with --end-date also requires --start-date"}, indent=2))
         return 1
     if date_start is not None and date_end is not None and date_start > date_end:
         print(json.dumps({"error": "start_date must be <= end_date"}, indent=2))
