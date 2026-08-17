@@ -1011,7 +1011,7 @@ def test_shutdown_refuses_foreign_live_pid(monkeypatch, tmp_path, patched):
 
         code, data = patched(["discovery-control", "stop", "shutdown-foreign"])
         assert code == 1
-        assert "no longer the discovery campaign" in data["error"]
+        assert "no longer the running campaign" in data["error"]
         assert foreign.poll() is None  # untouched
         _, status = patched(["discovery-status"])
         assert status["status"] == "failed"

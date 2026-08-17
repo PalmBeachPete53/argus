@@ -25,6 +25,27 @@ DEFAULT_RAW_ROOT = "data/raw"
 DISCOVERY_WORKERS = 6
 _WORKERS_ENV = "ARGUS_DISCOVERY_WORKERS"
 
+# The statuses a collection campaign considers "needs work" and therefore
+# selects by default. This is the self-repair contract:
+#
+# * ``DISCOVERED`` — never collected yet, fetch it;
+# * ``UPDATED``    — rediscovery changed metadata / added document URLs, collect
+#   the new bits (existing FETCHED documents are still skipped);
+# * ``PARTIAL``    — some documents failed last time, retry the failed ones;
+# * ``FAILED``     — every document failed, retry them.
+#
+# Fetched-only publications (``FETCHED``) are *not* selected: idempotence relies
+# on skipping already-fetched documents, and blindly re-selecting everything
+# would re-download the world on every pass. ``force=True`` keeps its meaning —
+# it re-collects the documents of an otherwise-selected publication even when
+# they are already FETCHED — it does not re-select FETCHED publications.
+COLLECTION_STATUSES = (
+    models.PublicationStatus.DISCOVERED,
+    models.PublicationStatus.UPDATED,
+    models.PublicationStatus.PARTIAL,
+    models.PublicationStatus.FAILED,
+)
+
 
 def _worker_pool_size() -> int:
     raw = os.environ.get(_WORKERS_ENV, "").strip()
@@ -47,6 +68,17 @@ class _SourceDiscoveryResult:
     error: str | None
     strategy: object | None
     native_error: Exception | None
+
+
+class CollectionStopped(Exception):
+    """Raised inside a collection campaign when a stop (SIGTERM) is requested.
+
+    Mirrors the Discovery lifecycle: SIGTERM is a normal lifecycle control,
+    never a "failed" signal — the campaign finalizes itself as ``cancelled`` so
+    the GUI shows exactly what happened. Collection is sequential in this phase,
+    so the exception is raised on the campaign's single thread between
+    publications.
+    """
 
 
 def in_bounds(pub, start, end) -> bool:
@@ -318,19 +350,131 @@ class CentralBankCollector:
         self.store.log_error(error)
         self.errors.append(error)
 
+    def plan_collection(
+        self,
+        *,
+        banks=None,
+        force: bool = False,
+        date_start=None,
+        date_end=None,
+    ) -> list[models.Publication]:
+        """The publications a collection pass will operate on (selected first).
+
+        Selection is the single source of truth for what a collection campaign
+        covers: the currently enabled banks, the self-repair statuses
+        (:data:`COLLECTION_STATUSES`) and the optional publication-date window.
+        ``force`` does *not* widen the selection (it only re-downloads
+        already-fetched documents of a selected publication), so the plan is
+        stable across identical inputs.
+        """
+        effective = self._effective_banks(banks)
+        if not effective:
+            return []
+        return self.store.list_publications(
+            bank=effective,
+            statuses=COLLECTION_STATUSES,
+            date_start=date_start,
+            date_end=date_end,
+        )
+
+    def collect_campaign(
+        self,
+        *,
+        banks: tuple[str, ...] | list[str] | None = None,
+        force: bool = False,
+        date_start=None,
+        date_end=None,
+        run_id: str | None = None,
+        progress: Callable[[int, int], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> list[FetchResult]:
+        """Run one **sequential** collection campaign over the selected
+        publications.
+
+        This is the lifecycle-aware counterpart of :meth:`fetch_all`, mirroring
+        :meth:`discover_all`: the campaign owns a ``run_id``, fixes its scope
+        (``plan_collection``) before the loop starts, and reports progression
+        through the store's ``collection_runs`` row via the same serialized
+        writer. Collection is strictly sequential in this phase — no worker pool.
+        That is deliberate: the future parallel scheduler will split the
+        *network* work across workers while every Store mutation stays on this
+        serialized writer (a single SQLite connection, not thread-safe).
+
+        ``should_stop`` is polled before each publication; when it returns True
+        (or a SIGTERM arrives and raises :class:`CollectionStopped`), the
+        campaign aborts — the caller (the bridge) finalizes the run as
+        ``cancelled``. ``progress(completed, total)`` is called as each
+        publication actually finishes; ``completed``/``total`` are publication
+        counts, and a failing publication still counts as one completed step.
+
+        Returns the per-publication ``FetchResult`` list in selection order.
+        """
+        run_id = run_id or self.store.run_stamp()
+        publications = self.plan_collection(
+            banks=banks, force=force, date_start=date_start, date_end=date_end
+        )
+        total = len(publications)
+        if run_id:
+            self.store.set_collection_progress(run_id, completed=0, total=total)
+
+        def _on_progress(completed: int) -> None:
+            # Always on the campaign's own thread (sequential): the same thread
+            # that owns the serialized Store writes.
+            if run_id:
+                self.store.set_collection_progress(run_id, completed=completed, total=total)
+            if progress is not None:
+                progress(completed, total)
+
+        results: list[FetchResult] = []
+        completed = 0
+        for index, publication in enumerate(publications):
+            if should_stop is not None and should_stop():
+                raise CollectionStopped("collection cancelled by user")
+            try:
+                result = self.fetcher.fetch(publication, force=force)
+                results.append(result)
+            except CollectionStopped:
+                raise
+            except Exception as exc:
+                error = CollectError(
+                    bank_id=publication.central_bank,
+                    source_id=publication.source_id,
+                    strategy="fetch",
+                    url=publication.url,
+                    error_type=exc.__class__.__name__,
+                    message=str(exc),
+                    status_code=getattr(exc, "status_code", None),
+                    run_id=run_id,
+                )
+                self.store.log_error(error)
+                self.errors.append(error)
+            completed += 1
+            _on_progress(completed)
+        return results
+
     def fetch_all(
         self,
         *,
         banks: tuple[str, ...] | list[str] | None = None,
-        statuses: tuple = (
-            models.PublicationStatus.DISCOVERED,
-            models.PublicationStatus.UPDATED,
-        ),
+        statuses: tuple = COLLECTION_STATUSES,
         force: bool = False,
         date_start=None,
         date_end=None,
         run_id: str | None = None,
     ) -> list[FetchResult]:
+        """Fetch the selected publications (see :data:`COLLECTION_STATUSES`).
+
+        The default selection is the self-repair contract: DISCOVERED (never
+        collected), UPDATED (metadata changed), PARTIAL (some documents failed)
+        and FAILED (all documents failed) publications are selected — so a
+        partially or entirely failed collection is automatically retried on the
+        next pass. Already-FETCHED documents of a selected publication are
+        skipped (no network, idempotent). ``force=True`` re-downloads the
+        documents of a selected publication even when already fetched.
+
+        A per-publication error never kills the pass: it is recorded in
+        ``collect_errors`` and the loop continues with the next publication.
+        """
         run_id = run_id or self.store.run_stamp()
         effective = self._effective_banks(banks)
         if not effective:

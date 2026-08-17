@@ -28,8 +28,20 @@ Commands (``python -m argus.gui_bridge <command>``):
   and ``discovery_candidates`` tables only — pipeline data is untouched).
 - ``discovery-status``→ JSON summary of the latest discovery run (or ``idle``)
 - ``discovery-results``→ JSON candidates produced by the latest (or a given) run
+- ``collection-run`` → run a collection campaign over the enabled banks (long;
+  designed to be spawned detached by the Rust shell and observed via
+  ``collection-status``). It selects exactly the publications that need work
+  (DISCOVERED / UPDATED / PARTIAL / FAILED — the Core's self-repair contract),
+  so a partially or entirely failed collection is automatically retried.
+  ``--force`` re-collects already-fetched documents; ``--run-id`` lets the
+  launcher pre-mint the campaign's identity.
+- ``collection-run-id`` → mint a fresh collection-run identifier (no side effect)
+- ``collection-control <stop> [<run-id>]`` → cancel a running collection
+  campaign (SIGTERM with escalation; the campaign records itself as
+  ``cancelled``).
+- ``collection-status``→ JSON summary of the latest collection run (or ``idle``)
 - ``stats``          → read-only store aggregates for the Overview (publications,
-  documents, facts, last discovery)
+  documents, facts, last discovery, last collection)
 - ``open-url <url>`` → open an http(s) URL with the OS-default application
 - ``help``           → usage
 
@@ -51,12 +63,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .cli import _search_provider_from_env
-from .collector import CentralBankCollector
+from .collector import CentralBankCollector, CollectionStopped
 from .config import enabled_banks
 from .http import HttpConfig
 from .normalize import iso, now_utc
 from .registry import SourceRegistry
-from .store import ActiveDiscoveryError, Store, make_run_stamp
+from .store import ActiveCollectionError, ActiveDiscoveryError, Store, make_run_stamp
 
 USAGE = (
     "usage: python -m argus.gui_bridge "
@@ -64,7 +76,10 @@ USAGE = (
     "open-file <relative-path>|sources|"
     "discovery-run [--bank <id>]... --start-date YYYY-MM-DD --end-date YYYY-MM-DD|"
     "discovery-control <pause|resume|stop> [<run-id>]|discovery-clear|"
-    "discovery-status|discovery-results [<run-id>]|stats|open-url <url>"
+    "discovery-status|discovery-results [<run-id>]|"
+    "collection-run [--bank <id>]... [--force] [--run-id <id>]|"
+    "collection-run-id|collection-control <stop> [<run-id>]|collection-status|"
+    "stats|open-url <url>"
 )
 
 # Repository root, resolved from this module's own location
@@ -369,17 +384,22 @@ def _process_command_line(pid: int) -> str:
 def _process_identity(pid: int) -> str:
     """Classify the recorded PID for signalling decisions.
 
-    - ``"missing"``   → no runnable process exists for that PID;
-    - ``"discovery"`` → a live process whose command line is recognizably an
+    - ``"missing"``    → no runnable process exists for that PID;
+    - ``"discovery"``  → a live process whose command line is recognizably an
       Argus discovery campaign (``argus.gui_bridge discovery-run``);
-    - ``"foreign"``   → a *live* process that is not the recorded campaign —
+    - ``"collection"`` → a live process whose command line is recognizably an
+      Argus collection campaign (``argus.gui_bridge collection-run``);
+    - ``"foreign"``    → a *live* process that is not the recorded campaign —
       typically a recycled PID. It is never signalled.
     """
     if not _process_alive(pid):
         return "missing"
     cmdline = _process_command_line(pid)
-    if "argus.gui_bridge" in cmdline and "discovery-run" in cmdline:
-        return "discovery"
+    if "argus.gui_bridge" in cmdline:
+        if "discovery-run" in cmdline:
+            return "discovery"
+        if "collection-run" in cmdline:
+            return "collection"
     return "foreign"
 
 
@@ -441,13 +461,15 @@ def _process_group_alive(pgid: int) -> bool:
 # campaign driven in-process by the test harness or a terminal). Enables the
 # launcher-liveness guards: a detached campaign must never outlive Argus.
 _DETACHED_ENV = "ARGUS_DISCOVERY_DETACHED"
+_COLLECTION_DETACHED_ENV = "ARGUS_COLLECTION_DETACHED"
 
 
 def _launched_detached() -> bool:
-    return os.environ.get(_DETACHED_ENV) == "1"
+    """True when this process was spawned detached by the desktop launcher."""
+    return os.environ.get(_DETACHED_ENV) == "1" or os.environ.get(_COLLECTION_DETACHED_ENV) == "1"
 
 
-def _reconcile_run(store: Store, run: dict | None) -> dict | None:
+def _reconcile_run(store: Store, run: dict | None, *, kind: str = "discovery") -> dict | None:
     """Bring the Store in line with reality: a campaign whose recorded PID is
     no longer a live process can never be ``running``/``paused`` again.
 
@@ -455,27 +477,45 @@ def _reconcile_run(store: Store, run: dict | None) -> dict | None:
     finalizing), so it is the honest non-explicit outcome: ``failed``. An
     explicit user Stop records ``cancelled`` at the moment it *verifies* the
     process is gone, and is never downgraded afterwards.
+
+    ``kind`` selects the run table (``discovery`` or ``collection``); the
+    terminate / reconcile pipeline is identical for both campaign types.
     """
+    get, finish = _run_accessors(store, kind)
     if run is None or run["status"] not in _ACTIVE_STATUSES:
         return run
     pid = run.get("pid")
     if pid and not _process_alive(pid):
-        store.finish_discovery_run(
+        finish(
             run["run_id"],
             status="failed",
             error=f"campaign process {pid} exited unexpectedly",
         )
-        return store.get_discovery_run(run["run_id"])
+        return get(run["run_id"])
     return run
 
 
-def _terminate_campaign(store: Store, run: dict, pid: int) -> dict:
+def _run_accessors(store: Store, kind: str):
+    """(getter, finisher) bound store methods for a campaign table.
+
+    Shared by the reconcile / terminate pipeline so discovery and collection
+    campaigns run through the exact same hardened lifecycle primitives.
+    """
+    if kind == "collection":
+        return store.get_collection_run, store.finish_collection_run
+    return store.get_discovery_run, store.finish_discovery_run
+
+
+def _terminate_campaign(store: Store, run: dict, pid: int, *, kind: str = "discovery") -> dict:
     """Stop a campaign and guarantee the whole process tree is really gone
     before the Store says ``cancelled``.
 
+    Applies to both discovery and collection campaigns (``kind`` selects the
+    run table the status is read/written to).
+
     1. un-freeze a paused campaign (SIGCONT) so its signals can be delivered;
-    2. verify the recorded PID is the real discovery campaign — a live but
-       foreign process (e.g. a recycled PID) is never signalled;
+    2. verify the recorded PID is the real campaign — a live but foreign
+       process (e.g. a recycled PID) is never signalled;
     3. SIGTERM the campaign's process group (a detached campaign is its own
        group leader, so any descendants are covered) — graceful stop;
     4. wait for real termination of the whole group (``STOP_GRACE_S``);
@@ -486,6 +526,7 @@ def _terminate_campaign(store: Store, run: dict, pid: int) -> dict:
     The Store is never edited to hide a still-living process: if the process
     cannot be killed, the error propagates and the campaign stays active.
     """
+    get, finish = _run_accessors(store, kind)
     if run["status"] == "paused":
         try:
             os.kill(pid, signal.SIGCONT)
@@ -500,20 +541,20 @@ def _terminate_campaign(store: Store, run: dict, pid: int) -> dict:
         # take down an unrelated process. Never signal it; the run is
         # finalized as failed (the expected campaign is gone) and the stop is
         # reported as an error.
-        store.finish_discovery_run(
+        finish(
             run["run_id"],
             status="failed",
-            error=f"recorded pid {pid} is no longer the discovery campaign; not terminating",
+            error=f"recorded pid {pid} is no longer the running campaign; not terminating",
         )
         raise RuntimeError(
-            f"recorded pid {pid} is no longer the discovery campaign; not terminating"
+            f"recorded pid {pid} is no longer the running campaign; not terminating"
         )
     if identity == "missing":
         # Already gone (or never existed): there is nothing to signal.
-        current = store.get_discovery_run(run["run_id"])
+        current = get(run["run_id"])
         if current and current["status"] in _ACTIVE_STATUSES:
-            store.finish_discovery_run(run["run_id"], status="cancelled", error="cancelled by user")
-        return store.get_discovery_run(run["run_id"])
+            finish(run["run_id"], status="cancelled", error="cancelled by user")
+        return get(run["run_id"])
 
     pgid = _process_group_id(pid)
     group_target = pgid if (pgid is not None and pgid == pid) else None
@@ -553,10 +594,10 @@ def _terminate_campaign(store: Store, run: dict, pid: int) -> dict:
     if _tree_alive():
         raise RuntimeError(f"could not terminate campaign process {pid}")
 
-    current = store.get_discovery_run(run["run_id"])
+    current = get(run["run_id"])
     if current and current["status"] in _ACTIVE_STATUSES:
-        store.finish_discovery_run(run["run_id"], status="cancelled", error="cancelled by user")
-    return store.get_discovery_run(run["run_id"])
+        finish(run["run_id"], status="cancelled", error="cancelled by user")
+    return get(run["run_id"])
 
 
 def _start_parent_watchdog() -> None:
@@ -980,6 +1021,326 @@ def _cmd_discovery_results(argv: list[str]) -> int:
     return 0
 
 
+def _collection_stop_flag_handler(flag: list) -> None:
+    """Return a SIGTERM handler that sets a polled stop flag.
+
+    Collection's fetch call stack swallows ordinary exceptions into FAILED
+    documents (a SIGTERM landing mid-`client.get` must never masquerade as a
+    failed document and let the campaign continue). Instead the signal only sets
+    a flag; the campaign loop polls it between publications via ``should_stop``
+    and raises :class:`CollectionStopped` at a clean boundary.
+    """
+
+    def _set_flag(_signum, _frame):
+        flag[0] = True
+
+    return _set_flag
+
+
+def _run_collection_campaign(
+    store_path: Path,
+    raw_root: Path,
+    banks: tuple[str, ...],
+    *,
+    force: bool = False,
+    date_start: datetime | None = None,
+    date_end: datetime | None = None,
+    run_id: str | None = None,
+) -> dict:
+    """Run one collection campaign and record its lifecycle in the store.
+
+    Orchestration only — every piece of collection logic (selection of the
+    publications that need work, document fetch, content validation, atomic raw
+    write, deduplication, status transitions) runs inside the existing
+    ``CentralBankCollector.collect_campaign``. ``banks`` is the enabled
+    selection resolved by the caller, so an OFF bank can never be launched.
+    ``force`` re-collects documents of a selected publication even when already
+    fetched; the optional ``date_*`` bounds narrow the publication-date window.
+
+    The campaign records its own PID with the run so the GUI's stop can signal
+    it; SIGTERM finalizes the run as ``cancelled`` (a deliberate stop, never
+    ``failed``). Like discovery, a *detached* campaign must never outlive Argus:
+    the launcher-liveness guards and parent watchdog run here too.
+    """
+    stop_flag = [False]
+    signal.signal(signal.SIGTERM, _collection_stop_flag_handler(stop_flag))
+    detached = _launched_detached()
+    if detached and os.getppid() == 1:
+        # The desktop app that spawned this campaign is already gone (reparented
+        # to the init process). Never become an orphan doing work after Argus
+        # closed — refuse to start.
+        return {
+            "run_id": None,
+            "status": "failed",
+            "error": "launcher exited during campaign startup",
+            "collected": 0,
+        }
+    store = Store(store_path)
+    run_id = run_id or make_run_stamp()
+    registry = SourceRegistry()
+    # The number of publications the campaign will collect, fixed at launch so
+    # the GUI reads 0 / N immediately; the Core advances it via the same
+    # selection (what `collect_campaign` actually schedules).
+    collector = CentralBankCollector(
+        store=store,
+        registry=registry,
+        http_config=HttpConfig(respect_robots=True, min_interval=1.0),
+        raw_root=raw_root,
+        search_provider=_search_provider_from_env(),
+    )
+    publications_total = len(
+        collector.plan_collection(
+            banks=tuple(banks) if banks else None,
+            force=force,
+            date_start=date_start,
+            date_end=date_end,
+        )
+    )
+    store.start_collection_run(
+        run_id,
+        banks,
+        pid=os.getpid(),
+        force=force,
+        date_start=iso(date_start) if date_start else None,
+        date_end=iso(date_end) if date_end else None,
+        publications_total=publications_total,
+    )
+    if detached and os.getppid() == 1:
+        # The launcher vanished in the instant between the first check and the
+        # run being recorded — close the window by finalizing immediately.
+        store.finish_collection_run(
+            run_id,
+            status="cancelled",
+            error="launcher exited during campaign startup",
+        )
+        return {
+            "run_id": run_id,
+            "status": "cancelled",
+            "error": "launcher exited during campaign startup",
+            "collected": 0,
+        }
+    _start_parent_watchdog()
+    try:
+        results = collector.collect_campaign(
+            banks=tuple(banks) if banks else None,
+            force=force,
+            date_start=date_start,
+            date_end=date_end,
+            run_id=run_id,
+            should_stop=lambda: stop_flag[0],
+        )
+    except CollectionStopped:
+        store.finish_collection_run(run_id, status="cancelled", error="cancelled by user")
+        return {"run_id": run_id, "status": "cancelled", "error": "cancelled by user", "collected": 0}
+    except Exception as exc:
+        message = f"{exc.__class__.__name__}: {exc}"
+        store.finish_collection_run(run_id, status="failed", error=message)
+        return {"run_id": run_id, "status": "failed", "error": message, "collected": 0}
+
+    # A collection campaign finally reports what it actually did: the number of
+    # publications with usable documents, and the failed ones.
+    completed = 0
+    failed = 0
+    for result in results:
+        if result.ok:
+            completed += 1
+        else:
+            failed += 1
+    store.finish_collection_run(run_id, status="completed")
+    return {
+        "run_id": run_id,
+        "status": "completed",
+        "error": None,
+        "collected": completed,
+        "failed": failed,
+        "publications_total": len(results),
+    }
+
+
+def _cmd_collection_run(argv: list[str]) -> int:
+    """Run a collection campaign over the enabled banks.
+
+    Optional ``--bank <id>`` (repeatable) selects a subset; without one, the
+    run uses every currently enabled bank. ``--force`` re-collects the documents
+    of a selected publication even when already fetched. ``--run-id <id>``
+    (optional) lets the desktop launcher pre-mint the run's identity (via
+    ``collection-run-id``) so it can be returned to the frontend *before* the
+    detached subprocess records it.
+
+    Exactly one collection campaign may be active; the Store claims the run in a
+    locked transaction, so a second launch (even racing) is refused here too.
+    """
+    banks = enabled_banks()
+    selected: list[str] = []
+    force = False
+    run_id = None
+    date_start = None
+    date_end = None
+    index = 0
+    while index < len(argv):
+        if argv[index] == "--bank" and index + 1 < len(argv):
+            selected.append(argv[index + 1])
+            index += 2
+        elif argv[index] == "--force":
+            force = True
+            index += 1
+        elif argv[index] == "--run-id" and index + 1 < len(argv):
+            run_id = argv[index + 1].strip() or None
+            index += 2
+        elif argv[index] == "--start-date" and index + 1 < len(argv):
+            value = argv[index + 1].strip()
+            if value:
+                try:
+                    date_start = _parse_date_arg(value, "start-date")
+                except ValueError as exc:
+                    print(str(exc), file=sys.stderr)
+                    return 2
+            index += 2
+        elif argv[index] == "--end-date" and index + 1 < len(argv):
+            value = argv[index + 1].strip()
+            if value:
+                try:
+                    date_end = _parse_date_arg(value, "end-date")
+                except ValueError as exc:
+                    print(str(exc), file=sys.stderr)
+                    return 2
+            index += 2
+        else:
+            print(f"unexpected argument: {argv[index]}", file=sys.stderr)
+            return 2
+    if date_start is not None and date_end is None:
+        print(json.dumps({"error": "Collection with --start-date also requires --end-date"}, indent=2))
+        return 1
+    if date_start is not None and date_end is not None and date_start > date_end:
+        print(json.dumps({"error": "start_date must be <= end_date"}, indent=2))
+        return 1
+    if selected:
+        from .config import filter_enabled
+
+        banks = filter_enabled(selected) or ()
+
+    store = Store(_store_path())
+    _reconcile_run(store, store.latest_collection_run(), kind="collection")
+    active = store.latest_collection_run()
+    if active is not None and active["status"] in _ACTIVE_STATUSES:
+        print(
+            json.dumps(
+                {"error": f"a collection campaign is already active: {active['run_id']}"},
+                indent=2,
+            )
+        )
+        return 1
+
+    try:
+        result = _run_collection_campaign(
+            _store_path(), _raw_root(), banks,
+            force=force,
+            date_start=date_start,
+            date_end=date_end,
+            run_id=run_id,
+        )
+    except ActiveCollectionError as exc:
+        print(json.dumps({"error": str(exc)}, indent=2))
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _cmd_collection_run_id(argv: list[str]) -> int:
+    """Mint a fresh collection-run identifier (no store access, no side effect).
+
+    The desktop launcher calls this synchronously before spawning the detached
+    campaign, so it can return the run's identity immediately — the frontend then
+    waits for *that* id to appear instead of racing with the previous terminal
+    run.
+    """
+    print(json.dumps({"run_id": make_run_stamp()}, indent=2))
+    return 0
+
+
+def _cmd_collection_control(argv: list[str]) -> int:
+    """Real lifecycle control of a collection campaign, targeted by its run_id.
+
+    ``collection-control stop [run_id]`` — the ``run_id`` is that of the
+    campaign actually controlled (its PID is read from the Store, never
+    invented). Without a ``run_id`` the most recent campaign is used (legacy
+    convenience; the GUI always passes the explicit id).
+
+    ``stop`` means cancel: SIGTERM with a real termination wait and SIGKILL
+    escalation (see :func:`_terminate_campaign`) — the Store says ``cancelled``
+    only once the process is verified gone. Collection has no pause: it is a
+    strictly sequential, short-lived operation, so a frozen half-fetch is not a
+    state worth representing.
+    """
+    if len(argv) < 1:
+        print(USAGE, file=sys.stderr)
+        return 2
+    action = argv[0].strip().lower()
+    if action not in ("stop",):
+        print(f"unknown collection-control action: {action} (stop)", file=sys.stderr)
+        return 2
+    run_id = argv[1] if len(argv) > 1 else None
+    store = Store(_store_path())
+    run = store.get_collection_run(run_id) if run_id else store.latest_collection_run()
+    if run is None or run["status"] in ("idle", *_TERMINAL_STATUSES):
+        print(json.dumps({"error": f"no active collection campaign to {action}"}, indent=2))
+        return 1
+    pid = run.get("pid")
+    if not pid:
+        print(
+            json.dumps({"error": f"collection run {run['run_id']} has no recorded pid (started outside the desktop GUI)"}, indent=2)
+        )
+        return 1
+    try:
+        run = _terminate_campaign(store, run, pid, kind="collection")
+    except ProcessLookupError:
+        _reconcile_run(store, run, kind="collection")
+        print(json.dumps({"error": f"collection process {pid} is no longer running"}, indent=2))
+        return 1
+    except RuntimeError as exc:
+        print(json.dumps({"error": str(exc)}, indent=2))
+        return 1
+    except OSError as exc:
+        print(json.dumps({"error": f"cannot {action} collection process {pid}: {exc}"}, indent=2))
+        return 1
+    print(json.dumps(run, indent=2))
+    return 0
+
+
+def _cmd_collection_status(argv: list[str]) -> int:
+    """JSON summary of the most recent collection campaign (or ``idle``).
+
+    Runs the dead-PID reconciliation first, so an active-looking campaign whose
+    process is gone is surfaced as ``failed`` rather than left ``running``
+    forever (the GUI polls this command).
+    """
+    store = Store(_store_path())
+    run = _reconcile_run(store, store.latest_collection_run(), kind="collection")
+    if run is None:
+        print(
+            json.dumps(
+                {
+                    "run_id": None,
+                    "status": "idle",
+                    "started_at": None,
+                    "finished_at": None,
+                    "error": None,
+                    "banks": [],
+                    "pid": None,
+                    "force": False,
+                    "date_start": None,
+                    "date_end": None,
+                    "publications_total": 0,
+                    "publications_completed": 0,
+                },
+                indent=2,
+            )
+        )
+        return 0
+    print(json.dumps(run, indent=2))
+    return 0
+
+
 def _cmd_stats(argv: list[str]) -> int:
     """Read-only store aggregates for the Overview (no derived magic)."""
     store = Store(_store_path())
@@ -991,6 +1352,7 @@ def _cmd_stats(argv: list[str]) -> int:
                 "normalized_documents": store.count_normalized_documents(),
                 "facts": store.count_facts(),
                 "last_discovery": store.latest_discovery_run(),
+                "last_collection": store.latest_collection_run(),
             },
             indent=2,
         )
@@ -1047,6 +1409,14 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_discovery_status(argv[1:])
     if command == "discovery-results":
         return _cmd_discovery_results(argv[1:])
+    if command == "collection-run":
+        return _cmd_collection_run(argv[1:])
+    if command == "collection-run-id":
+        return _cmd_collection_run_id(argv[1:])
+    if command == "collection-control":
+        return _cmd_collection_control(argv[1:])
+    if command == "collection-status":
+        return _cmd_collection_status(argv[1:])
     if command == "stats":
         return _cmd_stats(argv[1:])
     if command == "open-url":

@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from argus.adapters.base import BankAdapter, rss_source
 from argus.collector import CentralBankCollector
 from argus.errors import TransportError
@@ -327,3 +329,75 @@ def test_direct_calls_respect_explicit_run_id(tmp_path, fixture_bytes):
             STRATEGIES.pop("explode", None)
         else:
             STRATEGIES["explode"] = original_explode
+
+
+# ---------------------------------------------------------------------------
+# Collection campaign lifecycle (findings 🔴 #1 and #2)
+# ---------------------------------------------------------------------------
+
+def test_collect_campaign_records_progress_and_persists_run(tmp_path, fixture_bytes):
+    """collect_campaign fixes its scope at launch (0/N), records each completed
+    publication into its collection_runs row, and returns per-publication
+    results in selection order."""
+    session = FakeSession({
+        FED_URL: response(fixture_bytes(FED_FIXTURE), url=FED_URL, content_type="application/xml"),
+        "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260729a.htm":
+            response("<html><body>1</body></html>", url="https://www.federalreserve.gov/newsevents/pressreleases/monetary20260729a.htm"),
+        "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260617a.htm":
+            response("<html><body>2</body></html>", url="https://www.federalreserve.gov/newsevents/pressreleases/monetary20260617a.htm"),
+    })
+    store = make_store(tmp_path)
+    collector = CentralBankCollector(
+        store=store,
+        client=make_client(session),
+        raw_root=tmp_path / "raw",
+    )
+    collector.discover_all()
+    store.start_collection_run("col-1", ["fed"], pid=1)
+
+    steps: list[tuple[int, int]] = []
+    results = collector.collect_campaign(run_id="col-1", progress=lambda c, t: steps.append((c, t)))
+    assert len(results) == 2
+    assert steps == [(1, 2), (2, 2)]
+    run = store.get_collection_run("col-1")
+    assert run["status"] == "running"
+    assert run["publications_total"] == 2
+    assert run["publications_completed"] == 2
+
+
+def test_collect_campaign_stop_raises_collection_stopped(tmp_path, fixture_bytes):
+    """A stop request aborts the campaign mid-flight: CollectionStopped is
+    raised, nothing past the stop point is collected, and the caller finalizes
+    the run as cancelled (nothing is fabricated to look completed)."""
+    from argus.collector import CollectionStopped
+
+    session = FakeSession({
+        FED_URL: response(fixture_bytes(FED_FIXTURE), url=FED_URL, content_type="application/xml"),
+        "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260729a.htm":
+            response("<html><body>1</body></html>", url="https://www.federalreserve.gov/newsevents/pressreleases/monetary20260729a.htm"),
+        "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260617a.htm":
+            response("<html><body>2</body></html>", url="https://www.federalreserve.gov/newsevents/pressreleases/monetary20260617a.htm"),
+    })
+    store = make_store(tmp_path)
+    collector = CentralBankCollector(
+        store=store,
+        client=make_client(session),
+        raw_root=tmp_path / "raw",
+    )
+    collector.discover_all()
+    store.start_collection_run("col-stop", ["fed"], pid=1)
+
+    stop_after = {"n": 0}
+
+    def should_stop():
+        stop_after["n"] += 1
+        return stop_after["n"] >= 2  # stop before the second publication
+
+    with pytest.raises(CollectionStopped):
+        collector.collect_campaign(run_id="col-stop", should_stop=should_stop)
+
+    run = store.get_collection_run("col-stop")
+    assert run["status"] == "running"  # the runner raises; the bridge finalizes
+    assert run["publications_completed"] == 1
+    # exactly one publication was actually fetched
+    assert len(store.list_documents(store.list_publications()[0].id)) == 1

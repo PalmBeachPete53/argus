@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from argus.models import Document, DocumentStatus, Publication, PublicationStatus
-from argus.store import Store
+from argus.store import ActiveCollectionError, Store
 
 
 def make_pub(bank="fed", title="Statement", url=None, date=None, **kw):
@@ -54,6 +54,31 @@ def test_url_and_text_identity_merge(tmp_path):
     second = store.upsert_publication(by_text)
     assert first.id != second.id  # distinct identity forms
     assert len(store.list_publications()) == 2
+
+
+def test_distinct_urls_are_distinct_publications(tmp_path):
+    """The URL-dedup contract is documented and explicit: a publication is
+    identified by its canonical URL, so two *different* URLs are two different
+    publications even when they serve the same physical content. Semantic
+    deduplication is deliberately out of scope; a source that knows two URLs are
+    the same publication must supply `dedup_key`/`canonical_url` explicitly."""
+    store = Store(tmp_path / "s.db")
+    a = store.upsert_publication(make_pub(title="Statement", url="https://x.test/pubs/stmt"))
+    b = store.upsert_publication(make_pub(title="Statement", url="https://x.test/files/stmt.pdf"))
+    assert a.id != b.id
+    assert len(store.list_publications()) == 2
+
+
+def test_explicit_canonical_url_coalesces_distinct_sources(tmp_path):
+    """A source that supplies an explicit `canonical_url`/`dedup_key` opts into
+    URL-dedup across otherwise-different URLs."""
+    store = Store(tmp_path / "s.db")
+    a = make_pub(title="Same", url="https://x.test/a")
+    b = make_pub(title="Same", url="https://x.test/b")
+    b.dedup_key = store._dedup(a)
+    store.upsert_publication(a)
+    store.upsert_publication(b)
+    assert len(store.list_publications()) == 1
 
 
 def test_extra_and_document_urls_union(tmp_path):
@@ -178,3 +203,44 @@ def test_normalized_document_pages_round_trip(tmp_path):
     # idempotent re-save keeps a single row
     store.upsert_normalized_document(doc)
     assert store.get_normalized_document("doc-1") is not None
+
+
+def test_collection_run_lifecycle(tmp_path):
+    store = Store(tmp_path / "s.db")
+    store.start_collection_run("c1", ["fed"], pid=42, publications_total=3)
+    run = store.get_collection_run("c1")
+    assert run["status"] == "running"
+    assert run["pid"] == 42
+    assert run["banks"] == ["fed"]
+    assert run["publications_total"] == 3
+    assert run["publications_completed"] == 0
+
+    store.set_collection_progress("c1", completed=1, total=3)
+    assert store.get_collection_run("c1")["publications_completed"] == 1
+
+    store.finish_collection_run("c1", status="completed")
+    run = store.get_collection_run("c1")
+    assert run["status"] == "completed"
+    assert run["finished_at"] is not None
+    assert store.latest_collection_run()["run_id"] == "c1"
+
+
+def test_start_collection_run_enforces_single_active(tmp_path):
+    store = Store(tmp_path / "s.db")
+    store.start_collection_run("c-a", ["fed"], pid=1)
+    try:
+        store.start_collection_run("c-b", ["ecb"], pid=2)
+    except ActiveCollectionError as exc:
+        assert "c-a" in str(exc)
+    else:
+        raise AssertionError("a second active collection campaign must be refused")
+    assert store.latest_collection_run()["run_id"] == "c-a"
+    assert store.get_collection_run("c-b") is None
+
+
+def test_collection_run_releases_active_after_finish(tmp_path):
+    store = Store(tmp_path / "s.db")
+    store.start_collection_run("c-x", ["fed"], pid=1)
+    store.finish_collection_run("c-x", status="cancelled")
+    store.start_collection_run("c-y", ["ecb"], pid=2)  # no longer active
+    assert store.latest_collection_run()["run_id"] == "c-y"

@@ -138,6 +138,27 @@ CREATE TABLE IF NOT EXISTS discovery_candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_discovery_candidates_run
     ON discovery_candidates(run_id);
+CREATE TABLE IF NOT EXISTS collection_runs (
+    -- One row per collection campaign (launched from the CLI or the desktop
+    -- GUI). The report layer for a collection run: status, timing, scope and
+    -- per-publication progression. Collection itself stays untouched in the
+    -- collector/fetcher — this only records the lifecycle of a campaign so the
+    -- GUI can observe and cancel it, exactly like `discovery_runs`.
+    run_id TEXT PRIMARY KEY,
+    started_at TEXT,
+    finished_at TEXT,
+    status TEXT,
+    error TEXT,
+    banks_json TEXT,
+    pid INTEGER,
+    force INTEGER DEFAULT 0,
+    date_start TEXT,
+    date_end TEXT,
+    publications_total INTEGER DEFAULT 0,
+    publications_completed INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_collection_runs_started
+    ON collection_runs(started_at);
 CREATE TABLE IF NOT EXISTS normalized_documents (
     document_id TEXT PRIMARY KEY,
     publication_id TEXT NOT NULL,
@@ -505,6 +526,17 @@ class ActiveDiscoveryError(Exception):
 
     Raised by ``start_discovery_run`` so the invariant "0 or 1 active campaign"
     is guaranteed by the Store itself, never by the GUI or the caller.
+    """
+
+
+class ActiveCollectionError(Exception):
+    """A collection campaign is already running; only one may exist.
+
+    Raised by ``start_collection_run`` so the invariant "0 or 1 active
+    campaign" is guaranteed by the Store itself, never by the GUI or the
+    caller. Collection is strictly sequential in this phase, so a single-active
+    guard is the honest contract (it also protects the future parallel
+    scheduler, which must serialize Store writes through one writer anyway).
     """
 
 
@@ -1202,6 +1234,148 @@ class Store:
             }
             for r in rows
         ]
+
+    # ------------------------------------------------------------------
+    # Collection campaign report layer (run lifecycle)
+    # ------------------------------------------------------------------
+
+    def start_collection_run(
+        self,
+        run_id: str,
+        banks,
+        pid: int | None = None,
+        force: bool = False,
+        date_start: str | None = None,
+        date_end: str | None = None,
+        publications_total: int | None = None,
+    ) -> None:
+        """Record that a collection campaign started (status ``running``).
+
+        ``pid`` is the OS process running the campaign (for the desktop GUI's
+        stop control); it is optional so CLI-driven campaigns stay recordable
+        too. ``force`` and the ``date_*`` bounds are persisted so the status
+        report reflects the campaign exactly as launched. ``publications_total``
+        is the number of publications the campaign will collect (fixed at launch
+        so the GUI can show ``0 / N`` immediately);
+        ``publications_completed`` starts at 0 and is advanced by the Core via
+        :meth:`set_collection_progress` as each publication is actually fetched.
+
+        Only one campaign may be active at a time. The claim is taken in a
+        write-locked transaction so two launchers racing cannot both start: the
+        second one raises :class:`ActiveCollectionError`.
+        """
+        started = iso(now_utc())
+        banks_json = json.dumps(list(banks or ()))
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            existing = self._conn.execute(
+                "SELECT run_id FROM collection_runs "
+                "WHERE status IN ('running', 'paused') LIMIT 1"
+            ).fetchone()
+            if existing is not None:
+                raise ActiveCollectionError(
+                    f"a collection campaign is already active: {existing['run_id']}"
+                )
+            self._conn.execute(
+                """
+                INSERT INTO collection_runs
+                    (run_id, started_at, status, banks_json, pid, force, date_start,
+                     date_end, publications_total, publications_completed)
+                VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    started_at=excluded.started_at,
+                    status='running',
+                    error=NULL,
+                    finished_at=NULL,
+                    banks_json=excluded.banks_json,
+                    pid=excluded.pid,
+                    force=excluded.force,
+                    date_start=excluded.date_start,
+                    date_end=excluded.date_end,
+                    publications_total=excluded.publications_total,
+                    publications_completed=0
+                """,
+                (
+                    run_id,
+                    started,
+                    banks_json,
+                    pid,
+                    int(force),
+                    date_start,
+                    date_end,
+                    publications_total or 0,
+                ),
+            )
+            self._conn.commit()
+        except BaseException:
+            self._conn.rollback()
+            raise
+
+    def set_collection_progress(self, run_id: str, *, completed: int, total: int) -> None:
+        """Persist the Core-driven per-publication progression of a campaign.
+
+        Called on the campaign's serialized writer thread (it is sequential in
+        this phase): it only updates the two counters of an existing
+        ``collection_runs`` row, so ``publications_completed`` reflects real
+        fetches as they happen and ``publications_total`` stays fixed at its
+        launch value. A run that no longer exists is a no-op.
+        """
+        self._conn.execute(
+            "UPDATE collection_runs SET publications_completed=?, publications_total=? WHERE run_id=?",
+            (completed, total, run_id),
+        )
+        self._conn.commit()
+
+    def finish_collection_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        """Finalize a collection campaign with a terminal status.
+
+        ``cancelled`` is what a user Stop / app close records (the campaign was
+        interrupted deliberately); ``completed`` records a full, uninterrupted
+        run; ``failed`` records an unexpected failure of the campaign itself.
+        """
+        finished = iso(now_utc())
+        self._conn.execute(
+            "UPDATE collection_runs SET finished_at=?, status=?, error=? WHERE run_id=?",
+            (finished, status, error, run_id),
+        )
+        self._conn.commit()
+
+    def _collection_run_from_row(self, row: sqlite3.Row) -> dict | None:
+        if row is None:
+            return None
+        return {
+            "run_id": row["run_id"],
+            "status": row["status"],
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+            "error": row["error"],
+            "banks": json.loads(row["banks_json"] or "[]"),
+            "pid": row["pid"],
+            "force": bool(row["force"]),
+            "date_start": row["date_start"],
+            "date_end": row["date_end"],
+            "publications_total": row["publications_total"] or 0,
+            "publications_completed": row["publications_completed"] or 0,
+        }
+
+    def get_collection_run(self, run_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM collection_runs WHERE run_id=?", (run_id,)
+        ).fetchone()
+        return self._collection_run_from_row(row)
+
+    def latest_collection_run(self) -> dict | None:
+        """The most recently started collection campaign, if any."""
+        row = self._conn.execute(
+            "SELECT * FROM collection_runs ORDER BY started_at DESC, run_id DESC LIMIT 1"
+        ).fetchone()
+        return self._collection_run_from_row(row)
 
     # ------------------------------------------------------------------
     # Overview counters (read-only aggregates for the GUI)

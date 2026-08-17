@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import tempfile
 from pathlib import Path
 
 from bs4 import BeautifulSoup
 
+from .errors import InvalidDocumentContent
 from .models import Document, DocumentStatus, FetchResult, Publication, PublicationStatus
 from .normalize import absolutize, is_same_host, now_utc, slugify
 
@@ -66,6 +69,60 @@ def _kind_and_ext(url: str, content_type: str | None) -> tuple[str, str]:
 
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+# Conservative HTML challenge / bot-page markers (lowercased). A document
+# target that comes back as one of these pages is never a real document — it is
+# the site's bot protection, not the requested resource. The list is deliberately
+# short and generic so it works across central banks (Cloudflare, Akamai, etc.)
+# without flagging legitimately plain pages.
+_CHALLENGE_MARKERS = (
+    "just a moment",
+    "checking your browser",
+    "verify you are human",
+    "cf-chl",
+    "challenge-platform",
+    "captcha",
+    "attention required",
+    "access denied",
+    "enable javascript and cookies",
+    "ddos protection",
+)
+
+# Media types that promise a *binary document* (PDF, OOXML, legacy Office):
+# receiving HTML bytes under one of these is a manifest contradiction — either
+# a bot page, a server error page, or a misconfigured endpoint.
+_BINARY_DOCUMENT_MEDIA = (
+    "application/pdf",
+    "application/zip",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
+
+
+def _validate_content(url: str, kind: str, content_type: str | None, body: bytes) -> None:
+    """Minimal (conservative) content sanity check before a document is stored.
+
+    A response passing this check is *not* guaranteed to be a valid document;
+    the check only rejects the clear-cut failures: an empty body, a bot/challenge
+    page served in place of a document, and a declared binary document whose
+    bytes are actually HTML. It never rejects a valid response just because the
+    server used an imprecise MIME. Raises :class:`InvalidDocumentContent`.
+    """
+    if not body:
+        raise InvalidDocumentContent(url, kind, "empty body (HTTP 200 with no content)")
+    media = (content_type or "").split(";", 1)[0].strip().lower()
+    head = body[:8192].lower()
+    is_html_bytes = head.lstrip().startswith(b"<")
+    if is_html_bytes and any(marker in head.decode("utf-8", errors="replace") for marker in _CHALLENGE_MARKERS):
+        raise InvalidDocumentContent(url, kind, "HTML challenge / bot page returned instead of the document")
+    if kind != "html" and is_html_bytes and media in _BINARY_DOCUMENT_MEDIA:
+        # The server promised a binary document but delivered HTML — a server
+        # error page, a bot wall, or a misconfigured Content-Type. Rejecting
+        # keeps such a response from being stored as a "fetched" document.
+        raise InvalidDocumentContent(url, kind, f"HTML body received with declared binary media type {media!r}")
 
 
 class Fetcher:
@@ -147,7 +204,24 @@ class Fetcher:
         digest = sha256_bytes(body)
         if kind == "html":
             ext = ".html"
-        local_path = self._write_raw(publication, kind, digest, ext, body)
+        # A body that fails the minimal content sanity check follows the normal
+        # error path (FAILED document → PARTIAL/FAILED publication) and is never
+        # stored as FETCHED — even on HTTP 200.
+        try:
+            _validate_content(url, kind, content_type, body)
+            local_path = self._write_raw(publication, kind, digest, ext, body)
+        except Exception as exc:
+            if isinstance(exc, InvalidDocumentContent):
+                retries = (existing.retries if existing else 0) + 1
+                return Document(
+                    publication_id=publication.id or "",
+                    url=url,
+                    kind=kind,
+                    status=DocumentStatus.FAILED,
+                    retries=retries,
+                    error=f"{exc.__class__.__name__}: {exc}",
+                )
+            raise
         return Document(
             publication_id=publication.id or "",
             url=url,
@@ -202,6 +276,17 @@ class Fetcher:
         return documents
 
     def _write_raw(self, publication: Publication, kind: str, digest: str, ext: str, body: bytes) -> str:
+        """Persist a downloaded body to the raw tree, atomically.
+
+        The body is written to a hidden temporary file in the *same* directory
+        (so the final ``os.replace`` stays on one filesystem), flushed with
+        ``fsync``, then atomically renamed into place. The visible final file can
+        therefore only ever exist in its complete form — a crash during the
+        download/write leaves at most a stray ``.tmp`` file (never referenced by
+        any ``documents`` row), never a truncated real document. The store
+        invariant holds: a ``documents`` row's ``local_path`` always points at a
+        fully written file.
+        """
         bank_dir = self.raw_root / publication.central_bank
         if publication.publication_date is not None:
             folder = publication.publication_date.strftime("%Y/%m")
@@ -213,7 +298,22 @@ class Fetcher:
         base = slugify(publication.title, max_len=60)
         filename = f"{base}-{short}{ext}"
         path = target / filename
-        path.write_bytes(body)
+
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{filename}.", suffix=".tmp", dir=str(target)
+        )
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(body)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_name, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
         return str(path)
 
     def _compute_status(self, publication_id: str, fetched: list[Document]) -> PublicationStatus | None:

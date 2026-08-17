@@ -114,6 +114,22 @@ def compute_dedup_key(
     title: str | None = None,
     date: datetime | None = None,
 ) -> str:
+    """The deterministic identity of a publication, used as its dedup key.
+
+    A publication is primarily identified by its **canonical URL**: two
+    publications whose URLs canonicalize to the same value (query order,
+    fragments, tracking parameters, default ports, trailing slash — see
+    :func:`canonical_url`) are the *same* publication and coalesce into one row.
+    Only when a publication has no URL at all does it fall back to a
+    title+bank+date identity.
+
+    The URL identity is the **only** dedup contract: two different URLs — even
+    when they point at the same physical document — are two distinct
+    publications (``URL A → publication X``, ``URL B → publication Y``). This
+    phase deliberately does *not* attempt semantic document deduplication; a
+    source that knows two URLs are the same publication must say so by supplying
+    ``dedup_key`` / ``canonical_url`` on the Publication.
+    """
     if url:
         canon = canonical_url(url)
         payload = f"u|{canon}"
