@@ -2,8 +2,22 @@ import { useState } from "react";
 import type { DiscoveryCandidate, DiscoveryRun } from "../types";
 import type { DiscoveryState } from "./MainContent";
 import { formatDate, formatDateTime } from "../lib/format";
-import { rangeStatus, REQUIRED_RANGE_HINT, INVALID_RANGE_HINT, discoveryProgress, discoveryView } from "../lib/discovery";
+import {
+  discoveryProgress,
+  discoveryView,
+  REQUIRED_RANGE_HINT,
+  INVALID_RANGE_HINT,
+} from "../lib/discovery";
+import {
+  dateInputStatus,
+  discoveryWindowStatus,
+  exclusiveEnd,
+  formatDateInput,
+  INVALID_DATE_HINT,
+  parseDateInput,
+} from "../lib/dateInput";
 import ConfirmDialog from "./ConfirmDialog";
+import DateField from "./DateField";
 
 interface DiscoveryProps {
   discovery: DiscoveryState;
@@ -115,13 +129,6 @@ function CandidateDetail({
   );
 }
 
-/** The date AFTER `iso` (YYYY-MM-DD): the Core's window is end-exclusive, so a
- * "to" date chosen by the user is converted to its exclusive upper bound. */
-function exclusiveEnd(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
-}
-
 /** Two-step confirmation button: first click arms it, second click fires. */
 function ConfirmButton({
   label,
@@ -181,17 +188,21 @@ export default function Discovery({ discovery }: DiscoveryProps) {
 
   const range =
     status.date_start || status.date_end
-      ? [status.date_start && formatDate(status.date_start), status.date_end && formatDate(status.date_end)]
+      ? [status.date_start && formatDateInput(status.date_start), status.date_end && formatDateInput(status.date_end)]
           .filter(Boolean)
           .join(" → ")
       : "Unbounded";
 
-  const windowStatus = rangeStatus(dateFrom, dateTo);
+  const windowStatus = discoveryWindowStatus(dateFrom, dateTo);
+  const dateError = windowStatus === "invalid-date" || windowStatus === "invalid";
   const runDisabled = active || starting || windowStatus !== "valid";
 
   const handleRun = () => {
-    // Both dates are guaranteed non-empty here (Run is disabled otherwise).
-    void discovery.launch(dateFrom, exclusiveEnd(dateTo));
+    const fromIso = parseDateInput(dateFrom);
+    const toIso = parseDateInput(dateTo);
+    // Both dates are guaranteed valid here (Run is disabled otherwise).
+    if (!fromIso || !toIso) return;
+    void discovery.launch(fromIso, exclusiveEnd(toIso));
   };
 
   return (
@@ -205,32 +216,30 @@ export default function Discovery({ discovery }: DiscoveryProps) {
 
       <section className="discovery-card" aria-label="Discovery campaign controls">
         <div className="discovery-card-range">
-          <label className="discovery-range">
-            <span>Start date</span>
-            <input
-              type="date"
-              value={dateFrom}
-              disabled={active}
-              onChange={(e) => setDateFrom(e.target.value)}
-            />
-          </label>
-          <label className="discovery-range">
-            <span>End date</span>
-            <input
-              type="date"
-              value={dateTo}
-              disabled={active}
-              onChange={(e) => setDateTo(e.target.value)}
-            />
-          </label>
+          <DateField
+            label="Start date"
+            value={dateFrom}
+            onChange={setDateFrom}
+            disabled={active}
+            error={dateInputStatus(dateFrom) === "invalid"}
+          />
+          <DateField
+            label="End date"
+            value={dateTo}
+            onChange={setDateTo}
+            disabled={active}
+            error={dateInputStatus(dateTo) === "invalid"}
+          />
           <p
-            className={`discovery-range-hint${windowStatus === "invalid" ? " discovery-range-hint-error" : ""}`}
+            className={`discovery-range-hint${dateError ? " discovery-range-hint-error" : ""}`}
           >
-            {windowStatus === "invalid"
-              ? INVALID_RANGE_HINT
-              : windowStatus === "missing"
-                ? REQUIRED_RANGE_HINT
-                : "Publication-date window (start-inclusive, end-exclusive)."}
+            {windowStatus === "invalid-date"
+              ? INVALID_DATE_HINT
+              : windowStatus === "invalid"
+                ? INVALID_RANGE_HINT
+                : windowStatus === "missing"
+                  ? REQUIRED_RANGE_HINT
+                  : "Publication-date window (start-inclusive, end-exclusive)."}
           </p>
         </div>
 

@@ -448,13 +448,144 @@ body {
   color: var(--muted);
 }
 
-.discovery-range input {
+.date-field-wrap {
+  position: relative;
+}
+
+.date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.date-field-input {
+  width: 124px;
+  font-variant-numeric: tabular-nums;
   border: 1px solid var(--border-gray);
   border-radius: 6px;
   padding: 6px 8px;
   font-size: 13px;
   color: var(--text);
   background: var(--white);
+}
+
+.date-field-input:disabled {
+  opacity: 0.5;
+}
+
+.date-field-toggle {
+  border: 1px solid var(--border-gray);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.date-field-toggle:hover:not(:disabled) {
+  background: var(--light-gray);
+}
+
+.date-field-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.date-field-error .date-field-input,
+.date-field-error .date-field-toggle {
+  border-color: var(--red);
+}
+
+.date-picker-anchor {
+  position: relative;
+}
+
+.date-picker {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  z-index: 40;
+  width: 236px;
+  background: var(--white);
+  border: 1px solid var(--border-gray);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  padding: 10px;
+}
+
+.date-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.date-picker-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.date-picker-nav {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--indigo);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.date-picker-nav:hover {
+  background: var(--light-gray);
+}
+
+.date-picker-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.date-picker-cell {
+  border: none;
+  background: none;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 0;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.date-picker-cell.empty {
+  cursor: default;
+}
+
+.date-picker-cell:hover:not(.empty) {
+  background: var(--light-gray);
+}
+
+.date-picker-cell.today {
+  font-weight: 700;
+  color: var(--indigo);
+}
+
+.date-picker-cell.selected {
+  background: var(--indigo);
+  color: var(--white);
 }
 
 .secondary-button {
