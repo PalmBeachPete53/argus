@@ -42,13 +42,16 @@ export interface CollectionPollStep {
  * @param starting true while waiting for `targetRunId` to first appear after a
  *   launch — during this phase no other run may end the loop.
  * @param observed the latest `collection-status` response.
- * @param startingDisplay the optimistic "Starting…" run shown while waiting.
+ * @param fallbackDisplay the run to render while the observed run is *not* the
+ *   followed target: the optimistic "Starting…" run during the starting phase,
+ *   or the followed run's last known state afterwards. A foreign run is never
+ *   displayed as the current campaign.
  */
 export function nextCollectionPollStep(
   targetRunId: string | null,
   starting: boolean,
   observed: CollectionRun,
-  startingDisplay: CollectionRun,
+  fallbackDisplay: CollectionRun,
 ): CollectionPollStep {
   const terminal = TERMINAL.has(observed.status);
 
@@ -65,7 +68,7 @@ export function nextCollectionPollStep(
     }
     return {
       keepPolling: true,
-      display: startingDisplay,
+      display: fallbackDisplay,
       adoptTarget: null,
       stopWaiting: false,
     };
@@ -91,11 +94,13 @@ export function nextCollectionPollStep(
   }
 
   // Following a known target. A response for a different run (defensive — the
-  // backend is single-active, so this shouldn't happen) never ends the loop.
+  // backend is single-active, so this shouldn't happen) never ends the loop and
+  // never renders that foreign run as the current campaign: keep showing the
+  // followed run's last known state and keep polling for it.
   if (observed.run_id !== targetRunId) {
     return {
       keepPolling: true,
-      display: observed,
+      display: fallbackDisplay,
       adoptTarget: null,
       stopWaiting: false,
     };

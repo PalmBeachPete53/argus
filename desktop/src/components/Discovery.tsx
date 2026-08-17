@@ -220,6 +220,10 @@ function CollectionProgress({ status }: { status: CollectionRun }) {
 function CollectionPanel({ collection, discovery }: { collection: CollectionState; discovery: DiscoveryState }) {
   const { status, error, starting } = collection;
   const active = status.status === "running" && !starting;
+  // Cancel must stay available during the startup phase (the process has been
+  // launched — the hook targets the followed run, and a Cancel then really
+  // terminates it), not only once the run is authoritatively running.
+  const controllable = active || starting;
   const view = collectionView(status);
   const runDisabled = active || starting;
   const range =
@@ -256,7 +260,7 @@ function CollectionPanel({ collection, discovery }: { collection: CollectionStat
         >
           {active ? "Collection in progress…" : "Run Collection"}
         </button>
-        {active && (
+        {controllable && (
           <ConfirmButton label="Cancel Collection" confirmLabel="Confirm cancel?" onClick={() => void collection.stop()} />
         )}
       </div>

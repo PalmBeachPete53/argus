@@ -80,8 +80,8 @@ beforeEach(() => {
       const { action, runId } = args as { action: string; runId: string };
       controlCalls.push({ action, runId });
       // The Core preserves the campaign's counters on a stop (finish_collection_run
-      // only touches status/error/finished_at).
-      latestStatus = { ...latestStatus, status: "cancelled", error: "cancelled by user" };
+      // only touches status/error/finished_at) and keeps the targeted run_id.
+      latestStatus = { ...latestStatus, status: "cancelled", error: "cancelled by user", run_id: runId };
       return Promise.resolve({ ...latestStatus });
     }
     return Promise.resolve({});
@@ -235,6 +235,83 @@ describe("useCollection", () => {
     latestStatus = run({ run_id: "col-1", status: "running", publications_total: 8, publications_completed: 1 });
     await pump(1200);
     expect(hook!.status).toMatchObject({ run_id: "col-1", status: "running", publications_total: 8 });
+    unmount();
+  });
+
+  it("cancels during starting, targeting the followed run — never an older terminal one", async () => {
+    mount();
+    await microtasks();
+    // An older completed run is still "latest" while the new campaign bootstraps.
+    latestStatus = run({ run_id: "old", status: "completed", publications_total: 5, publications_completed: 5 });
+    await act(async () => {
+      await hook!.launch();
+    });
+    expect(hook!.starting).toBe(true);
+
+    let stopped: boolean | undefined;
+    await act(async () => {
+      stopped = await hook!.stop();
+    });
+    expect(stopped).toBe(true);
+    expect(controlCalls).toEqual([{ action: "stop", runId: "col-1" }]);
+    expect(hook!.status).toMatchObject({ status: "cancelled", run_id: "col-1" });
+    expect(hook!.starting).toBe(false);
+    unmount();
+  });
+
+  it("cancels during starting before the run has recorded itself", async () => {
+    mount();
+    await microtasks();
+    await act(async () => {
+      await hook!.launch();
+    });
+    // The backend still reports idle (the detached subprocess is booting).
+    latestStatus = idleRun;
+    let stopped: boolean | undefined;
+    await act(async () => {
+      stopped = await hook!.stop();
+    });
+    expect(stopped).toBe(true);
+    expect(controlCalls).toEqual([{ action: "stop", runId: "col-1" }]);
+    expect(hook!.status.status).toBe("cancelled");
+    unmount();
+  });
+
+  it("adopts a followed run that already failed instead of invoking stop", async () => {
+    mount();
+    await microtasks();
+    await act(async () => {
+      await hook!.launch();
+    });
+    latestStatus = run({ run_id: "col-1", status: "failed", error: "RuntimeError: plan exploded" });
+
+    let stopped: boolean | undefined;
+    await act(async () => {
+      stopped = await hook!.stop();
+    });
+    expect(stopped).toBe(true);
+    expect(controlCalls).toEqual([]); // never asked the Core to stop a dead run
+    expect(hook!.status).toMatchObject({ status: "failed", run_id: "col-1" });
+    expect(hook!.status.error).toContain("plan exploded");
+    unmount();
+  });
+
+  it("never displays a foreign run reported by the backend while following the target", async () => {
+    mount();
+    await microtasks();
+    await act(async () => {
+      await hook!.launch();
+    });
+    latestStatus = run({ run_id: "col-1", status: "running", publications_total: 10, publications_completed: 2 });
+    await pump(1200);
+    expect(hook!.status).toMatchObject({ run_id: "col-1", status: "running", publications_completed: 2 });
+
+    // The backend briefly reports a different run (defensive) — the hook must
+    // keep showing the followed run's state, never the foreign run's.
+    latestStatus = run({ run_id: "other", status: "completed", publications_total: 9, publications_completed: 9 });
+    await pump(1200);
+    expect(hook!.status).toMatchObject({ run_id: "col-1", status: "running", publications_completed: 2 });
+    expect(hook!.status.run_id).not.toBe("other");
     unmount();
   });
 });

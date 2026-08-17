@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { CollectionRun, CollectionRunId } from "../types";
-import { nextCollectionPollStep } from "../lib/collectionPoll";
+import { nextCollectionPollStep, TERMINAL } from "../lib/collectionPoll";
 
 const IDLE: CollectionRun = {
   run_id: null,
@@ -93,18 +93,15 @@ export function useCollection() {
         }
         if (token !== loopTokenRef.current) return;
 
-        const startingDisplay: CollectionRun = {
+        const fallbackDisplay: CollectionRun = {
           ...statusRef.current,
-          status: "running",
           run_id: targetRunIdRef.current,
-          publications_completed: 0,
-          publications_total: 0,
         };
         const step = nextCollectionPollStep(
           targetRunIdRef.current,
           startingRef.current,
           observed,
-          startingDisplay,
+          fallbackDisplay,
         );
         if (step.adoptTarget) targetRunIdRef.current = step.adoptTarget;
         if (step.stopWaiting) setStartingPhase(false);
@@ -184,10 +181,23 @@ export function useCollection() {
       setError(String(err));
       return false;
     }
-    const runId = run.run_id ?? targetRunIdRef.current ?? null;
+    // Prefer the run this hook is following (the campaign just launched, or the
+    // one adopted on mount) — never an older terminal run that is still
+    // "latest" until the target records itself.
+    const followed = targetRunIdRef.current;
+    const runId = followed ?? (run.status === "running" ? run.run_id : null) ?? null;
     if (!runId) {
       setError("cannot stop: no active collection campaign");
       return false;
+    }
+    // The followed run is already terminal in the store (e.g. its bootstrap
+    // failed): adopt the authoritative state instead of asking the Core to stop
+    // something that already ended.
+    if (run.run_id === runId && TERMINAL.has(run.status)) {
+      applyStatus(run);
+      setStartingPhase(false);
+      loopTokenRef.current += 1;
+      return true;
     }
     try {
       const updated = await invoke<CollectionRun>("collection_control", {
@@ -198,13 +208,14 @@ export function useCollection() {
       // has not observed the cancellation yet) so no later poll can resurrect an
       // older state. There is nothing left to follow.
       applyStatus(updated);
+      setStartingPhase(false);
       loopTokenRef.current += 1;
     } catch (err) {
       setError(String(err));
       return false;
     }
     return true;
-  }, [readStatus, applyStatus]);
+  }, [readStatus, applyStatus, setStartingPhase]);
 
   return {
     status,

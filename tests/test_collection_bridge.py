@@ -36,6 +36,112 @@ def patched(monkeypatch, tmp_path, capsys):
     return run
 
 
+def test_collection_detached_bootstrap_failure_is_observable_failed(tmp_path):
+    """Subprocess bootstrap failure via the *real* detached launch path
+    (``python -m argus.gui_bridge collection-run`` — the exact mechanism the
+    Rust shell uses): the spawned campaign dies during ``plan_collection``, yet
+    the pre-minted run must still appear in ``collection-status`` as ``failed``
+    with an explicit error — never a silent disappearance that would leave the
+    frontend waiting for 60s."""
+    import os
+    import subprocess
+    import sys
+    import time
+    from pathlib import Path
+
+    src = str(Path(gui_bridge.__file__).resolve().parents[2] / "src")
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    (tmp_path / "cache").mkdir(exist_ok=True)
+
+    sitecustomize = (
+        f"import sys\nsys.path.insert(0, {src!r})\n"
+        "def _patch():\n"
+        "    try:\n"
+        "        import argus.collector as m\n"
+        "        class FailingPlan:\n"
+        "            def __init__(self, **kw):\n"
+        "                self.store = kw['store']\n"
+        "            def plan_collection(self, **kw):\n"
+        "                raise RuntimeError('plan exploded in detached spawn')\n"
+        "            def collect_campaign(self, **kw):\n"
+        "                return []\n"
+        "        m.CentralBankCollector = FailingPlan\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "_patch()\n"
+    )
+    (tmp_path / "sitecustomize.py").write_text(sitecustomize)
+
+    env = dict(
+        os.environ,
+        PYTHONPATH=f"{tmp_path}:{src}",
+        ARGUS_ROOT=str(tmp_path),
+        ARGUS_COLLECTION_DETACHED="1",
+        ARGUS_BANKS_CONFIG=str(tmp_path / "banks.json"),
+    )
+    campaign = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "argus.gui_bridge",
+            "collection-run",
+            "--run-id",
+            "X-detached",
+        ],
+        cwd=Path(gui_bridge.__file__).resolve().parents[2],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        # The run must become observable *and* reach `failed` on its own.
+        final = None
+        for _ in range(400):
+            exitcode = campaign.poll()
+            # drain any lingering process
+            if exitcode is not None and campaign.wait(1) is not None and exitcode != 0:
+                # The campaign may exit non-zero only if it could not record the
+                # run (a real defect). We still require the row below.
+                pass
+            store = gui_bridge.Store(str(data / "argus.db"))
+            run = store.get_collection_run("X-detached")
+            store.close()
+            if run is not None and run["status"] == "failed":
+                final = run
+                break
+            time.sleep(0.05)
+        assert final is not None, "the failed run never became observable"
+        assert final["status"] == "failed"
+        assert "plan exploded in detached spawn" in final["error"]
+        assert final["finished_at"], "a failed bootstrap records finished_at"
+    finally:
+        if campaign.poll() is None:
+            campaign.kill()
+            campaign.wait()
+
+
+def _run_main(root, argv):
+    """Run ``gui_bridge.main`` against a given temp data root and return
+    ``(code, parsed_stdout)`` without touching the ``patched`` fixture."""
+    import contextlib
+    import io
+
+    import argus.gui_bridge as gb
+
+    real_root = gb.ROOT
+    gb.ROOT = root
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = gb.main(argv)
+        out = buf.getvalue().strip()
+        return code, json.loads(out) if out else None
+    finally:
+        gb.ROOT = real_root
+
+
 def _seed_publication(tmp_path, **kw):
     from argus.models import Publication
 
@@ -307,6 +413,152 @@ def test_collection_run_failure_records_failed_status(monkeypatch, tmp_path, pat
     assert status["status"] == "failed"
 
 
+def test_collection_bootstrap_plan_failure_records_failed_run(monkeypatch, tmp_path, patched):
+    """A failure *during plan_collection* (before the campaign exists) must not
+    swallow the pre-minted run: the lifecycle was recorded first, so the run is
+    observable as `failed` with an explicit error — never `did not start in
+    time` on the frontend side."""
+    _, minted = patched(["collection-run-id"])
+
+    class _PlanFailingFake(_FakeCollector):
+        def plan_collection(self, **kwargs):
+            raise RuntimeError("plan exploded")
+
+    _install_fake_collector(monkeypatch, _PlanFailingFake)
+    code, data = patched(["collection-run", "--run-id", minted["run_id"]])
+    assert code == 0
+    assert data["status"] == "failed"
+    assert data["run_id"] == minted["run_id"]
+    assert "RuntimeError: plan exploded" in data["error"]
+
+    _, status = patched(["collection-status"])
+    assert status["status"] == "failed"
+    assert status["run_id"] == minted["run_id"]
+    assert status["finished_at"], "failed bootstrap must record finished_at"
+    assert status["error"] and "plan exploded" in status["error"]
+    # No bogus total is fabricated for a plan that was never computed.
+    assert status["publications_total"] == 0
+    assert status["publications_completed"] == 0
+
+
+def test_collection_bootstrap_collector_construction_failure_records_failed(
+    monkeypatch, tmp_path, patched
+):
+    """A failure building the collector itself is also a bootstrap failure: the
+    run (already recorded) must surface as `failed`, not linger as `running`."""
+
+    class _ConstructFailing:
+        def __init__(self, **kwargs):
+            raise RuntimeError("cannot build collector")
+
+    _install_fake_collector(monkeypatch, _ConstructFailing)
+    _, minted = patched(["collection-run-id"])
+    code, data = patched(["collection-run", "--run-id", minted["run_id"]])
+    assert code == 0
+    assert data["status"] == "failed"
+    assert "cannot build collector" in data["error"]
+    _, status = patched(["collection-status"])
+    assert status["status"] == "failed"
+    assert status["run_id"] == minted["run_id"]
+
+
+def test_collection_bootstrap_cancel_records_cancelled(monkeypatch, tmp_path, patched):
+    """A stop request (SIGTERM flag) during bootstrap cancels the run cleanly —
+    a deliberate stop is `cancelled`, never `failed`."""
+    _seed_publication(tmp_path)
+
+    class _BootstrapStopFake(_FakeCollector):
+        def plan_collection(self, **kwargs):
+            from argus.collector import CollectionStopped
+
+            raise CollectionStopped("stop requested during campaign startup")
+
+    _install_fake_collector(monkeypatch, _BootstrapStopFake)
+    code, data = patched(["collection-run"])
+    assert code == 0
+    assert data["status"] == "cancelled"
+    assert data["run_id"]
+    _, status = patched(["collection-status"])
+    assert status["status"] == "cancelled"
+    assert status["error"] == "cancelled by user"
+    assert status["finished_at"]
+
+
+def test_collection_control_stop_terminal_run_adopts_state(monkeypatch, tmp_path, patched):
+    """Stopping an already-terminal run (e.g. a bootstrap failure) reports the
+    authoritative terminal state instead of `no active collection campaign to
+    stop` — the frontend adopts it."""
+    _seed_publication(tmp_path)
+
+    class _FailingFake(_FakeCollector):
+        def plan_collection(self, **kwargs):
+            raise RuntimeError("boom")
+
+    _install_fake_collector(monkeypatch, _FailingFake)
+    _, minted = patched(["collection-run-id"])
+    patched(["collection-run", "--run-id", minted["run_id"]])  # ends failed
+
+    code, run = patched(["collection-control", "stop", minted["run_id"]])
+    assert code == 0
+    assert run["status"] == "failed"
+    assert run["run_id"] == minted["run_id"]
+    assert "boom" in run["error"]
+
+
+def test_collection_control_stop_unknown_run_errors(monkeypatch, tmp_path, patched):
+    """A stop targeting a run that never existed and never appears still errors
+    (the bounded wait is for *late-arriving launches*, not a miracle lookup)."""
+    monkeypatch.setattr(gui_bridge, "STOP_WAIT_STEP_S", 0.01)
+    monkeypatch.setattr(gui_bridge, "STOP_WAIT_CYCLES", 5)
+    code, data = patched(["collection-control", "stop", "never-minted"])
+    assert code == 1
+    assert "no collection campaign found" in data["error"]
+
+
+def test_collection_control_stop_during_startup_waits_for_late_run(
+    monkeypatch, tmp_path, patched
+):
+    """A Cancel issued right after launch (before the detached subprocess has
+    recorded its row) waits a bounded time for the run to appear, then really
+    terminates it and records `cancelled` — never `no active collection campaign
+    to stop` for a run the GUI just launched."""
+    import os
+    import threading
+    import time
+
+    if os.name == "nt":
+        pytest.skip("POSIX signals required")
+
+    monkeypatch.setattr(gui_bridge, "STOP_WAIT_STEP_S", 0.01)
+    monkeypatch.setattr(gui_bridge, "STOP_WAIT_CYCLES", 300)  # up to ~3s
+    _, minted = patched(["collection-run-id"])
+    campaign = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)", "argus.gui_bridge", "collection-run"]
+    )
+    recorded = {"done": False}
+
+    def _record_late():
+        time.sleep(0.3)  # the detached subprocess is still booting
+        store = gui_bridge.Store(tmp_path / "data" / "argus.db")
+        store.start_collection_run(minted["run_id"], ["fed"], pid=campaign.pid)
+        store.close()
+        recorded["done"] = True
+
+    threading.Thread(target=_record_late).start()
+    try:
+        code, run = patched(["collection-control", "stop", minted["run_id"]])
+        assert recorded["done"], "the wait loop must have let the run appear"
+        assert code == 0
+        assert run["run_id"] == minted["run_id"]
+        assert run["status"] == "cancelled"
+        assert campaign.wait(5) is not None  # really gone before `cancelled`
+        assert not gui_bridge._process_alive(campaign.pid)
+    finally:
+        if campaign.poll() is None:
+            campaign.kill()
+            campaign.wait()
+
+
 def test_collection_status_reconciles_dead_pid(monkeypatch, tmp_path, patched):
     gone = subprocess.Popen([sys.executable, "-c", "pass"])
     gone.wait()
@@ -396,7 +648,9 @@ def test_collection_control_refuses_foreign_live_pid(monkeypatch, tmp_path, patc
 
 def test_collection_launch_race_parent_gone_after_record(monkeypatch, tmp_path, patched):
     """Parent disappears right after the run is recorded: the collection
-    campaign finalizes itself `cancelled` instead of continuing as an orphan."""
+    campaign finalizes itself `failed` (the launching app died — an error
+    condition, never a voluntary cancellation) instead of continuing as an
+    orphan, and the pre-minted run stays observable in `collection-status`."""
     monkeypatch.setenv(gui_bridge._COLLECTION_DETACHED_ENV, "1")
     real_getppid = gui_bridge.os.getppid
     calls = {"n": 0}
@@ -409,10 +663,29 @@ def test_collection_launch_race_parent_gone_after_record(monkeypatch, tmp_path, 
     _install_fake_collector(monkeypatch)
     code, data = patched(["collection-run"])
     assert code == 0
-    assert data["status"] == "cancelled"
+    assert data["status"] == "failed"
     assert "launcher exited during campaign startup" in data["error"]
     _, status = patched(["collection-status"])
-    assert status["status"] == "cancelled"
+    assert status["status"] == "failed"
+
+
+def test_collection_launch_parent_gone_before_record(monkeypatch, tmp_path, patched):
+    """Parent is already gone before the run records itself: the campaign must
+    never silently vanish — the pre-minted identity is recorded as `failed` so
+    `collection-status` can still observe it (the Rust shell already returned it
+    to the frontend)."""
+    monkeypatch.setenv(gui_bridge._COLLECTION_DETACHED_ENV, "1")
+    monkeypatch.setattr(gui_bridge.os, "getppid", lambda: 1)
+    _install_fake_collector(monkeypatch)
+    _, minted = patched(["collection-run-id"])
+    code, data = patched(["collection-run", "--run-id", minted["run_id"]])
+    assert code == 0
+    assert data["status"] == "failed"
+    assert data["run_id"] == minted["run_id"]
+    assert "launcher exited during campaign startup" in data["error"]
+    _, status = patched(["collection-status"])
+    assert status["status"] == "failed"
+    assert status["run_id"] == minted["run_id"]
 
 
 def test_stats_exposes_last_collection(monkeypatch, tmp_path, patched):
@@ -493,6 +766,86 @@ def test_collection_sigterm_mid_campaign_records_cancelled(tmp_path):
         assert run is not None
         assert run["status"] == "cancelled", run["status"]
         assert run["error"]
+    finally:
+        if campaign.poll() is None:
+            campaign.kill()
+            campaign.wait()
+
+
+def test_collection_cancel_during_bootstrap_terminates_and_records_cancelled(
+    monkeypatch, tmp_path
+):
+    """A real Cancel issued while the campaign is still bootstrapping
+    (plan_collection running) must terminate the process and record `cancelled`
+    — the process is verified dead *before* the Store says `cancelled` (the
+    Collection cancellation contract), and the run never lingers as `running`."""
+    import os
+    import subprocess
+    import sys
+    import time
+    from pathlib import Path
+
+    if os.name == "nt":
+        pytest.skip("POSIX signals required")
+
+    src = str(Path(gui_bridge.__file__).resolve().parents[2] / "src")
+    db = tmp_path / "data" / "argus.db"
+    (tmp_path / "data").mkdir(exist_ok=True)
+
+    monkeypatch.setattr(gui_bridge, "STOP_GRACE_S", 0.3)
+    monkeypatch.setattr(gui_bridge, "STOP_KILL_S", 0.3)
+
+    fake_collector = (
+        "class SlowPlan:\n"
+        "    def __init__(self, **kw):\n"
+        "        self.store = kw['store']\n"
+        "    def plan_collection(self, **kw):\n"
+        "        import time as t\n"
+        "        t.sleep(30)  # still bootstrapping while a Cancel arrives\n"
+        "        return []\n"
+        "    def collect_campaign(self, **kw):\n"
+        "        return []\n"
+    )
+    campaign_code = (
+        "import sys;\n"
+        f"sys.path.insert(0, {src!r});\n"
+        f"{fake_collector}\n"
+        "from argus import gui_bridge;\n"
+        f"gui_bridge.ROOT = __import__('pathlib').Path({str(tmp_path)!r});\n"
+        "import argus.collector as collector_mod;\n"
+        "collector_mod.CentralBankCollector = SlowPlan;\n"
+        "gui_bridge.CentralBankCollector = SlowPlan;\n"
+        "sys.exit(gui_bridge.main(['collection-run', '--run-id', 'bootstrap-cancel']))"
+    )
+    env = dict(os.environ, PYTHONPATH=src)
+    campaign = subprocess.Popen(
+        [sys.executable, "-c", campaign_code, "argus.gui_bridge", "collection-run"], env=env
+    )
+    try:
+        pid = None
+        for _ in range(500):
+            store = gui_bridge.Store(db)
+            run = store.get_collection_run("bootstrap-cancel")
+            store.close()
+            if run is not None and run["status"] == "running":
+                pid = run["pid"]
+                break
+            time.sleep(0.02)
+        assert pid is not None, "campaign never recorded itself"
+        assert pid == campaign.pid, "the run must carry the campaign's real pid"
+
+        code, run = _run_main(tmp_path, ["collection-control", "stop", "bootstrap-cancel"])
+        assert code == 0, run
+        assert run["run_id"] == "bootstrap-cancel"
+        assert run["status"] == "cancelled", run
+        assert campaign.wait(5) is not None, "process must really be gone"
+        assert not gui_bridge._process_alive(campaign.pid)
+
+        store = gui_bridge.Store(db)
+        final = store.get_collection_run("bootstrap-cancel")
+        store.close()
+        assert final["status"] == "cancelled"
+        assert final["finished_at"]
     finally:
         if campaign.poll() is None:
             campaign.kill()

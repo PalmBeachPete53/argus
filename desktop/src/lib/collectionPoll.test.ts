@@ -22,7 +22,7 @@ function run(partial: Partial<CollectionRun> = {}): CollectionRun {
 }
 
 /** The optimistic run shown while waiting for the target to appear. */
-function startingDisplay(target: string): CollectionRun {
+function fallbackDisplay(target: string): CollectionRun {
   return run({ run_id: target, status: "running", publications_total: 0, publications_completed: 0 });
 }
 
@@ -39,7 +39,7 @@ describe("nextCollectionPollStep", () => {
       publications_completed: 283,
     });
 
-    const first = nextCollectionPollStep(target, true, oldCompleted, startingDisplay(target));
+    const first = nextCollectionPollStep(target, true, oldCompleted, fallbackDisplay(target));
     expect(first.keepPolling).toBe(true);
     expect(first.stopWaiting).toBe(false);
     expect(first.display.run_id).toBe(target); // optimistic, not the old run
@@ -54,7 +54,7 @@ describe("nextCollectionPollStep", () => {
       publications_total: 12,
       publications_completed: 0,
     });
-    const second = nextCollectionPollStep(target, true, newRunning, startingDisplay(target));
+    const second = nextCollectionPollStep(target, true, newRunning, fallbackDisplay(target));
     expect(second.keepPolling).toBe(true);
     expect(second.stopWaiting).toBe(true);
     expect(second.display).toBe(newRunning);
@@ -67,7 +67,7 @@ describe("nextCollectionPollStep", () => {
         target,
         false,
         run({ run_id: target, status: "running", publications_total: 12, publications_completed: c }),
-        startingDisplay(target),
+        fallbackDisplay(target),
       ),
     );
 
@@ -78,7 +78,7 @@ describe("nextCollectionPollStep", () => {
       target,
       false,
       run({ run_id: target, status: "completed", publications_total: 12, publications_completed: 12 }),
-      startingDisplay(target),
+      fallbackDisplay(target),
     );
     expect(completed.keepPolling).toBe(false);
     expect(completed.display.publications_completed).toBe(12);
@@ -91,7 +91,7 @@ describe("nextCollectionPollStep", () => {
       target,
       false,
       run({ run_id: target, status: "running", publications_total: 283, publications_completed: 12 }),
-      startingDisplay(target),
+      fallbackDisplay(target),
     );
     expect(running.keepPolling).toBe(true);
 
@@ -99,7 +99,7 @@ describe("nextCollectionPollStep", () => {
       target,
       false,
       run({ run_id: target, status: "cancelled", publications_total: 283, publications_completed: 12 }),
-      startingDisplay(target),
+      fallbackDisplay(target),
     );
     expect(cancelled.keepPolling).toBe(false);
     expect(cancelled.display.status).toBe("cancelled");
@@ -120,7 +120,7 @@ describe("nextCollectionPollStep", () => {
         publications_total: 283,
         publications_completed: 5,
       }),
-      startingDisplay(target),
+      fallbackDisplay(target),
     );
     expect(failed.keepPolling).toBe(false);
     expect(failed.display.status).toBe("failed");
@@ -137,7 +137,7 @@ describe("nextCollectionPollStep", () => {
         target,
         true,
         run({ run_id: "old", status: "cancelled", publications_total: 5, publications_completed: 2 }),
-        startingDisplay(target),
+        fallbackDisplay(target),
       );
       expect(step.keepPolling).toBe(true);
       expect(step.stopWaiting).toBe(false);
@@ -147,7 +147,7 @@ describe("nextCollectionPollStep", () => {
       target,
       true,
       run({ run_id: target, status: "running", publications_total: 10, publications_completed: 0 }),
-      startingDisplay(target),
+      fallbackDisplay(target),
     );
     expect(appears.stopWaiting).toBe(true);
     expect(appears.keepPolling).toBe(true);
@@ -161,14 +161,14 @@ describe("nextCollectionPollStep", () => {
       publications_total: 30,
       publications_completed: 3,
     });
-    const step = nextCollectionPollStep(null, false, active, startingDisplay(""));
+    const step = nextCollectionPollStep(null, false, active, fallbackDisplay(""));
     expect(step.keepPolling).toBe(true);
     expect(step.adoptTarget).toBe("bg");
     expect(step.display).toBe(active);
   });
 
   it("stops after a single read when idle and observing", () => {
-    const step = nextCollectionPollStep(null, false, run({ status: "idle" }), startingDisplay(""));
+    const step = nextCollectionPollStep(null, false, run({ status: "idle" }), fallbackDisplay(""));
     expect(step.keepPolling).toBe(false);
     expect(step.display.status).toBe("idle");
   });
@@ -178,24 +178,33 @@ describe("nextCollectionPollStep", () => {
       null,
       false,
       run({ run_id: "old", status: "completed", publications_total: 3, publications_completed: 3 }),
-      startingDisplay(""),
+      fallbackDisplay(""),
     );
     expect(completed.keepPolling).toBe(false);
     expect(completed.display.run_id).toBe("old");
   });
 
-  it("never ends the loop when following a target but observing a different run", () => {
+  it("never displays or adopts a foreign run when following an explicit target", () => {
     // Defensive: single-active backend makes this impossible, but if the status
     // reports a different (e.g. older) run while we follow another, the loop
-    // must keep polling and must not render the foreign run's terminal state.
+    // must keep polling for the followed run and must never render the foreign
+    // run's terminal state as the current campaign.
     const target = "mine";
+    const followedState = run({
+      run_id: target,
+      status: "running",
+      publications_total: 7,
+      publications_completed: 3,
+    });
     const step = nextCollectionPollStep(
       target,
       false,
       run({ run_id: "other", status: "completed", publications_total: 9, publications_completed: 9 }),
-      startingDisplay(target),
+      followedState,
     );
     expect(step.keepPolling).toBe(true);
-    expect(step.display.run_id).toBe("other");
+    expect(step.display.run_id).toBe("mine");
+    expect(step.display.publications_completed).toBe(3);
+    expect(step.adoptTarget).toBeNull();
   });
 });

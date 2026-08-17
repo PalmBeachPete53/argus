@@ -346,6 +346,14 @@ def _parse_date_arg(value: str, name: str) -> datetime:
 STOP_GRACE_S = 2.5
 STOP_KILL_S = 2.0
 
+# How long a Stop targeting an explicit ``run_id`` waits for a freshly-spawned
+# campaign to record itself (Rust returns the id to the frontend *before* the
+# detached subprocess has written its row). Kept as module constants so tests
+# can shorten them; this is a bounded backend synchronization with the launching
+# subprocess, never a frontend timeout.
+STOP_WAIT_STEP_S = 0.05
+STOP_WAIT_CYCLES = 60  # ~3s
+
 _ACTIVE_STATUSES = ("running", "paused")
 _TERMINAL_STATUSES = ("completed", "failed", "cancelled", "stopped")
 
@@ -1067,45 +1075,61 @@ def _run_collection_campaign(
     ``force`` re-collects documents of a selected publication even when already
     fetched; the optional ``date_*`` bounds narrow the publication-date window.
 
+    **Lifecycle-before-bootstrap.** The run is recorded (``start_collection_run``)
+    *before* the bootstrap phase (registry / collector construction,
+    ``plan_collection``) that can fail. A pre-minted ``run_id`` must never be
+    handed to a frontend that the Core cannot later show: once the run row
+    exists, any bootstrap exception is converted into ``failed`` (with an
+    explicit message) instead of letting the subprocess vanish silently.
+
+    ``publications_total`` is recorded with a provisional ``0`` and fixed to the
+    real plan's length immediately after ``plan_collection`` succeeds — the total
+    always equals the exact set of publications that will be submitted
+    (``collect_campaign`` re-fixes the same value before its workers start), and
+    a bootstrap failure never fabricates a bogus total.
+
     The campaign records its own PID with the run so the GUI's stop can signal
-    it; SIGTERM finalizes the run as ``cancelled`` (a deliberate stop, never
-    ``failed``). Like discovery, a *detached* campaign must never outlive Argus:
+    it; SIGTERM (a user stop, or the parent watchdog when the launching app is
+    gone) finalizes the run as ``cancelled`` — a deliberate stop, never
+    ``failed``. Like discovery, a *detached* campaign must never outlive Argus:
     the launcher-liveness guards and parent watchdog run here too.
     """
     stop_flag = [False]
     signal.signal(signal.SIGTERM, _collection_stop_flag_handler(stop_flag))
     detached = _launched_detached()
+    store = Store(store_path)
+    run_id = run_id or make_run_stamp()
+
     if detached and os.getppid() == 1:
         # The desktop app that spawned this campaign is already gone (reparented
         # to the init process). Never become an orphan doing work after Argus
-        # closed — refuse to start.
+        # closed — refuse to start, but keep the pre-minted identity observable:
+        # the Rust shell already returned `run_id` to the frontend, so the run
+        # must reach a terminal state (failed) instead of never existing.
+        store.start_collection_run(
+            run_id,
+            banks,
+            pid=os.getpid(),
+            force=force,
+            date_start=iso(date_start) if date_start else None,
+            date_end=iso(date_end) if date_end else None,
+            publications_total=0,
+        )
+        store.finish_collection_run(
+            run_id,
+            status="failed",
+            error="launcher exited during campaign startup",
+        )
         return {
-            "run_id": None,
+            "run_id": run_id,
             "status": "failed",
             "error": "launcher exited during campaign startup",
             "collected": 0,
         }
-    store = Store(store_path)
-    run_id = run_id or make_run_stamp()
-    registry = SourceRegistry()
-    collector = CentralBankCollector(
-        store=store,
-        registry=registry,
-        http_config=HttpConfig(respect_robots=True, min_interval=1.0),
-        raw_root=raw_root,
-        search_provider=_search_provider_from_env(),
-    )
-    # The campaign's *frozen plan*: computed once, recorded as the run's total,
-    # and handed to collect_campaign so the total always equals the exact set of
-    # publications that will be submitted — even if a concurrent Discovery adds
-    # or modifies publications while this campaign runs.
-    plan = collector.plan_collection(
-        banks=tuple(banks) if banks else None,
-        force=force,
-        date_start=date_start,
-        date_end=date_end,
-    )
-    publications_total = len(plan)
+
+    # Record the lifecycle *before* the bootstrap that can fail, so `run_id` is
+    # observable from the very first `collection-status` poll. The total is
+    # provisional (0) until the real plan is known.
     store.start_collection_run(
         run_id,
         banks,
@@ -1113,23 +1137,62 @@ def _run_collection_campaign(
         force=force,
         date_start=iso(date_start) if date_start else None,
         date_end=iso(date_end) if date_end else None,
-        publications_total=publications_total,
+        publications_total=0,
     )
     if detached and os.getppid() == 1:
         # The launcher vanished in the instant between the first check and the
-        # run being recorded — close the window by finalizing immediately.
+        # run being recorded — close the window by finalizing immediately. This
+        # is an error condition (the launching app died), never a voluntary
+        # cancellation.
         store.finish_collection_run(
             run_id,
-            status="cancelled",
+            status="failed",
             error="launcher exited during campaign startup",
         )
         return {
             "run_id": run_id,
-            "status": "cancelled",
+            "status": "failed",
             "error": "launcher exited during campaign startup",
             "collected": 0,
         }
     _start_parent_watchdog()
+
+    try:
+        registry = SourceRegistry()
+        collector = CentralBankCollector(
+            store=store,
+            registry=registry,
+            http_config=HttpConfig(respect_robots=True, min_interval=1.0),
+            raw_root=raw_root,
+            search_provider=_search_provider_from_env(),
+        )
+        # The campaign's *frozen plan*: computed once and handed to
+        # collect_campaign so the total always equals the exact set of
+        # publications that will be submitted — even if a concurrent Discovery
+        # adds or modifies publications while this campaign runs.
+        plan = collector.plan_collection(
+            banks=tuple(banks) if banks else None,
+            force=force,
+            date_start=date_start,
+            date_end=date_end,
+        )
+        if stop_flag[0]:
+            # A Cancel arrived during bootstrap (SIGTERM sets the flag between
+            # publications — there are none yet, so it is polled here).
+            raise CollectionStopped("stop requested during campaign startup")
+        # Fix the total to the real plan *before* submission (0 / N readable
+        # immediately; collect_campaign re-fixes the same value before its pool
+        # starts).
+        publications_total = len(plan)
+        store.set_collection_progress(run_id, completed=0, total=publications_total)
+    except CollectionStopped:
+        store.finish_collection_run(run_id, status="cancelled", error="cancelled by user")
+        return {"run_id": run_id, "status": "cancelled", "error": "cancelled by user", "collected": 0}
+    except Exception as exc:
+        message = f"{exc.__class__.__name__}: {exc}"
+        store.finish_collection_run(run_id, status="failed", error=message)
+        return {"run_id": run_id, "status": "failed", "error": message, "collected": 0}
+
     try:
         results = collector.collect_campaign(
             banks=tuple(banks) if banks else None,
@@ -1295,10 +1358,34 @@ def _cmd_collection_control(argv: list[str]) -> int:
         return 2
     run_id = argv[1] if len(argv) > 1 else None
     store = Store(_store_path())
-    run = store.get_collection_run(run_id) if run_id else store.latest_collection_run()
-    if run is None or run["status"] in ("idle", *_TERMINAL_STATUSES):
-        print(json.dumps({"error": f"no active collection campaign to {action}"}, indent=2))
-        return 1
+    if run_id:
+        run = store.get_collection_run(run_id)
+        if run is None:
+            # The campaign was just launched (the Rust shell returns the minted
+            # `run_id` to the frontend before the detached subprocess records
+            # it). Wait a bounded time for the row to appear so a Cancel issued
+            # during startup still addresses the real campaign — never a bogus
+            # "no active collection campaign to stop" for a run the GUI just
+            # launched.
+            for _ in range(STOP_WAIT_CYCLES):
+                time.sleep(STOP_WAIT_STEP_S)
+                run = store.get_collection_run(run_id)
+                if run is not None:
+                    break
+        if run is None:
+            print(json.dumps({"error": f"no collection campaign found for run {run_id}"}, indent=2))
+            return 1
+        if run["status"] in ("idle", *_TERMINAL_STATUSES):
+            # Already terminal (e.g. the bootstrap failed): there is nothing to
+            # stop — report the authoritative state so the frontend adopts it
+            # instead of showing an incoherent error.
+            print(json.dumps(run, indent=2))
+            return 0
+    else:
+        run = store.latest_collection_run()
+        if run is None or run["status"] in ("idle", *_TERMINAL_STATUSES):
+            print(json.dumps({"error": f"no active collection campaign to {action}"}, indent=2))
+            return 1
     pid = run.get("pid")
     if not pid:
         print(
