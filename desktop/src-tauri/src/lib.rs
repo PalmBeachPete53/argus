@@ -5,7 +5,7 @@
 //! reached by spawning `python -m argus.gui_bridge` (single source of truth).
 //! The bridge resolves and confines every path to the Argus `data/` directory.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
