@@ -176,6 +176,9 @@ def test_html_challenge_page_is_rejected(tmp_path):
 
 
 def test_html_for_declared_pdf_content_type_rejected(tmp_path):
+    """A `.pdf` URL answered with HTML — even when the server *declares*
+    application/pdf — is rejected: the URL asked for a binary document and the
+    bytes are HTML."""
     store, persisted, fetcher, result = _fetch_one(
         tmp_path,
         FakeSession({"https://x.test/p.pdf": response("<html><body>error</body></html>", url="https://x.test/p.pdf", content_type="application/pdf")}),
@@ -183,7 +186,8 @@ def test_html_for_declared_pdf_content_type_rejected(tmp_path):
     assert result.ok is False
     doc = store.get_document(persisted.id, "https://x.test/p.pdf")
     assert doc.status == DocumentStatus.FAILED
-    assert "declared binary media type" in doc.error
+    assert "HTML page returned for a binary document URL" in doc.error
+    assert store.get_publication(persisted.id).status == PublicationStatus.FAILED
 
 
 def test_octet_stream_with_valid_bytes_accepted(tmp_path):
@@ -197,6 +201,71 @@ def test_octet_stream_with_valid_bytes_accepted(tmp_path):
     doc = store.get_document(persisted.id, "https://x.test/p.pdf")
     assert doc.status == DocumentStatus.FETCHED
     assert store.get_publication(persisted.id).status == PublicationStatus.FETCHED
+
+
+def test_pdf_url_with_html_mime_generic_page_rejected(tmp_path):
+    """The exact problematic case: `https://.../statement.pdf` answered with
+    `Content-Type: text/html` and a generic HTML body. Previously the MIME
+    classified the response as `html` and (without challenge markers) it could
+    be persisted; now the URL's document extension is authoritative and the
+    response is rejected."""
+    store, persisted, fetcher, result = _fetch_one(
+        tmp_path,
+        FakeSession({"https://x.test/statement.pdf": response("<html><body>This is an error page, not a document.</body></html>", url="https://x.test/statement.pdf", content_type="text/html")}),
+    )
+    assert result.ok is False
+    doc = store.get_document(persisted.id, "https://x.test/statement.pdf")
+    assert doc.status == DocumentStatus.FAILED
+    assert "HTML page returned for a binary document URL" in doc.error
+    assert store.get_publication(persisted.id).status == PublicationStatus.FAILED
+    assert doc.local_path is None
+
+
+def test_extensionless_url_with_pdf_mime_accepted(tmp_path):
+    """A document without a file extension, served with a valid PDF MIME and
+    genuine PDF bytes, is accepted and classified as a PDF (MIME classifies
+    extensionless URLs)."""
+    store, persisted, fetcher, result = _fetch_one(
+        tmp_path,
+        FakeSession({"https://x.test/download": response(b"%PDF-1.4 real", url="https://x.test/download", content_type="application/pdf")}),
+    )
+    assert result.ok is True
+    doc = store.get_document(persisted.id, "https://x.test/download")
+    assert doc.status == DocumentStatus.FETCHED
+    assert doc.kind == "pdf"
+    assert store.get_publication(persisted.id).status == PublicationStatus.FETCHED
+
+
+def test_pdf_url_with_html_mime_real_pdf_stored_as_pdf(tmp_path):
+    """A `.pdf` URL answered with genuine PDF bytes even under a sloppy
+    `text/html` Content-Type is accepted and stored as a PDF — the URL is
+    authoritative for classification, never re-classified as HTML."""
+    store, persisted, fetcher, result = _fetch_one(
+        tmp_path,
+        FakeSession({"https://x.test/p.pdf": response(b"%PDF-1.4 real", url="https://x.test/p.pdf", content_type="text/html")}),
+    )
+    assert result.ok is True
+    doc = store.get_document(persisted.id, "https://x.test/p.pdf")
+    assert doc.status == DocumentStatus.FETCHED
+    assert doc.kind == "pdf"
+    assert store.get_publication(persisted.id).status == PublicationStatus.FETCHED
+
+
+@pytest.mark.parametrize("ext", [".doc", ".docx", ".xls", ".xlsx", ".zip", ".csv"])
+def test_binary_document_url_with_html_body_rejected(tmp_path, ext):
+    """A URL that clearly asks for a binary document (doc/docx/xls/xlsx/zip/csv)
+    answered with HTML — generic or challenge — is rejected even when the server
+    declares `text/html` (the old behaviour could have stored it as HTML)."""
+    store, persisted, fetcher, result = _fetch_one(
+        tmp_path,
+        FakeSession({f"https://x.test/file{ext}": response("<html><body>not a document</body></html>", url=f"https://x.test/file{ext}", content_type="text/html")}),
+    )
+    assert result.ok is False
+    doc = store.get_document(persisted.id, f"https://x.test/file{ext}")
+    assert doc.status == DocumentStatus.FAILED
+    assert "InvalidDocumentContent" in doc.error
+    assert store.get_publication(persisted.id).status == PublicationStatus.FAILED
+    assert doc.local_path is None
 
 
 def test_valid_html_landing_page_accepted(tmp_path):
@@ -267,3 +336,89 @@ def test_atomic_write_failure_cleans_temp_and_no_document_row(tmp_path):
     # nothing persisted for the failed target, no temp files anywhere
     assert store.document_count(persisted.id) == 0
     assert not list((tmp_path / "raw").rglob("*.tmp"))
+
+
+# ---------------------------------------------------------------------------
+# `retries` convention (🔴 audit finding #2): total-attempt counter
+# ---------------------------------------------------------------------------
+
+def test_retries_counts_total_attempts_including_first_success(tmp_path):
+    """`retries` is a *total attempt* counter: a document fetched successfully
+    on the first attempt records retries == 1 (the initial attempt counts, not
+    only the retries after it). This is the documented convention the future
+    parallel Collection must preserve."""
+    store = make_store(tmp_path)
+    persisted = store.upsert_publication(pub())
+    session = FakeSession(routes())
+    fetcher = Fetcher(make_client(session), store, tmp_path / "raw")
+    result = fetcher.fetch(persisted)
+    for d in result.documents:
+        assert d.retries == 1, f"{d.url}: expected a single first attempt, got retries={d.retries}"
+
+
+def test_retries_increments_on_each_failed_attempt(tmp_path):
+    """A FAILED document increments `retries` on every actual re-fetch, so the
+    counter reflects how many times the URL was really attempted."""
+    store = make_store(tmp_path)
+    persisted = store.upsert_publication(pub())
+    pdf = "https://x.test/files/report.pdf"
+    session = FakeSession({
+        "https://x.test/monetarypolicy/statement.htm": response(page_html(), url="https://x.test/monetarypolicy/statement.htm"),
+        pdf: TransportError(pdf, "boom"),
+        "https://x.test/files/data.xlsx": response(b"PK", url="https://x.test/files/data.xlsx", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    })
+    fetcher = Fetcher(make_client(session), store, tmp_path / "raw")
+
+    fetcher.fetch(persisted)
+    assert store.get_document(persisted.id, pdf).retries == 1
+    fetcher.fetch(persisted)
+    assert store.get_document(persisted.id, pdf).retries == 2
+    fetcher.fetch(persisted)
+    assert store.get_document(persisted.id, pdf).retries == 3
+
+
+def test_retries_cap_stops_reattempting_failed_document(tmp_path):
+    """Once `retries` reaches `max_retries`, the Fetcher returns the existing
+    FAILED document without any further network call — a permanently failing
+    document is not hammered forever."""
+    from argus.http import HttpConfig
+
+    store = make_store(tmp_path)
+    the_pub = pub()
+    the_pub.document_urls = ("https://x.test/files/report.pdf",)
+    persisted = store.upsert_publication(the_pub)
+    pdf = "https://x.test/files/report.pdf"
+    session = FakeSession({pdf: TransportError(pdf, "boom")})
+    # Single-attempt HTTP client (max_retries=0) so the *Fetcher*'s own cap is
+    # what limits the number of network calls, not the HTTP retry layer.
+    client = make_client(session)
+    client.config = HttpConfig(respect_robots=False, min_interval=0.0, max_retries=0, jitter=0.0)
+    fetcher = Fetcher(client, store, tmp_path / "raw", max_retries=3)
+
+    for _ in range(4):  # one Fetcher attempt per pass; the 4th must not hit the network
+        fetcher.fetch(persisted)
+    calls_for_pdf = sum(1 for c in session.calls if c == pdf)
+    assert calls_for_pdf == 3  # exactly 3 attempts, then the cap kicks in
+    assert store.get_document(persisted.id, pdf).retries == 3
+
+
+def test_retries_increments_when_repair_succeeds(tmp_path):
+    """A document that fails then succeeds records the cumulative attempt count
+    (failures + the successful re-fetch)."""
+    store = make_store(tmp_path)
+    persisted = store.upsert_publication(pub())
+    pdf = "https://x.test/files/report.pdf"
+    session = FakeSession({
+        "https://x.test/monetarypolicy/statement.htm": response(page_html(), url="https://x.test/monetarypolicy/statement.htm"),
+        pdf: TransportError(pdf, "boom"),
+        "https://x.test/files/data.xlsx": response(b"PK", url="https://x.test/files/data.xlsx", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    })
+    fetcher = Fetcher(make_client(session), store, tmp_path / "raw")
+    fetcher.fetch(persisted)
+    assert store.get_document(persisted.id, pdf).status == DocumentStatus.FAILED
+
+    session.routes[pdf] = response(b"%PDF-1.4 healed", url=pdf, content_type="application/pdf")
+    fetcher.fetch(persisted)
+    doc = store.get_document(persisted.id, pdf)
+    assert doc.status == DocumentStatus.FETCHED
+    assert doc.retries == 2  # 1 failed attempt + 1 successful re-fetch

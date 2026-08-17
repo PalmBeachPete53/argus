@@ -185,3 +185,62 @@ def test_repair_respects_retry_cap(tmp_path):
     doc = store.get_document(pub_id, PAGE_URL)
     assert doc.status == DocumentStatus.FAILED
     assert doc.retries >= collector.fetcher.max_retries
+
+
+def test_invalid_content_failed_document_is_retried_and_repaired(tmp_path):
+    """A document rejected by InvalidDocumentContent (generic HTML for a PDF URL)
+    becomes FAILED → the publication FAILED → the next collection pass selects
+    it for repair → a healed response turns it FETCHED, with no raw file ever
+    written for the rejected body and no duplicate document row."""
+    session = FakeSession({
+        PDF_URL: response("<html><body>generic error page</body></html>", url=PDF_URL, content_type="text/html"),
+    })
+    collector, store = _build(tmp_path, session, lambda: _pub(document_urls=(PDF_URL,)))
+    pub_id = _pub_lock(store)
+
+    results = collector.fetch_all()
+    assert len(results) == 1
+    assert results[0].ok is False
+    pub = store.get_publication(pub_id)
+    assert pub.status == PublicationStatus.FAILED
+    doc = store.get_document(pub_id, PDF_URL)
+    assert doc.status == DocumentStatus.FAILED
+    assert "InvalidDocumentContent" in doc.error
+    assert doc.local_path is None  # never persisted as a raw file
+    assert store.document_count(pub_id) == 1
+
+    # The next collection pass re-selects the FAILED publication and retries.
+    session.routes[PDF_URL] = response(b"%PDF-1.4 healed", url=PDF_URL, content_type="application/pdf")
+    results2 = collector.fetch_all()
+    assert len(results2) == 1
+    assert results2[0].ok is True
+    healed = store.get_document(pub_id, PDF_URL)
+    assert healed.status == DocumentStatus.FETCHED
+    assert healed.local_path is not None
+    assert store.get_publication(pub_id).status == PublicationStatus.FETCHED
+    assert store.document_count(pub_id) == 1  # no duplication
+
+
+def test_invalid_content_partial_publication_is_retried(tmp_path):
+    """A publication with one valid document and one content-rejected document
+    becomes PARTIAL; the next pass retries only the rejected document (the
+    valid one is not re-downloaded)."""
+    page = "https://x.test/ok.htm"
+    session = FakeSession({
+        page: response("<html><body>ok</body></html>", url=page),
+        PDF_URL: response("<html><body>error page</body></html>", url=PDF_URL, content_type="text/html"),
+    })
+    collector, store = _build(tmp_path, session, lambda: _pub(document_urls=(page, PDF_URL)))
+    pub_id = _pub_lock(store)
+
+    collector.fetch_all()
+    assert store.get_publication(pub_id).status == PublicationStatus.PARTIAL
+    assert store.get_document(pub_id, PDF_URL).status == DocumentStatus.FAILED
+
+    calls_before = len(session.calls)
+    session.routes[PDF_URL] = response(b"%PDF-1.4 healed", url=PDF_URL, content_type="application/pdf")
+    collector.fetch_all()
+    assert store.get_publication(pub_id).status == PublicationStatus.FETCHED
+    # only the PDF was re-attempted; the already-FETCHED page was skipped
+    assert len(session.calls) == calls_before + 1
+    assert store.document_count(pub_id) == 2

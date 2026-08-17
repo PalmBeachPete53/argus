@@ -106,6 +106,14 @@ class Document:
     content_type: str | None = None
     size: int | None = None
     retrieved_at: datetime | None = None
+    # Number of total fetch attempts for this document URL (1 on the first
+    # attempt, incremented on every *actual* re-fetch — successful or failed —
+    # and not incremented when an already-FETCHED document is skipped). The
+    # Fetcher stops re-attempting a FAILED document once `retries` reaches
+    # `max_retries`. This convention is load-bearing for the retry/repair
+    # contract and is locked by tests (see tests/test_fetcher.py and
+    # tests/test_collection_retry.py) — a future parallel Collection must not
+    # change it.
     retries: int = 0
     error: str | None = None
     id: int | None = None

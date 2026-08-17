@@ -25,6 +25,35 @@ DEFAULT_RAW_ROOT = "data/raw"
 DISCOVERY_WORKERS = 6
 _WORKERS_ENV = "ARGUS_DISCOVERY_WORKERS"
 
+# Bounded collection worker pool: at most this many *publications* are collected
+# simultaneously. Collection is network/I-O bound, so a handful of threads
+# saturates it. The Store stays a single SQLite connection: workers only do
+# network + raw-file work and every Store mutation happens on the caller's
+# serialized writer. Configurable per process via ARGUS_COLLECTION_WORKERS (a
+# future GUI setting can reuse the same hook).
+COLLECTION_WORKERS = 6
+_COLLECTION_WORKERS_ENV = "ARGUS_COLLECTION_WORKERS"
+
+
+def _worker_pool_size() -> int:
+    raw = os.environ.get(_WORKERS_ENV, "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return DISCOVERY_WORKERS
+
+
+def _collection_worker_pool_size() -> int:
+    """The bounded collection pool size, configurable via ``ARGUS_COLLECTION_WORKERS``.
+
+    Mirrors :func:`_worker_pool_size`: a positive integer override wins, any
+    invalid / non-positive / missing value falls back to ``COLLECTION_WORKERS``.
+    The pool is always bounded — never an unbounded thread count.
+    """
+    raw = os.environ.get(_COLLECTION_WORKERS_ENV, "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return COLLECTION_WORKERS
+
 # The statuses a collection campaign considers "needs work" and therefore
 # selects by default. This is the self-repair contract:
 #
@@ -75,10 +104,28 @@ class CollectionStopped(Exception):
 
     Mirrors the Discovery lifecycle: SIGTERM is a normal lifecycle control,
     never a "failed" signal — the campaign finalizes itself as ``cancelled`` so
-    the GUI shows exactly what happened. Collection is sequential in this phase,
-    so the exception is raised on the campaign's single thread between
-    publications.
+    the GUI shows exactly what happened. With a parallel pool, the stop is
+    polled on the campaign's main thread (the only thread allowed to touch the
+    Store); in-flight workers may be interrupted at the process level as
+    before.
     """
+
+
+@dataclass
+class _CollectionWorkerResult:
+    """What one collection worker produced for one publication — never the Store.
+
+    The worker only performs the network fetch, content validation and atomic
+    raw-file writes; this result carries the documents to persist and the
+    computed status. The scheduler (main thread) applies every Store mutation
+    serially through ``persist`` / ``collect_errors``, exactly like discovery's
+    ``_SourceDiscoveryResult``.
+    """
+
+    publication: models.Publication
+    fetch_result: FetchResult | None = None
+    status: models.PublicationStatus | None = None
+    error: Exception | None = None
 
 
 def in_bounds(pub, start, end) -> bool:
@@ -122,6 +169,7 @@ class CentralBankCollector:
         self._injected_client = client is not None
         self._http_config = http_config
         self.client = client or HttpClient(http_config)
+        self._injected_fetcher = fetcher is not None
         self.fetcher = fetcher or Fetcher(
             self.client,
             self.store,
@@ -140,6 +188,27 @@ class CentralBankCollector:
         if self._injected_client:
             return self.client
         return HttpClient(self._http_config)
+
+    def _new_fetcher(self, client: HttpClient) -> Fetcher:
+        """A Fetcher bound to one worker's client (own session / rate limiter).
+
+        Collection workers never touch the Store, so the per-worker Fetcher is
+        built with the real store reference but only its network/raw-file path
+        (``collect``) is ever called; every Store mutation stays on the
+        scheduler thread via :meth:`_apply_collection_result`. An injected
+        fetcher is the test double, shared.
+        """
+        if self._injected_fetcher:
+            return self.fetcher
+        f = self.fetcher
+        return Fetcher(
+            client,
+            self.store,
+            f.raw_root,
+            page_doc_extraction=f.page_doc_extraction,
+            max_page_documents=f.max_page_documents,
+            max_retries=f.max_retries,
+        )
 
     def _sync_sources(self) -> None:
         for source in self.registry.sources:
@@ -388,26 +457,34 @@ class CentralBankCollector:
         progress: Callable[[int, int], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
     ) -> list[FetchResult]:
-        """Run one **sequential** collection campaign over the selected
-        publications.
+        """Run a **parallel** collection campaign over the selected publications.
 
-        This is the lifecycle-aware counterpart of :meth:`fetch_all`, mirroring
+        The lifecycle-aware counterpart of :meth:`fetch_all`, mirroring
         :meth:`discover_all`: the campaign owns a ``run_id``, fixes its scope
-        (``plan_collection``) before the loop starts, and reports progression
-        through the store's ``collection_runs`` row via the same serialized
-        writer. Collection is strictly sequential in this phase — no worker pool.
-        That is deliberate: the future parallel scheduler will split the
-        *network* work across workers while every Store mutation stays on this
-        serialized writer (a single SQLite connection, not thread-safe).
+        (``plan_collection``) before the pool starts, and reports progression
+        through the store's ``collection_runs`` row via the serialized writer.
 
-        ``should_stop`` is polled before each publication; when it returns True
-        (or a SIGTERM arrives and raises :class:`CollectionStopped`), the
-        campaign aborts — the caller (the bridge) finalizes the run as
-        ``cancelled``. ``progress(completed, total)`` is called as each
-        publication actually finishes; ``completed``/``total`` are publication
-        counts, and a failing publication still counts as one completed step.
+        Publications are collected by a **bounded pool of workers**
+        (``COLLECTION_WORKERS`` / ``ARGUS_COLLECTION_WORKERS``) — one worker per
+        publication. Workers only perform the network fetch, content validation
+        and atomic raw-file writes; every Store mutation (``upsert_document``,
+        ``set_publication_status``, ``collect_errors``, progress) happens here,
+        serially, on the caller's thread, because the Store owns a single SQLite
+        connection and is not thread-safe.
 
-        Returns the per-publication ``FetchResult`` list in selection order.
+        ``progress(completed, total)`` fires on the caller's thread in **real
+        completion order** (``as_completed``), so a slow publication never
+        stalls the progress of already-finished ones. ``completed`` /
+        ``total`` are publication counts, and a failing publication still counts
+        as one completed step. ``should_stop`` is polled before submissions and
+        after each completion; when it returns True (or a SIGTERM raises
+        :class:`CollectionStopped`), the pool is shut down without waiting for
+        the remaining publications and the campaign aborts — the caller (the
+        bridge) finalizes the run as ``cancelled``, never fabricating
+        ``completed == total``.
+
+        Returns the per-publication ``FetchResult`` list in **selection order**
+        (a worker that failed before producing a result is logged but absent).
         """
         run_id = run_id or self.store.run_stamp()
         publications = self.plan_collection(
@@ -417,40 +494,135 @@ class CentralBankCollector:
         if run_id:
             self.store.set_collection_progress(run_id, completed=0, total=total)
 
-        def _on_progress(completed: int) -> None:
-            # Always on the campaign's own thread (sequential): the same thread
-            # that owns the serialized Store writes.
+        def _on_progress(completed: int, campaign_total: int) -> None:
+            # Always on the campaign's own thread: the same thread that owns the
+            # serialized Store writes.
             if run_id:
-                self.store.set_collection_progress(run_id, completed=completed, total=total)
+                self.store.set_collection_progress(run_id, completed=completed, total=campaign_total)
             if progress is not None:
-                progress(completed, total)
+                progress(completed, campaign_total)
 
-        results: list[FetchResult] = []
-        completed = 0
-        for index, publication in enumerate(publications):
-            if should_stop is not None and should_stop():
-                raise CollectionStopped("collection cancelled by user")
-            try:
-                result = self.fetcher.fetch(publication, force=force)
-                results.append(result)
-            except CollectionStopped:
-                raise
-            except Exception as exc:
-                error = CollectError(
-                    bank_id=publication.central_bank,
-                    source_id=publication.source_id,
-                    strategy="fetch",
-                    url=publication.url,
-                    error_type=exc.__class__.__name__,
-                    message=str(exc),
-                    status_code=getattr(exc, "status_code", None),
-                    run_id=run_id,
+        return self._run_collection(
+            publications,
+            force=force,
+            run_id=run_id,
+            progress=_on_progress,
+            should_stop=should_stop,
+        )
+
+    def _collect_publication_worker(
+        self,
+        publication: models.Publication,
+        existing_by_url: dict,
+        force: bool,
+    ) -> _CollectionWorkerResult:
+        """Collect **one arbitrary publication** (never bank- or source-specific).
+
+        Pure network/raw-file work: this must not touch the Store. Any error is
+        isolated into the result so a failing publication cannot kill the other
+        workers. ``existing_by_url`` is the snapshot of the publication's stored
+        documents taken by the scheduler (the serialized writer) before
+        submission — it is read here, never written.
+        """
+        fetcher = self._new_fetcher(self._new_client())
+        try:
+            fetch_result, status = fetcher.collect(publication, existing_by_url, force=force)
+            return _CollectionWorkerResult(
+                publication=publication,
+                fetch_result=fetch_result,
+                status=status,
+            )
+        except CollectionStopped:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive isolation
+            return _CollectionWorkerResult(
+                publication=publication,
+                error=exc,
+            )
+
+    def _apply_collection_result(self, worker_result: _CollectionWorkerResult, run_id: str) -> None:
+        """Serialized Store writes for one worker's result (never in a worker)."""
+        publication = worker_result.publication
+        if worker_result.error is not None:
+            exc = worker_result.error
+            error = CollectError(
+                bank_id=publication.central_bank,
+                source_id=publication.source_id,
+                strategy="fetch",
+                url=publication.url,
+                error_type=exc.__class__.__name__,
+                message=str(exc),
+                status_code=getattr(exc, "status_code", None),
+                run_id=run_id,
+            )
+            self.store.log_error(error)
+            self.errors.append(error)
+            return
+        fetch_result = worker_result.fetch_result
+        if fetch_result is not None:
+            self.fetcher.persist(publication.id or "", fetch_result.documents, worker_result.status)
+
+    def _run_collection(
+        self,
+        publications: list[models.Publication],
+        *,
+        force: bool,
+        run_id: str,
+        progress: Callable[[int, int], None] | None,
+        should_stop: Callable[[], bool] | None,
+    ) -> list[FetchResult]:
+        """Run the bounded worker pool over ``publications``.
+
+        Progress and results are decoupled on purpose, exactly like discovery:
+
+        * ``progress(completed, total)`` is invoked on the caller's thread as
+          soon as each worker *really* finishes (``as_completed``), so the
+          remontée of progress follows the real completion order and a slow
+          publication can never stall the progress of publications already done;
+        * the returned results keep the publication *submission* order, so the
+          serialized Store writes (and the logical result order / dedup) are
+          unchanged by the completion order.
+
+        A stop request (``CollectionStopped`` raised on the main thread by the
+        stop poll or SIGTERM handler) shuts the pool down without waiting for
+        in-flight workers and propagates — the campaign lifecycle (Stop / app
+        close) must never wait for a stuck worker, and never fabricate a
+        ``progress(total, total)`` for interrupted work.
+        """
+        if not publications:
+            return []
+        executor = ThreadPoolExecutor(max_workers=_collection_worker_pool_size())
+        total = len(publications)
+        try:
+            future_to_index: dict = {}
+            for index, publication in enumerate(publications):
+                if should_stop is not None and should_stop():
+                    raise CollectionStopped("collection cancelled by user")
+                existing_by_url = {d.url: d for d in self.store.list_documents(publication.id or "")}
+                future = executor.submit(
+                    self._collect_publication_worker, publication, existing_by_url, force
                 )
-                self.store.log_error(error)
-                self.errors.append(error)
-            completed += 1
-            _on_progress(completed)
-        return results
+                future_to_index[future] = index
+            results: list[FetchResult | None] = [None] * total
+            completed = 0
+            for future in as_completed(future_to_index):
+                if should_stop is not None and should_stop():
+                    raise CollectionStopped("collection cancelled by user")
+                # The worker isolates every Exception; a BaseException escaping
+                # it propagates here and shuts the pool down (never counted as a
+                # successful completion).
+                worker_result = future.result()
+                self._apply_collection_result(worker_result, run_id)
+                if worker_result.fetch_result is not None:
+                    results[future_to_index[future]] = worker_result.fetch_result
+                completed += 1
+                if progress is not None:
+                    progress(completed, total)
+        except BaseException:
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        executor.shutdown(wait=True)
+        return [result for result in results if result is not None]
 
     def fetch_all(
         self,

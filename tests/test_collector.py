@@ -367,8 +367,11 @@ def test_collect_campaign_records_progress_and_persists_run(tmp_path, fixture_by
 
 def test_collect_campaign_stop_raises_collection_stopped(tmp_path, fixture_bytes):
     """A stop request aborts the campaign mid-flight: CollectionStopped is
-    raised, nothing past the stop point is collected, and the caller finalizes
-    the run as cancelled (nothing is fabricated to look completed)."""
+    raised, the pool is shut down without waiting for the remaining
+    publications, and the caller finalizes the run as cancelled (nothing is
+    fabricated to look completed). With the parallel pool the stop poll may
+    fire during submission or between completions, so progress is *partial* —
+    strictly below the total, never equal to it."""
     from argus.collector import CollectionStopped
 
     session = FakeSession({
@@ -391,13 +394,13 @@ def test_collect_campaign_stop_raises_collection_stopped(tmp_path, fixture_bytes
 
     def should_stop():
         stop_after["n"] += 1
-        return stop_after["n"] >= 2  # stop before the second publication
+        return stop_after["n"] >= 2  # stop once the first poll returns True
 
     with pytest.raises(CollectionStopped):
         collector.collect_campaign(run_id="col-stop", should_stop=should_stop)
 
     run = store.get_collection_run("col-stop")
     assert run["status"] == "running"  # the runner raises; the bridge finalizes
-    assert run["publications_completed"] == 1
-    # exactly one publication was actually fetched
-    assert len(store.list_documents(store.list_publications()[0].id)) == 1
+    # progress is partial — never fabricated to the total
+    assert run["publications_completed"] < run["publications_total"]
+    assert run["publications_total"] == 2

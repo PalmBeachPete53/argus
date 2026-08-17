@@ -59,12 +59,20 @@ def _kind_from_url(url: str) -> str:
 
 
 def _kind_and_ext(url: str, content_type: str | None) -> tuple[str, str]:
+    # A known URL extension is the strongest signal about what kind of document
+    # was requested: a `.pdf` URL answered with `text/html` (or any imprecise
+    # MIME) is still a PDF request — validation will reject it if the bytes are
+    # not a real document, and a genuine PDF served under a sloppy MIME must be
+    # stored as a PDF, never re-classified as HTML. MIME only classifies URLs
+    # without a document extension.
+    url_kind = _kind_from_url(url)
+    if url_kind != "html":
+        return url_kind, _KIND_EXT.get(url_kind, ".bin")
     if content_type:
         media = content_type.split(";", 1)[0].strip().lower()
         if media in _MIME_TO_KIND_EXT:
             return _MIME_TO_KIND_EXT[media]
-    kind = _kind_from_url(url)
-    return kind, _KIND_EXT.get(kind, ".bin")
+    return "html", ".html"
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -89,6 +97,12 @@ _CHALLENGE_MARKERS = (
     "ddos protection",
 )
 
+# URL extensions that unambiguously identify a *binary document* request. When
+# such a URL is requested and the server answers with HTML, the response is a
+# manifest incompatibility (generic error page, bot wall, or wrapper) — the
+# requested document is never HTML, whatever the declared MIME says.
+_BINARY_DOCUMENT_URL_KINDS = frozenset(("pdf", "doc", "docx", "xls", "xlsx", "csv", "zip"))
+
 # Media types that promise a *binary document* (PDF, OOXML, legacy Office):
 # receiving HTML bytes under one of these is a manifest contradiction — either
 # a bot page, a server error page, or a misconfigured endpoint.
@@ -105,24 +119,52 @@ _BINARY_DOCUMENT_MEDIA = (
 def _validate_content(url: str, kind: str, content_type: str | None, body: bytes) -> None:
     """Minimal (conservative) content sanity check before a document is stored.
 
-    A response passing this check is *not* guaranteed to be a valid document;
-    the check only rejects the clear-cut failures: an empty body, a bot/challenge
-    page served in place of a document, and a declared binary document whose
-    bytes are actually HTML. It never rejects a valid response just because the
-    server used an imprecise MIME. Raises :class:`InvalidDocumentContent`.
+    The whole available context is used to decide: the **URL extension** (what
+    kind of document was actually requested), the declared ``Content-Type``, the
+    MIME-derived ``kind``, and the received bytes. Only *manifest*
+    incompatibilities are rejected:
+
+    - an empty body (``200`` with no content);
+    - a bot / challenge page (markers in an HTML body), whatever the URL;
+    - an HTML body when the **URL** clearly asks for a binary document
+      (``.pdf/.doc/.docx/.xls/.xlsx/.csv/.zip``) — a generic error page, a bot
+      wall or a wrapper, never the requested document, even when the server
+      declared ``text/html``;
+    - an HTML body when a **binary document MIME** is declared (an extensionless
+      URL can only be classified through its ``Content-Type``).
+
+    A valid response is never rejected just because its MIME is imprecise: a
+    real PDF served as ``application/octet-stream`` (or any binary URL whose
+    body is genuine binary content) passes. A real HTML publication page is
+    always accepted as HTML. Raises :class:`InvalidDocumentContent`.
     """
     if not body:
         raise InvalidDocumentContent(url, kind, "empty body (HTTP 200 with no content)")
     media = (content_type or "").split(";", 1)[0].strip().lower()
-    head = body[:8192].lower()
-    is_html_bytes = head.lstrip().startswith(b"<")
-    if is_html_bytes and any(marker in head.decode("utf-8", errors="replace") for marker in _CHALLENGE_MARKERS):
+    url_kind = _kind_from_url(url)
+    head = body[:8192].lstrip()
+    is_html_bytes = head.startswith(b"<")
+
+    # A bot / challenge page is never the document, whatever the URL or MIME.
+    if is_html_bytes and any(
+        marker in head.decode("utf-8", errors="replace").lower() for marker in _CHALLENGE_MARKERS
+    ):
         raise InvalidDocumentContent(url, kind, "HTML challenge / bot page returned instead of the document")
-    if kind != "html" and is_html_bytes and media in _BINARY_DOCUMENT_MEDIA:
+
+    if url_kind in _BINARY_DOCUMENT_URL_KINDS:
+        # The URL unambiguously asked for a binary document; an HTML answer is a
+        # manifest mismatch (generic error page, bot wall or wrapper). Even a
+        # `text/html` Content-Type does not legitimise it.
+        if is_html_bytes:
+            raise InvalidDocumentContent(url, kind, "HTML page returned for a binary document URL")
+        return  # genuine binary content (any MIME) is accepted
+
+    # No binary extension on the URL: the declared MIME is the only signal left.
+    if is_html_bytes and media in _BINARY_DOCUMENT_MEDIA:
         # The server promised a binary document but delivered HTML — a server
-        # error page, a bot wall, or a misconfigured Content-Type. Rejecting
-        # keeps such a response from being stored as a "fetched" document.
+        # error page, a bot wall, or a misconfigured Content-Type.
         raise InvalidDocumentContent(url, kind, f"HTML body received with declared binary media type {media!r}")
+    # Otherwise: a real HTML publication page → accepted.
 
 
 class Fetcher:
@@ -143,40 +185,86 @@ class Fetcher:
         self.max_page_documents = max_page_documents
         self.max_retries = max_retries
 
-    def fetch(self, publication: Publication, *, force: bool = False) -> FetchResult:
-        if publication.id is None:
-            persisted = self.store.upsert_publication(publication)
-            publication = persisted
+    def collect(self, publication: Publication, existing_by_url: dict, *, force: bool = False) -> tuple[FetchResult, PublicationStatus | None]:
+        """Collect one publication: **network + raw-file work only, no Store**.
+
+        This is the unit of parallelism. ``existing_by_url`` is a *snapshot* of
+        the publication's currently stored documents (``{url: Document}``) taken
+        by the caller (the serialized writer) before this method runs — it is
+        the only Store-derived input, and it is read, never written, here. The
+        method performs the HTTP downloads, content validation and atomic raw
+        writes, and returns:
+
+        * the ``FetchResult`` carrying the documents to persist (including
+          already-FETCHED documents returned as-is when they were skipped);
+        * the publication's final status computed from the snapshot + this
+          pass's documents.
+
+        No SQLite connection is ever touched: the caller applies the result to
+        the Store serially (see :meth:`persist` / ``CentralBankCollector``).
+        """
         targets = list(publication.document_urls) or ([publication.url] if publication.url else [])
         if not targets:
-            return FetchResult(publication_id=publication.id or "", documents=[], ok=False, error="no fetch target")
+            return (
+                FetchResult(publication_id=publication.id or "", documents=[], ok=False, error="no fetch target"),
+                None,
+            )
 
         fetched: list[Document] = []
         extracted_urls: set[str] = set(targets)
         for url in targets:
-            result = self._fetch_target(publication, url, force=force)
+            result = self._fetch_target(publication, url, existing=existing_by_url.get(url), force=force)
             if result is None:
                 continue
             fetched.append(result)
             if self.page_doc_extraction and result.status == DocumentStatus.FETCHED and result.kind == "html":
-                linked = self._extract_linked(publication, result, force=force, already=extracted_urls)
+                linked = self._extract_linked(publication, result, existing_by_url, force=force, already=extracted_urls)
                 fetched.extend(linked)
+        merged = dict(existing_by_url)
         for document in fetched:
-            self.store.upsert_document(document)
-        status = self._compute_status(publication.id or "", fetched)
-        if status is not None:
-            self.store.set_publication_status(publication.id, status)
+            merged[document.url] = document
+        status = self._compute_status(merged)
         failed = [d.url for d in fetched if d.status == DocumentStatus.FAILED]
         ok = bool(fetched) and len(failed) == 0
-        return FetchResult(
-            publication_id=publication.id or "",
-            documents=fetched,
-            ok=ok,
-            failed_urls=failed,
+        return (
+            FetchResult(
+                publication_id=publication.id or "",
+                documents=fetched,
+                ok=ok,
+                failed_urls=failed,
+            ),
+            status,
         )
 
-    def _fetch_target(self, publication: Publication, url: str, *, force: bool) -> Document | None:
-        existing = self.store.get_document(publication.id or "", url)
+    def persist(self, publication_id: str, documents: list[Document], status: PublicationStatus | None) -> None:
+        """Apply a ``collect`` result to the Store — serialized writer only.
+
+        Every Store mutation for one publication happens here (and only here),
+        so a parallel scheduler can call this from a single writer thread while
+        workers only ever call :meth:`collect`.
+        """
+        for document in documents:
+            self.store.upsert_document(document)
+        if status is not None:
+            self.store.set_publication_status(publication_id, status)
+
+    def fetch(self, publication: Publication, *, force: bool = False) -> FetchResult:
+        """Fetch one publication end-to-end (sequential convenience path).
+
+        Combines :meth:`collect` + :meth:`persist` on the calling thread. This
+        is the single-publication entry point used by direct callers and the
+        CLI; the parallel campaign uses ``collect`` in workers and ``persist``
+        on its serialized writer instead.
+        """
+        if publication.id is None:
+            persisted = self.store.upsert_publication(publication)
+            publication = persisted
+        existing_by_url = {d.url: d for d in self.store.list_documents(publication.id or "")}
+        result, status = self.collect(publication, existing_by_url, force=force)
+        self.persist(publication.id or "", result.documents, status)
+        return result
+
+    def _fetch_target(self, publication: Publication, url: str, *, existing: Document | None, force: bool) -> Document | None:
         if existing is not None and existing.status == DocumentStatus.FETCHED and not force:
             return existing
         if (
@@ -239,6 +327,7 @@ class Fetcher:
         self,
         publication: Publication,
         source_doc: Document,
+        existing_by_url: dict,
         *,
         force: bool,
         already: set[str],
@@ -270,7 +359,7 @@ class Fetcher:
                 break
         documents: list[Document] = []
         for url in discovered:
-            doc = self._fetch_target(publication, url, force=force)
+            doc = self._fetch_target(publication, url, existing=existing_by_url.get(url), force=force)
             if doc is not None:
                 documents.append(doc)
         return documents
@@ -316,13 +405,12 @@ class Fetcher:
             raise
         return str(path)
 
-    def _compute_status(self, publication_id: str, fetched: list[Document]) -> PublicationStatus | None:
-        stored = self.store.list_documents(publication_id)
-        by_url: dict[str, Document] = {}
-        for doc in stored:
-            by_url[doc.url] = doc
-        for doc in fetched:
-            by_url[doc.url] = doc
+    def _compute_status(self, by_url: dict[str, Document]) -> PublicationStatus | None:
+        """The publication status for a merged document map (existing + new).
+
+        Works on the caller-provided ``{url: Document}`` map (never the Store),
+        so it is usable from a worker thread with the snapshot it was handed.
+        """
         if not by_url:
             return PublicationStatus.DISCOVERED
         completed = [d for d in by_url.values() if d.status == DocumentStatus.FETCHED]
